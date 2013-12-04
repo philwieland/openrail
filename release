@@ -13,25 +13,17 @@ if [ "$1" = "all" -o "$1" = "corpusdb" ]; then
     DONE="corpusdb"
 fi
 
-#if [ "$1" = "all" -o "$1" = "timetable" ]; then
-#    echo "Releasing timetable"
-#    cp timetable.cgi        /var/www/friedbread/secure/released/cgi-bin/timetable.cgi
-#    cp timetable_live.cgi   /var/www/friedbread/secure/released/cgi-bin/timetable_live.cgi
-#    cp timetable.css        /var/www/friedbread/secure/released/cgi-bin/timetable.css
-#    DONE="timetable"
-#fi
-
 if [ "$1" = "all" -o "$1" = "liverail" ]; then
-    if [ "$host" = "cockfosters" ]; then
-        echo "Releasing liverail for cockfosters"
-        sudo cp liverail.cgi        /usr/lib/cgi-bin/liverail.cgi
-        sudo cp liverail.css        /var/www/charlwoodhouse/liverail.css
-        sudo cp liverail.js         /var/www/charlwoodhouse/liverail.js
-    else
+    if [ "$host" = "friedbread.liverpub.com" ]; then
         echo "Releasing liverail for friedbread"
         sudo cp liverail.cgi        /usr/lib/cgi-bin/liverail.cgi
         cp liverail.css        /var/www/friedbread/liverail.css
         cp liverail.js         /var/www/friedbread/liverail.js
+    else
+        echo "Releasing liverail for oakwood"
+        sudo cp liverail.cgi        /usr/lib/cgi-bin/liverail.cgi
+        sudo cp liverail.css        /var/www/liverail.css
+        sudo cp liverail.js         /var/www/liverail.js
     fi
     DONE="liverail"
 fi

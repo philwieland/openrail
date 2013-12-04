@@ -1,2 +1,82 @@
 openrail
 ========
+
+
+A suite of programmes to collect and analyse open rail data.
+
+cifdb - Fetch timetable / timetable updates and record in database.
+vstpdb - Collect VSTP timetable updates and record in database.
+trustdb - Collect train movement reports and record in database.
+liverail - Web display.
+
+To Install
+==========
+
+sudo mkdir /var/log/garner
+
+cd into the directory where you've put all the source from GIT.
+
+Create a file private.h containing the following personal information:
+#define DB_SERVER   "xxxxx"
+#define DB_USER     "xxxxx"
+#define DB_PASSWORD "xxxxx"
+
+#define NATIONAL_RAIL_USERNAME "xxxxx"
+#define NATIONAL_RAIL_PASSWORD "xxxxx"
+
+Edit an appropriate email address and mail server into sendreport.
+
+make
+
+
+Set Up Empty Database
+=====================
+
+Use sudo mysql -p
+
+CREATE DATABASE rail;
+GRANT ALL ON rail.* TO xxxxxx@xxxxxx IDENTIFIED BY 'xxxxxx';
+(Note that the tables within the database will be created by the programs as required.)
+
+
+Create Timetable Database Updated Daily
+=======================================
+
+import the location_data table, downloaded from  http://trains.barrycarlyon.co.uk/data/locations/  into the database.
+
+./release corpusdb && ./release sendreport && ./release cifdb && ./release dump-rail
+
+sudo corpusdb
+sudo cifdb -r
+sudo cifdb -a   (This last one takes hours...)
+
+Add root cron jobs as follows 
+
+08 07 *  *  *        /usr/sbin/cifdb
+50 00 21 *  *        /usr/sbin/corpusdb
+22 00 *    *    *    /usr/sbin/dump-rail >/tmp/dump-rail.log 2>&1
+
+You now have a timetable database updated daily, with a daily dump stored in /tmp for backup purposes.  (Obviously you wont want to leave the backup there!)
+
+Add streamed VSTP and Train Movement Data
+=========================================
+
+sudo cp _etc_init.d_vstpdb  /etc/init.d/vstpdb
+sudo cp _etc_init.d_trustdb /etc/init.d/trustdb
+sudo update-rc.d trustdb defaults
+sudo update-rc.d vstpdb defaults
+sudo cp _etc_logrotate.d_garner /etc/logrotate.d/garner
+
+./release vstpdb
+./release trustdb
+
+
+Set up apache
+=============
+Add authentication stuff inside <Directory /usr/lib/cgi-bin> and rewrite stuff inside <VirtualHost *:80> into /etc/apache2/sites-available/default
+cd /etc/apache2/mods-enabled && sudo ln -s ../mods-available/rewrite.load rewrite.load
+sudo htpasswd /etc/apache2/.htallpasswords <username> (Add -c switch if this is the first time.)
+restart apache 
+
+./release liverail
+

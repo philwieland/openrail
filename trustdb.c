@@ -762,14 +762,6 @@ static void process_trust_0003(const char * string, const jsmntok_t * tokens, co
          {
             char query1[256];
             struct tm * broken = localtime(&planned_timestamp);
-            sort_time = broken->tm_hour * 4 * 60 + broken->tm_min * 4;
-            sprintf(query, "SELECT cif_schedules.id, cif_schedules.CIF_train_uid, signalling_id FROM cif_schedules INNER JOIN cif_schedule_locations ON cif_schedules.id = cif_schedule_locations.cif_schedule_id WHERE cif_schedule_locations.tiploc_code = '%s'",
-                    tiploc);
-            sprintf(query1, " AND cif_schedule_locations.sort_time > %d AND cif_schedule_locations.sort_time < %d",
-                    sort_time - 1, sort_time + 4);
-            strcat(query, query1);
-            strcat(query, " AND (cif_schedules.CIF_stp_indicator = 'N' OR cif_schedules.CIF_stp_indicator = 'P' OR cif_schedules.CIF_stp_indicator = 'O')");
-
             // Select the day
             word day = broken->tm_wday;
             word yest = (day + 6) % 7;
@@ -778,18 +770,25 @@ static void process_trust_0003(const char * string, const jsmntok_t * tokens, co
             broken->tm_min = 0;
             broken->tm_sec = 0;
             time_t when = timegm(broken);
+            sort_time = broken->tm_hour * 4 * 60 + broken->tm_min * 4;
+            sprintf(query, "SELECT cif_schedules.id, cif_schedules.CIF_train_uid, signalling_id FROM cif_schedules INNER JOIN cif_schedule_locations ON cif_schedules.id = cif_schedule_locations.cif_schedule_id WHERE cif_schedule_locations.tiploc_code = '%s'",
+                    tiploc);
+            sprintf(query1, " AND cif_schedule_locations.sort_time > %d AND cif_schedule_locations.sort_time < %d",
+                    sort_time - 1, sort_time + 4);
+            strcat(query, query1);
+            strcat(query, " AND (cif_schedules.CIF_stp_indicator = 'N' OR cif_schedules.CIF_stp_indicator = 'P' OR cif_schedules.CIF_stp_indicator = 'O')");
+
 
             static const char * days_runs[8] = {"runs_su", "runs_mo", "runs_tu", "runs_we", "runs_th", "runs_fr", "runs_sa", "runs_su"};
 
             //
-   sprintf(query1, " AND (((%s) AND (schedule_start_date <= %ld) AND (schedule_end_date >= %ld) AND (NOT next_day))",   days_runs[day],  when + 12*60*60, when - 12*60*60);
-   strcat(query, query1);
-   sprintf(query1, " OR   ((%s) AND (schedule_start_date <= %ld) AND (schedule_end_date >= %ld) AND (    next_day)))",  days_runs[yest], when - 12*60*60, when - 36*60*60);
-   strcat(query, query1);
+            sprintf(query1, " AND (((%s) AND (schedule_start_date <= %ld) AND (schedule_end_date >= %ld) AND (NOT next_day))",   days_runs[day],  when + 12*60*60, when - 12*60*60);
+            strcat(query, query1);
+            sprintf(query1, " OR   ((%s) AND (schedule_start_date <= %ld) AND (schedule_end_date >= %ld) AND (    next_day)))",  days_runs[yest], when - 12*60*60, when - 36*60*60);
+            strcat(query, query1);
 
-   sprintf(query1, " AND deleted > %ld", now);
-   strcat(query, query1);
-
+            sprintf(query1, " AND deleted > %ld", now);
+            strcat(query, query1);
 
             if(!db_query(query))
             {
