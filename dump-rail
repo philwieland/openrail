@@ -1,0 +1,23 @@
+#!/usr/bin/perl
+
+use strict;
+
+#
+my $build = 'UC04';
+
+my $name = 'dump-rail';
+
+my $filename = sprintf('/tmp/rail-database-%d-%02d-%02d.sql.gz', (gmtime())[5] + 1900, (gmtime())[4] + 1, (gmtime())[3]);
+
+print `date`;
+print $name, " build ", $build, " creating \"",$filename,"\"\n";
+
+print `/usr/bin/nice /usr/bin/mysqldump --single-transaction --quick -u garnerd -pRA31GAkvpn rail | /usr/bin/nice gzip --best > $filename`;
+
+print `ln -sf $filename /tmp/rail-database-latest.sql.gz`;
+
+print `date`;
+print "Completed\n";
+
+__END__
+

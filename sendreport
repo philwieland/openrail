@@ -1,0 +1,44 @@
+#!/usr/bin/perl -w
+use strict;
+
+# Wrapper for sendEmail, retries as necessary
+
+my $build = 'UA30';
+
+# Parameters are Subject File
+
+my ($subject, $file) = @ARGV;
+
+my $from = 'openrail@liverpub.com';
+my $to   = 'phil@philwieland.com';
+my $server = 'mx-cluster-c1.one.com';
+
+if(!defined($file))
+{
+   print "Usage:\n";
+   print "sendreport <subject> <filename>\n";
+   exit(1);
+}
+
+my $wait = 64;
+my $tries = 8;
+my $result;
+my $command_line = "/usr/bin/sendEmail -f $from -t $to -u \"$subject\" -s $server -o message-file=$file";
+
+while($tries && ($result = system($command_line)))
+{
+   if(--$tries)
+   {
+      print("Failed to send.  Waiting before retrying...\n");
+      sleep ($wait + 256);
+      $wait *=2;
+   }
+   else
+   {
+      print "Email abandoned.\n";
+   }
+}
+
+
+exit(0);
+

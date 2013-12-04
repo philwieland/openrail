@@ -1,0 +1,72 @@
+#!/bin/bash
+
+host=`hostname`
+if [ "$1" = "all" -o "$1" = "cifdb" ]; then
+    echo "Releasing cifdb"
+    sudo cp cifdb   /usr/sbin/cifdb
+    DONE="cifdb"
+fi
+
+if [ "$1" = "all" -o "$1" = "corpusdb" ]; then
+    echo "Releasing corpusdb"
+    sudo cp corpusdb   /usr/sbin/corpusdb
+    DONE="corpusdb"
+fi
+
+#if [ "$1" = "all" -o "$1" = "timetable" ]; then
+#    echo "Releasing timetable"
+#    cp timetable.cgi        /var/www/friedbread/secure/released/cgi-bin/timetable.cgi
+#    cp timetable_live.cgi   /var/www/friedbread/secure/released/cgi-bin/timetable_live.cgi
+#    cp timetable.css        /var/www/friedbread/secure/released/cgi-bin/timetable.css
+#    DONE="timetable"
+#fi
+
+if [ "$1" = "all" -o "$1" = "liverail" ]; then
+    if [ "$host" = "cockfosters" ]; then
+        echo "Releasing liverail for cockfosters"
+        sudo cp liverail.cgi        /usr/lib/cgi-bin/liverail.cgi
+        sudo cp liverail.css        /var/www/charlwoodhouse/liverail.css
+        sudo cp liverail.js         /var/www/charlwoodhouse/liverail.js
+    else
+        echo "Releasing liverail for friedbread"
+        sudo cp liverail.cgi        /usr/lib/cgi-bin/liverail.cgi
+        cp liverail.css        /var/www/friedbread/liverail.css
+        cp liverail.js         /var/www/friedbread/liverail.js
+    fi
+    DONE="liverail"
+fi
+
+if [ "$1" = "all" -o "$1" = "vstpdb" ]; then
+    echo "Releasing vstpdb"
+    sudo /etc/init.d/vstpdb stop
+    sleep 4 
+    sudo cp vstpdb /usr/sbin/vstpdb 
+    sudo /etc/init.d/vstpdb start
+    DONE="vstpdb"
+fi
+
+if [ "$1" = "all" -o "$1" = "trustdb" ]; then
+    echo "Releasing trustdb"
+    sudo /etc/init.d/trustdb stop
+    sleep 4 
+    sudo cp trustdb /usr/sbin/trustdb 
+    sudo /etc/init.d/trustdb start
+    DONE="trustdb"
+fi
+
+if [ "$1" = "all" -o "$1" = "sendreport" ]; then
+    echo "Releasing sendreport"
+    sudo cp sendreport /usr/sbin/sendreport 
+    DONE="sendreport"
+fi
+
+if [ "$1" = "all" -o "$1" = "dump-rail" ]; then
+    echo "Releasing dump-rail"
+    sudo cp dump-rail /usr/sbin/dump-rail 
+    DONE="dump-rail"
+fi
+
+if [ "$DONE" = "" ]; then
+    echo "Usage:  $0 cifdb|corpusdb|vstpdb|trustdb|liverail|sendreport|all    -    Release specified unit or all."
+fi
+
