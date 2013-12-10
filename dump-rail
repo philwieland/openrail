@@ -3,7 +3,7 @@
 use strict;
 
 #
-my $build = 'UC04';
+my $build = 'UC10';
 
 my $name = 'dump-rail';
 
@@ -14,7 +14,7 @@ print $name, " build ", $build, " creating \"",$filename,"\"\n";
 
 print `/usr/bin/nice /usr/bin/mysqldump --single-transaction --quick -u garnerd -pRA31GAkvpn rail | /usr/bin/nice gzip --best > $filename`;
 
-print `ln -sf $filename /tmp/rail-database-latest.sql.gz`;
+print `ln -sf $filename /var/backup/rail-database-latest.sql.gz`;
 
 print `date`;
 print "Completed\n";
