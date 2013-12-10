@@ -4,17 +4,25 @@ use strict;
 
 #
 my $build = 'UC10';
-
 my $name = 'dump-rail';
 
-my $filename = sprintf('/tmp/rail-database-%d-%02d-%02d.sql.gz', (gmtime())[5] + 1900, (gmtime())[4] + 1, (gmtime())[3]);
+my $day_file_rotation = 4; ### Maximum 36
+my $frequency = 1; #          # Number of days between backups - Set in crontab call
+
+my $day_number = int(time() / (24 * 60 * 60));
+$day_number = int($day_number / $frequency);
+$day_number %= $day_file_rotation;
+
+my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = gmtime();
+my $filename = sprintf('/var/backup/rail-database-%d.sql.gz', $day_number);
+my $monthly_filename = sprintf('/var/backup/rail-database-monthly-%d-%02d.sql.gz', $year + 1900, $mon + 1);
 
 print `date`;
 print $name, " build ", $build, " creating \"",$filename,"\"\n";
 
 print `/usr/bin/nice /usr/bin/mysqldump --single-transaction --quick -u garnerd -pRA31GAkvpn rail | /usr/bin/nice gzip --best > $filename`;
 
-print `ln -sf $filename /var/backup/rail-database-latest.sql.gz`;
+print `cp $filename $monthly_filename`;
 
 print `date`;
 print "Completed\n";
