@@ -2,7 +2,7 @@
 CC=gcc -c -g -O2 -Wall -I/usr/include/mysql -DBIG_JOINS=1 -D_GNU_SOURCE -D_FILE_OFFSET_BITS=64 -fno-strict-aliasing -DUNIV_LINUX
 
 
-all:            cifdb corpusdb vstpdb trustdb liverail.cgi
+all:            cifdb corpusdb vstpdb trustdb liverail.cgi service-report
 
 jsmn.o:		jsmn.c jsmn.h misc.h
 
@@ -48,7 +48,12 @@ trustdb:        trustdb.o jsmn.o stomp.o misc.o db.o
 
 trustdb.o:      trustdb.c jsmn.h stomp.h misc.h db.h private.h
 
+service-report: service-report.o misc.o db.o
+		gcc -g -O2 service-report.o misc.o db.o -lmysqlclient -o service-report
+
+service-report.o: service-report.c misc.h db.h private.h
+
 clean:
-		rm  cifdb liverail.cgi corpusdb vstpdb trustdb *.o
+		rm  cifdb liverail.cgi corpusdb vstpdb trustdb service-report *.o
 
 

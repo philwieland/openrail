@@ -20,7 +20,7 @@
 #include "private.h"
 
 #define NAME  "vstpdb"
-#define BUILD "UC03"
+#define BUILD "UC09"
 
 static void perform(void);
 static void process_message(const char * body);
@@ -215,11 +215,11 @@ int main(int argc, char *argv[])
    {
       struct sysinfo info;
       // If uptime query fails OR uptime is small, wait for system to stabilise.
-      if(sysinfo(&info) || info.uptime < 256)
+      if(sysinfo(&info) || info.uptime < 64)
       {
          _log(GENERAL, "Startup delay ...");
          word i;
-         for(i = 0; i < 256 && run; i++) sleep(1);
+         for(i = 0; i < 64 && run; i++) sleep(1);
       }
    }
 

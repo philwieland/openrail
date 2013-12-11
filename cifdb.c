@@ -14,7 +14,7 @@
 #include "private.h"
 
 #define NAME  "cifdb"
-#define BUILD "UC04"
+#define BUILD "UC09"
 
 static void process_object(const char * object);
 static void process_timetable(const char * string, const jsmntok_t * tokens);
@@ -46,6 +46,7 @@ static time_t start_time, last_reported_time;
 static dword count_schedule_create, count_schedule_delete_hit, count_schedule_delete_miss;
 static dword count_schedule_loc_create, count_schedule_loc_delete;
 static dword count_assoc_create, count_assoc_delete_hit, count_assoc_delete_miss;
+static dword count_fetches;
 
 // Buffer for reading file
 #define MAX_BUF 8192
@@ -279,6 +280,15 @@ int main(int argc, char **argv)
 
    run = 1;
    tiploc_ignored = false;
+   count_schedule_create      = 0;
+   count_schedule_delete_hit  = 0;
+   count_schedule_delete_miss = 0;
+   count_schedule_loc_create  = 0;
+   count_schedule_loc_delete  = 0;
+   count_assoc_create         = 0;
+   count_assoc_delete_hit     = 0;
+   count_assoc_delete_miss    = 0;
+   count_fetches              = 0;
 
    struct tm * broken = localtime(&start_time);
    word date = broken->tm_mday;
@@ -289,7 +299,16 @@ int main(int argc, char **argv)
          _log(GENERAL, "Failed to find data.");
          exit(1);
       }
-      _log(GENERAL, "Failed to fetch file.  Pausing before retry...");
+      {
+         char report[256];
+         sprintf(report, "Attempt %ld failed to fetch file.  Pausing before retry...", count_fetches);
+         _log(GENERAL, report);
+         if(count_fetches == 4)
+         {
+            sprintf(report, "Failed to collect timetable update after %ld attempts.\n\nContinuing to retry.", count_fetches);
+            email_alert(NAME, BUILD, "Timetable Update Failure Report", report);
+         }
+      }
       sleep(32*60);
       time_t now = time(NULL);
       broken = localtime(&now);
@@ -301,15 +320,6 @@ int main(int argc, char **argv)
    size_t ibuf = 0;
    size_t iobj = 0;
    size_t buf_end;
-
-   count_schedule_create      = 0;
-   count_schedule_delete_hit  = 0;
-   count_schedule_delete_miss = 0;
-   count_schedule_loc_create  = 0;
-   count_schedule_loc_delete  = 0;
-   count_assoc_create         = 0;
-   count_assoc_delete_hit     = 0;
-   count_assoc_delete_miss    = 0;
 
    if(broken->tm_mday != date)
    {
@@ -374,6 +384,10 @@ int main(int argc, char **argv)
    _log(GENERAL, "");
    _log(GENERAL, "End of run:");
    sprintf(zs, "Elapsed time             : %ld minutes", (time(NULL) - start_time + 30) / 60);
+   _log(GENERAL, zs);
+   strcat(report, zs); strcat(report, "\n");
+
+   sprintf(zs, "File download attempts   : %s", commas(count_fetches));
    _log(GENERAL, zs);
    strcat(report, zs); strcat(report, "\n");
 
@@ -1024,6 +1038,8 @@ static word fetch_file(void)
    struct tm * broken;
    static char * weekdays[] = { "sun", "mon", "tue", "wed", "thu", "fri", "sat" };
 
+   count_fetches++;
+
    if(!opt_filename)
    {
       static CURL * curlh;
@@ -1176,8 +1192,7 @@ static word fetch_file(void)
          char zstamp[256];
          extract_match(front, matches, 1, zstamp, sizeof(zstamp));
          time_t stamp = atoi(zstamp);
-         strcat(zs, "Recovered timestamp: ");
-         strcat(zs, time_text(stamp, 0));
+         sprintf(zs, "Recovered timestamp: %s", time_text(stamp, 0));
          _log(test_mode?GENERAL:DEBUG, zs);
          sprintf(zs, "Stored in file \"%s\"", filepath);
          _log(test_mode?GENERAL:DEBUG, zs);

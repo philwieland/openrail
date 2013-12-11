@@ -10,227 +10,627 @@
 #include "db.h"
 #include "private.h"
 
-static void depsheet(void);
-static void display_choice(MYSQL_RES * result0, const time_t when);
-static void display_control_panel(const char * const location, const time_t when);
-static void report_train(const dword cif_schedule_location_id, const time_t when, const word huyton_special);
-static void report_train_summary(const dword cif_schedule_location_id, const time_t when, const word summaryu);
-static void as(void);
-static char * show_date(const time_t time, const byte local);
-static void train(void);
-static void train_text(void);
-static char * location_name_link(const char * const tiploc, const word use_cache, const time_t when);
-static char * location_name(const char * const tiploc, const word use_cache);
-static char * show_stanox(const char * const stanox);
-static char * show_stanox_link(const char * const stanox);
-static char * show_act(const char * const input);
-static char * show_trust_time(const char * const ms, const word local);
-static char * show_trust_time_nocolon(const char * const ms, const word local);
-static char * show_expected_time(const char * const scheduled, const word deviation, const word late);
+static void report(const char * const tiploc, const word year, const word month);
+static void report_day(const char * const tiploc, time_t when);
+static void report_train_day(const dword cif_schedule_location_id, const time_t when);
+static char * percentage(const dword num, const dword den);
 
+#define NAME "service-report"
+#define BUILD "UC11"
 
-#define NAME "Garner Live Rail"
-#define BUILD "UC09"
+static word debug;
+static word bus;
+static word nlate, nlater, ncape, nbus, ntrain;
+static word glate, glater, gcape, gbus, gtrain;
 
-#define COLUMNS 4
-
-word debug, refresh;
-static time_t now;
-static char parameters[10][128];
-
-#define CATEGORIES 12
-static const char * categories[CATEGORIES] = {
-   "OUUnadvertised Ordinary Passenger",
-   "OOOrdinary Passenger",
-   "OSStaff Train",
-   "OWMixed",
-   "XUUnadvertised Express",
-   "XXExpress Passenger",
-   "XZSleeper (Domestic)",
-   "BRBus replacement",
-   "BSBus WTT",
-   "EEEmpty Coaching Stock",
-   "ESECS and staff",
-   "ZZLight Locomotove",
-};
-
-#define POWER_TYPES 10
-static const char * power_types[POWER_TYPES] = {
-   "D  Diesel",
-   "DEMDiesel Electric Multiple Unit",
-   "DMUDiesel Mechanical Multiple Unit",
-   "E  Electric",
-   "ED Electro-diesel",
-   "EMLEMU plus D, E, or ED locomotive",
-   "EMUElectric Multiple Unit",
-   "EPUElectric Parcels Unit",
-   "HSTHigh Speed Train",
-   "LDSDiesel Shunting Locomotive",
-};
-
-static const char * days[] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
 // Days runs fields
 static const char * days_runs[8] = {"runs_su", "runs_mo", "runs_tu", "runs_we", "runs_th", "runs_fr", "runs_sa", "runs_su"};
-
-time_t start_time, done_main_query_time, done_analyse_time, done_analyse_sort_time;
 
 // (Hours * 60 + Minutes) * 4
 #define DAY_START  4*60*4
 
-
-// location name cache
-#define CACHE_SIZE 16
-static char cache_key[CACHE_SIZE][8];
-static char cache_val[CACHE_SIZE][128];
-
-int main(void)
+int main(int argc, char **argv)
 {
-   char zs[1024];
+   word month, year;
+   byte usage = false;
 
-   now = time(NULL);
-
-   char * parms = getenv("PARMS");
-   sprintf(zs, "PARMS = \"%s\"", parms);
-   _log(GENERAL, zs);
-
-   // Parse parms
-   word i, j, k, l;
-   i = j = k = l = 0;
-   if(parms[0] == '/') i++;
-   while(j < 10 && parms[i] && k < 128)
+   if(argc < 4)
    {
-      if(parms[i] == '/')
-      {
-         parameters[j++][k] = '\0';
-         k = 0;
-         i++;
-      }
-      else
-      {
-         parameters[j][k++] = parms[i++];
-         l = j;
-      }
-   }
-   if(k) parameters[j++][k] - '\0';
-
-   while(j < 10) parameters[j++][0] = '\0';
-
-   debug = !strcasecmp(parameters[l], "debug");
-   refresh = !strcasecmp(parameters[l], "r");
-
-   if(refresh || debug) parameters[l][0] = '\0';
-
-   printf("Content-Type: text/html; charset=iso-8859-1\n\n");
-   printf("<html xmlns=\"http://www.w3.org/1999/xhtml\" lang=\"en-US\" xml:lang=\"en-US\">\n");
-   printf("<head>\n");
-   printf("<title>%s %s</title>\n", NAME, BUILD);
-   printf("<link rel=\"stylesheet\" type=\"text/css\" href=\"/liverail.css\">\n");
-   printf("</head>\n");
-   printf("<body style=\"font-family: arial,sans-serif;\" onload=\"startup();\">\n");
-   printf("<script type=\"text/javascript\" src=\"/liverail.js\"></script>\n");
-
-   // Initialise location name cache
-   location_name(NULL, false);
-
-   start_time = now;
-
-   // TEMPO
-   // debug = true;
-
-   // Set up log
-   {
-      struct tm * broken = localtime(&now);
-      char logfile[128];
-
-      sprintf(logfile, "/tmp/liverail-%04d-%02d-%02d.log", broken->tm_year + 1900, broken->tm_mon + 1, broken->tm_mday);
-      _log_init(logfile, debug?2:0);
-   }
-
-   // Initialise database
-   //db_init(, debug?"rail_test":"rail");
-   db_init(DB_SERVER, DB_USER, DB_PASSWORD, "rail");
-
-   sprintf(zs, "Parameters:  (l = %d)", l);
-   _log(GENERAL, zs);
-   for(i=0;i <10; i++)
-   {
-      sprintf(zs, "%d = \"%s\"", i, parameters[i]);
-      _log(GENERAL, zs);
-   }
-
-   if(!parameters[0][0] || !strcasecmp(parameters[0], "depsheet")) depsheet();
-   if(!strcasecmp(parameters[0], "depsum")) depsheet();
-   if(!strcasecmp(parameters[0], "depsumu")) depsheet();
-   if(!strcasecmp(parameters[0], "as")) as();
-   if(!strcasecmp(parameters[0], "train")) train();
-   if(!strcasecmp(parameters[0], "train_text")) train_text();
-
-   {
-      char host[256];
-      if(gethostname(host, sizeof(host))) host[0] = '\0';
-      time_t elapsed = time(NULL) - start_time;
-      if(!strcasecmp(parameters[0], "depsumu"))
-      {
-         printf("Report updated at %s by %s %s at %s.  Elapsed time %ld second%s.\n", time_text(time(NULL), 1), NAME, BUILD, host, elapsed, (elapsed!=1)?"s":"");
-      }
-      else
-      {
-         printf("<p id=\"bottom-line\">Report completed at %s by %s %s at %s.  Elapsed time %ld second%s.</p>\n", time_text(time(NULL), 1), NAME, BUILD, host, elapsed, (elapsed!=1)?"s":"");
-         printf("</body></html>\n\n");
-      }
-   }
-   exit(0);
-}
-
-static void display_choice(MYSQL_RES * result0, const time_t when)
-{
-   MYSQL_ROW row0;
-   
-   printf("<p>Select desired location</p>\n");
-
-   printf("<table>");
-   printf("<tr class=\"small-table\"><th>TIPLOC</th><th>Location</th></tr>\n");
-
-   while((row0 = mysql_fetch_row(result0)) ) 
-   {
-      printf("<tr class=\"small-table\"><td>%s</td><td>%s</td></tr>\n", row0[0],  location_name_link(row0[0], false, when));
-   }
-   printf("</table>");
-}
-
-static void display_control_panel(const char * const location, const time_t when)
-{
-   printf("<table><tr><td class=\"control-panel-row\">\n");
-   
-   printf("&nbsp;Show trains at <input type=\"text\" id=\"search_loc\" size=32 maxlength=64 value=\"%s\" onkeydown=\"if(event.keyCode == 13) search_onclick(); else ar_off();\">\n", location);
-
-   struct tm * broken = localtime(&now);
-   word d = broken->tm_mday;
-   word m = broken->tm_mon;
-   word y = broken->tm_year;
-   broken = localtime(&when);
-   printf("on <input type=\"text\" id=\"search_date\" size=8 maxlength=8 value=\"");
-   if(!when || (d == broken->tm_mday && m == broken->tm_mon && y == broken->tm_year))
-   {
+      usage = true;
    }
    else
    {
-      printf("%02d/%02d/%02d", broken->tm_mday, broken->tm_mon + 1, broken->tm_year % 100);
+      if(strlen(argv[1]) > 8) usage = true;
+      month = atoi(argv[2]);
+      year  = atoi(argv[3]);
+      if(month < 1 || month > 12 || year < 2013 || year > 2099) usage = true;
    }
-   printf("\" onkeydown=\"if(event.keyCode == 13) search_onclick(); else ar_off();\">\n");
+   if(usage)
+   {
+      printf("Usage %s <TIPLOC> <month> <year>\n",argv[0]);
+      exit(1);
+   }
 
-   printf(" <button id=\"search\" class=\"cp-button\" onclick=\"search_onclick();\">Show</button>\n");
-   printf(" <button id=\"search\" class=\"cp-button\" onclick=\"summary_onclick();\">Show Summary</button>\n");
+   debug = false;
+   if(argc > 4) debug = !strcasecmp(argv[4], "debug");
+   // TEMPO
+   // debug = true;
 
-   printf("&nbsp;</td><td width=\"8%%\"></td><td class=\"control-panel-row\">&nbsp;<button id=\"as_rq\" class=\"cp-button\" onclick=\"as_rq_onclick();\">Advanced Search</button>&nbsp;\n");
+   // Initialise logging
+   _log_init("", debug?1:0);
 
-   printf("&nbsp;</td><td width=\"8%%\"></td><td class=\"control-panel-row\">&nbsp;Auto-refresh&nbsp;<input type=\"checkbox\" id=\"ar\" onclick=\"ar_onclick();\"%s>&nbsp;\n", refresh?" checked":"");
-   
-   printf("</td><td id=\"progress\" class=\"control-panel-row\" width=\"1%%\" valign=\"top\">&nbsp;");
+   // Initialise database
+   db_init(DB_SERVER, DB_USER, DB_PASSWORD, "rail");
 
-   printf("</td></tr></table>");
+   report(argv[1], year, month);
+
+   exit(0);
 }
 
+static void report(const char * const tiploc, const word year, const word month)
+{
+   char l[512];
+   time_t when;
+   struct tm broken;
+   sprintf(l, "Reporting on \"%s\".  Month is %02d/%d.", tiploc, month, year);
+   _log(GENERAL, l);
+
+   broken.tm_mday = 1;
+   broken.tm_mon = month - 1;
+   broken.tm_year = year - 1900;
+      
+   broken.tm_hour = 12;
+   broken.tm_min = 0;
+   broken.tm_sec = 0;
+   broken.tm_isdst = -1;
+   when = timegm(&broken);
+
+   glate = glater = gcape = gbus = gtrain = 0;
+
+   printf("<!-- Report for trains at %s during %02d/%d generated by %s build %s -->\n\n", tiploc, month, year, NAME, BUILD);
+   
+   while(broken.tm_mon == month - 1)
+   {
+      report_day(tiploc, when);
+
+      when += 24*60*60;
+      broken = *gmtime(&when);
+   }
+
+   printf("<tr><td>%s</td><td>%d</td><td>%d</td><td>(%s%%)</td>",
+          "Month", gtrain, gtrain-gcape, percentage(gtrain-gcape, gtrain));
+   printf("<td>%d</td><td>(%s%%)</td>",
+          gtrain - glate, percentage(gtrain - glate, gtrain));
+   printf("<td>%d</td><td>(%s%%)</td><td>%s</td></tr>\n",
+          gtrain - glater, percentage(gtrain - glater, gtrain), "&nbsp;");
+
+   printf("<!-- End of report -->\n\n"); 
+  
+}
+
+static void report_day(const char * const tiploc, time_t when)
+{
+   MYSQL_RES * result0, * result1;
+   MYSQL_ROW row0, row1;
+   char query[4096], zs[256];
+
+#define MAX_TRAINS 2048
+   struct train_details
+   {
+      dword cif_schedule_id;
+      byte next_day;
+      byte valid;
+      dword cif_schedule_location_id;
+      word sort_time;
+      char cif_train_uid[8];
+      char cif_stp_indicator;
+   } 
+   trains[MAX_TRAINS];
+   word train_sequence[MAX_TRAINS];
+
+   word train_count;
+
+   //                    0                          1                      2                             3         4
+   strcpy(query, "SELECT cif_schedules.id, cif_schedules.CIF_train_uid, cif_schedules.CIF_stp_indicator, next_day, sort_time");
+   strcat(query, " FROM cif_schedules INNER JOIN cif_schedule_locations");
+   strcat(query, " ON cif_schedules.id = cif_schedule_locations.cif_schedule_id");
+   sprintf(zs, " WHERE (cif_schedule_locations.tiploc_code = '%s')", tiploc);
+   strcat(query, zs);
+   
+   strcat(query, " AND (cif_schedules.CIF_stp_indicator = 'N' OR cif_schedules.CIF_stp_indicator = 'P' OR cif_schedules.CIF_stp_indicator = 'O')");
+   
+   sprintf(zs, " AND deleted >= %ld", when);
+   strcat(query, zs);
+   
+   // Select the day
+   struct tm * broken = gmtime(&when);
+   word day = broken->tm_wday;
+   word mday = broken->tm_mday;
+   word yest = (day + 6) % 7;
+   word tom = (day + 1) % 7;
+      
+   sprintf(zs, " AND ((((%s) AND (schedule_start_date <= %ld) AND (schedule_end_date >= %ld) AND (NOT next_day)) AND (sort_time >= %d))",  days_runs[day],  when + 12*60*60, when - 12*60*60, DAY_START);
+   strcat(query, zs);
+   sprintf(zs, " OR   (((%s) AND (schedule_start_date <= %ld) AND (schedule_end_date >= %ld) AND (    next_day)) AND (sort_time >= %d))",  days_runs[yest], when - 12*60*60, when - 36*60*60, DAY_START);
+   strcat(query, zs);
+   sprintf(zs, " OR   (((%s) AND (schedule_start_date <= %ld) AND (schedule_end_date >= %ld) AND (NOT next_day)) AND (sort_time <  %d))",  days_runs[tom],  when + 36*60*60, when + 12*60*60, DAY_START); 
+   strcat(query, zs);
+   sprintf(zs, " OR   (((%s) AND (schedule_start_date <= %ld) AND (schedule_end_date >= %ld) AND (    next_day)) AND (sort_time <  %d)))", days_runs[day],  when + 12*60*60, when - 12*60*60, DAY_START);
+   strcat(query, zs);
+   
+   sprintf(zs, " AND (public_departure != '' OR departure != '') AND (train_status = 'P' OR train_status = 'B' OR train_status = '1' OR train_status = '5')");
+   strcat(query, zs);
+   
+   strcat(query, " ORDER BY LOCATE(cif_schedules.CIF_stp_indicator, 'NPO'), cif_schedule_id"); 
+   
+   word index, i;
+   dword cif_schedule_id;
+   
+   // 1. Collect a list of unique schedule_id
+   train_count = 0;
+   //printf("<p>[%s]</p>", query);
+   
+   if(!db_query(query))
+   {
+      result0 = db_store_result();
+      while((row0 = mysql_fetch_row(result0)))
+      {
+         //printf("<br>%s ", row0[0]);
+         if(train_count >= MAX_TRAINS)
+         {
+            printf("<p>Error: MAX_TRAINS exceeded.</p>");
+            return;
+         }
+         cif_schedule_id =  atol(row0[0]);
+         for(i=0; i < train_count && trains[i].cif_schedule_id != cif_schedule_id; i++);
+         
+         if(i == train_count)
+         {
+            //printf(" Insert at %d", train_count);
+            // Insert in array
+            trains[train_count].cif_schedule_id = cif_schedule_id;
+            strcpy(trains[train_count].cif_train_uid, row0[1]);
+            trains[train_count].cif_stp_indicator = row0[2][0];
+            trains[train_count].valid = true;
+            trains[train_count].sort_time = atoi(row0[4]);
+            trains[train_count].next_day = atoi(row0[3]);
+            trains[train_count].cif_schedule_location_id = 0;
+            train_count++;
+         }
+      }
+      mysql_free_result(result0);
+   }
+   
+   // 2. Cancel any which are overriden
+   for(index = 1; index < train_count; index++)
+   {
+      if(trains[index].valid && trains[index].cif_stp_indicator == 'O')
+      {
+         for(i = 0; i < index; i++)
+         {
+            if(!strcmp(trains[i].cif_train_uid, trains[index].cif_train_uid))
+            {
+               // Hit
+               trains[i].valid = false;
+               //printf("<br>Step 2 invalidates %d due to %d", i, index);
+            }
+         }
+      }
+   }
+   
+   // 3. Next, remove those which are cancelled, and remove those overriden by overlays that don't call
+   // NOTE:  Overlay may not call at this station!
+   sprintf(zs, "3. Commencing C and O check.  day = %d", day);
+   _log(DEBUG, zs);
+   
+   for(index = 0; index < train_count; index++)
+   {
+      if(trains[index].valid)
+      {
+         sprintf(zs, "Testing index %d train \"%s\", sort_time = %d, next_day = %d", index, trains[index].cif_train_uid, trains[index].sort_time, trains[index].next_day );
+         _log(DEBUG, zs);
+         //                    0   1                 2                               3
+         strcpy(query, "SELECT id, CIF_stp_indicator ");
+         strcat(query, " FROM cif_schedules");
+         strcat(query, " WHERE (cif_stp_indicator = 'C' OR cif_stp_indicator = 'O')");
+         sprintf(zs, " AND (CIF_train_uid = '%s')", trains[index].cif_train_uid);
+         strcat(query, zs);
+         sprintf(zs, " AND (deleted >= %ld)", when);
+         strcat(query, zs);
+
+         if(trains[index].next_day && trains[index].sort_time >= DAY_START)
+         {
+            sprintf(zs, " AND ((%s) AND (schedule_start_date <= %ld) AND (schedule_end_date >= %ld))",  days_runs[yest], when - 12*60*60, when - 36*60*60);
+            strcat(query, zs);
+         }
+         else if(trains[index].next_day && trains[index].sort_time < DAY_START)
+         {
+            sprintf(zs, " AND ((%s) AND (schedule_start_date <= %ld) AND (schedule_end_date >= %ld))", days_runs[day],  when + 12*60*60, when - 12*60*60);
+            strcat(query, zs);
+         }
+         else if(!trains[index].next_day && trains[index].sort_time >= DAY_START)
+         {
+            sprintf(zs, " AND ((%s) AND (schedule_start_date <= %ld) AND (schedule_end_date >= %ld))",  days_runs[day],  when + 12*60*60, when - 12*60*60);
+            strcat(query, zs);
+         }
+         else if(!trains[index].next_day && trains[index].sort_time < DAY_START)
+         {
+            sprintf(zs, " AND ((%s) AND (schedule_start_date <= %ld) AND (schedule_end_date >= %ld))",  days_runs[tom],  when + 36*60*60, when + 12*60*60); 
+            strcat(query, zs);
+         }
+         if(!db_query(query))
+         {
+            result0 = db_store_result();
+            while((row0 = mysql_fetch_row(result0)))
+            {
+               _log(DEBUG, "Index C or O match:");
+               if(row0[1][0] == 'C')
+               {
+                  // Cancelled
+                  trains[index].valid = false;
+                  //printf("<br>Step 3:  %d invalidated due to C", index);
+                  sprintf(zs, "Schedule %ld (%s) cancelled by schedule %s.", trains[index].cif_schedule_id, trains[index].cif_train_uid, row0[0]);
+                  _log(DEBUG, zs);
+               }
+               else 
+               {
+                  // Overlay
+                  // We will come here with an overlay we already know about OR one which *doesn't come here*
+                  //printf("Examining details...");
+                  dword overlay_id = atol(row0[0]);
+                  if(overlay_id > trains[index].cif_schedule_id || trains[index].cif_stp_indicator == 'N')
+                  {
+                     // ID is higher, so supercede
+                     trains[index].valid = false;
+                     //printf("<br>Step 3:  %d invalidated due to O id = %s", index, row0[0]);
+                  }
+               }
+            }
+            mysql_free_result(result0);
+         }
+      }
+   }
+
+   // 4. We now have a list of unique garner schedule ids, all of which call here once OR MORE
+   // in the huyton_special case they may call at huyton or junction or both but will still have only one entry here.
+   // All entries have .cif_schedule_location_id == 0 now, we will set this as we process them,
+   // any still ==0 at the end of step 4 will be huyton_special HUYTJUN-only trains for step 4a to process. 
+   _log(DEBUG, "4. Add any second calls.  Poplulate schedule_location_d field.");
+   word limit = train_count;
+   word instances;
+
+   for(index = 0; index < limit; index++)
+   {
+      if(trains[index].valid)
+      {
+         instances = 0;
+
+         sprintf(query, "SELECT id from cif_schedule_locations WHERE cif_schedule_id = %ld AND tiploc_code = '%s'", trains[index].cif_schedule_id, tiploc);
+         if(!db_query(query))
+         {
+            result1 = db_store_result();
+            while((row1 = mysql_fetch_row(result1)))
+            {
+               if(instances++)
+               {
+                  // Second or subsequent visit to this location.  Append to end of array
+                  trains[train_count].cif_schedule_id = trains[index].cif_schedule_id;
+                  strcpy(trains[train_count].cif_train_uid, trains[index].cif_train_uid);
+                  trains[train_count].cif_stp_indicator = trains[index].cif_stp_indicator;
+                  trains[train_count].valid = true;
+                  trains[train_count].sort_time = trains[index].sort_time;
+                  trains[train_count].next_day = trains[index].next_day;
+                  trains[train_count].cif_schedule_location_id = atol(row1[0]);
+                  //printf("<br>Step 4:  Second visit for %ld, populated entry %d", trains[index].cif_schedule_id, train_count);
+                  train_count++;
+               }
+               else
+               {
+                  // First visit.  Update this entry
+                  trains[index].cif_schedule_location_id = atol(row1[0]);
+                  //printf("<br>Step 4:  Populated entry %d, id=%ld", index, trains[index].cif_schedule_id);
+               }
+            }
+            mysql_free_result(result1);
+         }
+      }
+   }
+
+
+   // 5. Bubble Sort
+   {
+      word i,j;
+
+      word run = true;
+
+      //printf("<p>Before sort: ");
+      //for(j=0; j < train_count; j++)
+      //{
+      //   printf("<br>%d %ld %s", j, trains[j].cif_schedule_id, trains[j].valid?"":"Invalidated");
+      //}
+      //printf("</p>\n");
+
+      // First, mung the sort_time so that early hours trains come after the others:
+      for(j=0; j< train_count; j++)
+      {
+         // Early hours trains come after all the others.
+         if(trains[j].sort_time < DAY_START) trains[j].sort_time += 10000;
+         train_sequence[j] = j;
+         //if(!trains[j].cif_schedule_location_id) printf("<br>Step 5: %d not populated.", j);
+      }
+
+      for(j = train_count; run && j > 1; j--)
+      {
+         run = false;
+         for(i=1; i < j; i++)
+         {
+            if(trains[train_sequence[i]].sort_time < trains[train_sequence[i-1]].sort_time)
+            {
+               run = true;
+               // Swap
+               word tempo = train_sequence[i];
+               train_sequence[i] = train_sequence[i-1];
+               train_sequence[i-1] = tempo;
+            }
+         }
+      }
+   }
+   
+   nlate = nlater = ncape = ntrain = nbus = 0;
+   for(index = 0; index < train_count; index++)
+   {
+      if(trains[train_sequence[index]].valid)
+      {
+         report_train_day(trains[train_sequence[index]].cif_schedule_location_id, when);
+      }
+   }
+
+   // See if there are any notes
+   char notes[4096];
+   strcpy(notes, "&nbsp;");
+   {
+      FILE * fp = fopen("/home/wielanpj/report-notes.txt", "r");
+      char line[256];
+      word match = false;
+      if(fp)
+      {
+         broken = gmtime(&when);
+         while(fgets(line, 256, fp))
+         {
+            if(line[0] == '>')
+            {
+               // Date
+               if(broken->tm_mday == atoi(line + 1) && broken->tm_mon + 1 == atoi(line + 4) && broken->tm_year % 100 == atoi(line + 7))
+               {
+                  match = true;
+                  notes[0] = '\0';
+               }
+               else
+               {
+                  match = false;
+               }
+            }
+            else if(match && line[0] != '\n') strcat(notes, line);
+         }
+         fclose(fp);
+      }
+      if(notes[strlen(notes) - 1] == '\n') notes[strlen(notes) - 1] = '\0';
+   }
+   printf("<tr><td>%02d</td><td>%d</td><td>%d</td><td>(%s%%)</td>",
+          mday, ntrain, ntrain-ncape, percentage(ntrain-ncape, ntrain));
+   printf("<td>%d</td><td>(%s%%)</td>",
+          ntrain - nlate, percentage(ntrain - nlate, ntrain));
+   printf("<td>%d</td><td>(%s%%)</td><td align=\"left\">%s</td></tr>\n",
+          ntrain - nlater, percentage(ntrain - nlater, ntrain), notes);
+
+   gtrain += ntrain;
+   gcape += ncape;
+   glate += nlate;
+   glater += nlater;
+   gbus += nbus;
+}
+
+static void report_train_day(const dword cif_schedule_location_id, const time_t when)
+{
+   MYSQL_RES * result0, * result1;
+   MYSQL_ROW row0, row1;
+
+   char query[1024];
+   word vstp, status;
+   char actual[16], expected[16];
+   word deviation, deduced, late;
+   dword cif_schedule_id;
+   word next_day, sort_time;
+   char depart[8], tiploc[16];
+   struct tm * broken;
+
+   deviation = late = status = bus = deduced = 0;
+   {
+      char zs[256];
+      sprintf(zs, "report_train_summary(%ld, %ld)", cif_schedule_location_id, when);
+      _log(DEBUG, zs);
+   }
+
+   // Find schedule id
+   sprintf(query, "select cif_schedule_id, next_day, sort_time, public_departure, tiploc_code, departure from cif_schedule_locations where id = %ld", cif_schedule_location_id);
+   db_query(query);
+   result0 = db_store_result();
+   if((row0 = mysql_fetch_row(result0)))
+   {
+      cif_schedule_id = atol(row0[0]); 
+      next_day        = atoi(row0[1]);
+      sort_time       = atoi(row0[2]);
+      strcpy(depart, row0[3]);
+      if(!depart[0]) strcpy(depart, row0[5]);
+      strcpy(expected, row0[3]);
+      strcpy(tiploc, row0[4]);
+      _log(DEBUG, "Got schedule id etc.");
+   }
+   else
+   {
+      _log(MAJOR, "report_train() failed to determine cif_schedule_id.");
+      return;
+   }
+   mysql_free_result(result0);
+
+   // Calculate start_date from when, deducting 24h if next_day and/or adding 24h if after 00:00.
+   time_t start_date = when - (next_day?(24*60*60):0);
+   if(sort_time < DAY_START) start_date += (24*60*60);
+
+   //                     0             1                    2                  3              4              5                  6           
+   sprintf(query, "SELECT train_status, schedule_start_date, schedule_end_date, signalling_id, CIF_train_uid, CIF_stp_indicator, update_id FROM cif_schedules WHERE id = %ld", cif_schedule_id);
+
+   if(!db_query(query))
+   {
+      result0 = db_store_result();
+
+      if((row0 = mysql_fetch_row(result0)))
+      {
+         vstp = (row0[6][0] == '0' && row0[6][1] == 0);
+         bus = (row0[0][0] == 'B' || row0[0][0] == '5');
+
+         if(!bus) ntrain++;
+
+         status = 0;
+         // TRUST
+         if(!bus)
+         {
+            char query[512], trust_id[16];
+            MYSQL_RES * result2;
+            MYSQL_ROW row2;
+            broken = gmtime(&start_date);
+            byte dom = broken->tm_mday;
+
+            // Only accept activations where dom matches, and are +- 4 days (To eliminate last month's activation.)  YUK
+            sprintf(query, "SELECT created, trust_id, deduced FROM trust_activation WHERE cif_schedule_id = %ld AND substring(trust_id FROM 9) = '%02d' AND created > %ld AND created < %ld order by created", cif_schedule_id, dom, when - 4*24*60*60, when + 4*24*60*60);
+            if(!db_query(query))
+            {
+               result1 = db_store_result();
+               if((row1 = mysql_fetch_row(result1)))
+               {
+                  status = 1;
+                  strcpy(trust_id, row1[1]);
+               }
+               mysql_free_result(result1);
+            }
+
+            if(status)
+            {
+               sprintf(query, "SELECT event_type, loc_stanox, actual_timestamp, timetable_variation, variation_status from trust_movement where trust_id='%s' AND created > %ld AND created < %ld order by actual_timestamp, planned_timestamp, created", trust_id, when - 4*24*60*60, when + 4*24*60*60);
+               if(!db_query(query))
+               {
+                  result1 = db_store_result();
+                  while((row1 = mysql_fetch_row(result1)))
+                  {
+                     if(status < 4)
+                     {
+                        status = 2;
+                        strcpy(actual, row1[2]);
+                        deviation = atoi(row1[3]);
+                        late = !strcasecmp("late", row1[4]);
+                     }
+                     if(status < 5)
+                     {
+                        sprintf(query, "SELECT tiploc FROM corpus WHERE stanox = %s", row1[1]);
+                        if(!db_query(query))
+                        {
+                           result2 = db_store_result();
+                           if((row2 = mysql_fetch_row(result2)))
+                           {
+                              if(!strcasecmp(tiploc, row2[0]))
+                              {
+                                 if(!strcasecmp("departure", row1[0]))
+                                 {
+                                    // Got a departure report at our station
+                                    status = 5;
+                                    strcpy(actual, row1[2]);
+                                    deviation = atoi(row1[3]);
+                                    late = !strcasecmp("late", row1[4]);
+                                 }
+                                 else if(status < 4)
+                                 {
+                                    // Got an arrival from our station AND haven't seen a departure yet
+                                    status = 4;
+                                 }
+                              }
+                           }
+                           mysql_free_result(result2);
+                        }
+                     }
+                  }
+                  mysql_free_result(result1);
+               }
+            }
+            
+            if(status < 4)
+            {
+               sprintf(query, "SELECT created, reason, type from trust_cancellation where trust_id='%s' AND created > %ld AND created < %ld order by created ", trust_id, when - 4*24*60*60, when + 4*24*60*60);                  
+               if(!db_query(query))
+               {                   
+                  result2 = db_store_result();
+                  if((row2 = mysql_fetch_row(result2)))
+                  {
+                     status = 3;
+                  }
+                  mysql_free_result(result2);
+                  
+               }
+            }
+         }
+      }
+      mysql_free_result(result0);
+   }
+
+   // Build analysis
+   switch(status)
+   {
+   case 0: 
+      if(bus) 
+      {
+         nbus++;
+      }
+      break;
+
+   case 1: // Activated
+      break;
+
+   case 2: // Moved
+      if(deviation > 2) nlate++;
+      if(deviation > 5) nlater++;
+      break;
+
+   case 3: // Cape
+      ncape++;
+      break;
+
+   case 4: // Arrived
+   case 5: // Departed
+      if(deviation > 2) nlate++;
+      if(deviation > 5) nlater++;
+      break;
+
+   }
+
+   return;
+}
+
+static char * percentage(const dword num, const dword den)
+{
+   static char result[16];
+
+   if(den)
+   {
+      dword permille = 1000 * num / den;
+      sprintf(result, "%ld.%ld", permille/10, permille%10);
+   }
+   else
+   {
+      strcpy(result, "-");
+   }
+
+   return result;
+}
+#if 0
 
 static void depsheet(void)
 {
@@ -2452,3 +2852,4 @@ static char * show_expected_time(const char * const scheduled, const word deviat
 
    return result;
 }
+#endif
