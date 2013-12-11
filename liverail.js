@@ -129,6 +129,7 @@ function smart_update(url)
    {
       // Fetch has failed or page layout has changed or date has changed.  Reload whole page.
       window.location = url;
+      return;
    }
 
    // Process individual trains.
