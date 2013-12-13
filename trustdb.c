@@ -20,7 +20,7 @@
 #include "private.h"
 
 #define NAME  "trustdb"
-#define BUILD "UC09"
+#define BUILD "UC13"
 
 static void perform(void);
 static void process_message(const char * const body);
@@ -732,7 +732,7 @@ static void process_trust_0003(const char * string, const jsmntok_t * tokens, co
          sprintf(query, "Movement message received with %d matching activations, train_id = \"%s\".", num_rows, train_id);
          _log(MINOR, query);
          stats[MovtNoAct]++;
-         if(planned_timestamp ==0)
+         if(planned_timestamp == 0)
          {
             strcpy(reason, "No planned timestamp");
          }
@@ -762,6 +762,7 @@ static void process_trust_0003(const char * string, const jsmntok_t * tokens, co
          {
             char query1[256];
             struct tm * broken = localtime(&planned_timestamp);
+            sort_time = broken->tm_hour * 4 * 60 + broken->tm_min * 4;
             // Select the day
             word day = broken->tm_wday;
             word yest = (day + 6) % 7;
@@ -770,7 +771,6 @@ static void process_trust_0003(const char * string, const jsmntok_t * tokens, co
             broken->tm_min = 0;
             broken->tm_sec = 0;
             time_t when = timegm(broken);
-            sort_time = broken->tm_hour * 4 * 60 + broken->tm_min * 4;
             sprintf(query, "SELECT cif_schedules.id, cif_schedules.CIF_train_uid, signalling_id FROM cif_schedules INNER JOIN cif_schedule_locations ON cif_schedules.id = cif_schedule_locations.cif_schedule_id WHERE cif_schedule_locations.tiploc_code = '%s'",
                     tiploc);
             sprintf(query1, " AND cif_schedule_locations.sort_time > %d AND cif_schedule_locations.sort_time < %d",
