@@ -1204,7 +1204,19 @@ static void report_train_summary(const dword cif_schedule_location_id, const tim
                                  else if(status < 4)
                                  {
                                     // Got an arrival from our station AND haven't seen a departure yet
-                                    status = 4;
+                                    char z[8];
+                                    z[0] = depart[0]; z[1] = depart[1]; z[2] = '\0';
+                                    word sched = atoi(z)*60;
+                                    z[0] = depart[2]; z[1] = depart[3];
+                                    sched += atoi(z);
+                                    time_t planned_timestamp = atol(row1[5]);
+                                    struct tm * broken = localtime(&planned_timestamp);
+                                    word planned = broken->tm_hour * 60 + broken->tm_min;
+                                    if(planned > sched - 3 && planned < sched + 3) // This might fail close to midnight!
+                                    {
+                                       // Near enough!
+                                       status = 4;
+                                    }
                                  }
                               }
                            }
