@@ -3,13 +3,17 @@ use strict;
 
 # Wrapper for sendEmail, retries as necessary
 
-my $build = 'UA30';
+my $build = 'UC14';
 
 # Parameters are Subject File
 
 my ($subject, $file) = @ARGV;
 
+my $hostname = `hostname`;
 my $from = 'openrail@liverpub.com';
+
+$hostname =~ /oakwood/i and $from = 'openrail@charlwoodhouse.co.uk';
+
 my $to   = 'phil@philwieland.com';
 my $server = 'mx-cluster-c1.one.com';
 
@@ -21,7 +25,7 @@ if(!defined($file))
 }
 
 my $wait = 64;
-my $tries = 8;
+my $tries = 64;
 my $result;
 my $command_line = "/usr/bin/sendEmail -f $from -t $to -u \"$subject\" -s $server -o message-file=$file";
 
@@ -30,15 +34,14 @@ while($tries && ($result = system($command_line)))
    if(--$tries)
    {
       print("Failed to send.  Waiting before retrying...\n");
-      sleep ($wait + 256);
-      $wait *=2;
+      sleep ($wait);
+      $wait *=2 unless ($wait > 4096);
    }
    else
    {
       print "Email abandoned.\n";
    }
 }
-
 
 exit(0);
 
