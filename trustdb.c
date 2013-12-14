@@ -20,7 +20,7 @@
 #include "private.h"
 
 #define NAME  "trustdb"
-#define BUILD "UC13"
+#define BUILD "UC14"
 
 static void perform(void);
 static void process_message(const char * const body);
@@ -643,7 +643,7 @@ static void process_trust_0002(const char * string, const jsmntok_t * tokens, co
 static void process_trust_0003(const char * string, const jsmntok_t * tokens, const int index)
 {
    char query[1024], zs[32], zs1[32], train_id[128], loc_stanox[128];
-   time_t planned_timestamp, timestamp;
+   time_t planned_timestamp, actual_timestamp, timestamp;
 
    time_t now = time(NULL);
    
@@ -665,8 +665,8 @@ static void process_trust_0003(const char * string, const jsmntok_t * tokens, co
    strcat(query, "', ");
    jsmn_find_extract_token(string, tokens, index, "actual_timestamp", zs, sizeof(zs));
    zs[10] = '\0';
-   timestamp = correct_trust_timestamp(atol(zs));
-   sprintf(zs, "%ld", timestamp);
+   actual_timestamp = correct_trust_timestamp(atol(zs));
+   sprintf(zs, "%ld", actual_timestamp);
    strcat(query, zs);
    strcat(query, ", ");
    jsmn_find_extract_token(string, tokens, index, "gbtt_timestamp", zs, sizeof(zs));
@@ -706,6 +706,12 @@ static void process_trust_0003(const char * string, const jsmntok_t * tokens, co
 
    db_query(query);
 
+   // Old one?
+   if(planned_timestamp && now - actual_timestamp > 6*60*60)
+   {
+      sprintf(query, "Late movement message received, actual timestamp %s.", time_text(actual_timestamp, true));
+      _log(MINOR, query);
+   }
    sprintf(query, "SELECT * from trust_activation where trust_id = '%s' and created > %ld and cif_schedule_id > 0", train_id, now - (4*24*60*60));
    if(!db_query(query))
    {
@@ -771,7 +777,7 @@ static void process_trust_0003(const char * string, const jsmntok_t * tokens, co
             broken->tm_min = 0;
             broken->tm_sec = 0;
             time_t when = timegm(broken);
-            sprintf(query, "SELECT cif_schedules.id, cif_schedules.CIF_train_uid, signalling_id FROM cif_schedules INNER JOIN cif_schedule_locations ON cif_schedules.id = cif_schedule_locations.cif_schedule_id WHERE cif_schedule_locations.tiploc_code = '%s'",
+            sprintf(query, "SELECT cif_schedules.id, cif_schedules.CIF_train_uid, signalling_id, CIF_stp_indicator FROM cif_schedules INNER JOIN cif_schedule_locations ON cif_schedules.id = cif_schedule_locations.cif_schedule_id WHERE cif_schedule_locations.tiploc_code = '%s'",
                     tiploc);
             sprintf(query1, " AND cif_schedule_locations.sort_time > %d AND cif_schedule_locations.sort_time < %d",
                     sort_time - 1, sort_time + 4);
@@ -787,13 +793,14 @@ static void process_trust_0003(const char * string, const jsmntok_t * tokens, co
             sprintf(query1, " OR   ((%s) AND (schedule_start_date <= %ld) AND (schedule_end_date >= %ld) AND (    next_day)))",  days_runs[yest], when - 12*60*60, when - 36*60*60);
             strcat(query, query1);
 
-            sprintf(query1, " AND deleted > %ld", now);
+            sprintf(query1, " AND deleted > %ld ORDER BY LOCATE(CIF_stp_indicator, 'NPO')", planned_timestamp);
             strcat(query, query1);
 
             if(!db_query(query))
             {
-               word count = 0;
-               dword cif_schedule_id;
+               char save_uid[16], save_stp;
+               save_uid[0] = save_stp = '\0';
+               dword cif_schedule_id = 0;
                result0 = db_store_result();
                num_rows = mysql_num_rows(result0);
                if(!num_rows)
@@ -801,28 +808,30 @@ static void process_trust_0003(const char * string, const jsmntok_t * tokens, co
                   strcpy(reason, "No schedules found");
                }
 
-               while((!reason[0]) && (row0 = mysql_fetch_row(result0)))
+               while((row0 = mysql_fetch_row(result0)))
                {
-                  sprintf(query, "   Found potential match: %s (%s) %s", row0[0], row0[1], row0[2]);
+                  sprintf(query, "   Found potential match:%8s (%s) %s STP=%s", row0[0], row0[1], row0[2], row0[3]);
                   _log(MINOR, query);
-                  count++;
-                  cif_schedule_id = atol(row0[0]);
-
+                  if (!reason[0])
+                  {
+                     if(save_uid[0] && strcmp(save_uid, row0[1]))  strcpy(reason, "Multiple matching schedule UIDs");
+                     else if (save_stp == 'O' && row0[3][0] =='O') strcpy(reason, "Multiple matching overlay schedules");
+                     else
+                     {
+                        cif_schedule_id = atol(row0[0]);
+                        strcpy(save_uid, row0[1]);
+                        save_stp = row0[3][0];
+                     }
+                  }
                }
                mysql_free_result(result0);
 
                if(!reason[0])
                {
-                  if(count == 1)
-                  {
-                     sprintf(query, "INSERT INTO trust_activation VALUES(%ld, '%s', %ld, 1)", now, train_id, cif_schedule_id);
-                     db_query(query);
-                     _log(MINOR, "   Successfully deduced activation.");
-                  }
-                  else
-                  {
-                     strcpy(reason, "Multiple schedules found");
-                  }
+                  sprintf(query, "INSERT INTO trust_activation VALUES(%ld, '%s', %ld, 1)", now, train_id, cif_schedule_id);
+                  db_query(query);
+                  sprintf(query, "   Successfully deduced activation %ld", cif_schedule_id);
+                  _log(MINOR, query);
                }
             }
          }

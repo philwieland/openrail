@@ -30,7 +30,7 @@ static char * show_expected_time(const char * const scheduled, const word deviat
 
 
 #define NAME "Garner Live Rail"
-#define BUILD "UC09"
+#define BUILD "UC14"
 
 #define COLUMNS 4
 
@@ -587,11 +587,11 @@ static void depsheet(void)
 
          if(huyton_special)
          {
-            sprintf(query, "SELECT id from cif_schedule_locations WHERE cif_schedule_id = %ld AND (tiploc_code = 'HUYTON')", trains[index].cif_schedule_id);
+            sprintf(query, "SELECT id,sort_time from cif_schedule_locations WHERE cif_schedule_id = %ld AND (tiploc_code = 'HUYTON')", trains[index].cif_schedule_id);
          }
          else
          {
-            sprintf(query, "SELECT id from cif_schedule_locations WHERE cif_schedule_id = %ld AND tiploc_code = '%s'", trains[index].cif_schedule_id, location);
+            sprintf(query, "SELECT id,sort_time from cif_schedule_locations WHERE cif_schedule_id = %ld AND tiploc_code = '%s'", trains[index].cif_schedule_id, location);
          }
          if(!db_query(query))
          {
@@ -601,12 +601,12 @@ static void depsheet(void)
                if(instances++)
                {
                   // Second or subsequent visit to this location.  Append to end of array
-                  trains[train_count].cif_schedule_id = trains[index].cif_schedule_id;
+                  trains[train_count].cif_schedule_id   = trains[index].cif_schedule_id;
                   strcpy(trains[train_count].cif_train_uid, trains[index].cif_train_uid);
                   trains[train_count].cif_stp_indicator = trains[index].cif_stp_indicator;
                   trains[train_count].valid = true;
-                  trains[train_count].sort_time = trains[index].sort_time;
-                  trains[train_count].next_day = trains[index].next_day;
+                  trains[train_count].sort_time = atoi(row1[1]);
+                  trains[train_count].next_day          = trains[index].next_day;
                   trains[train_count].cif_schedule_location_id = atol(row1[0]);
                   //printf("<br>Step 4:  Second visit for %ld, populated entry %d", trains[index].cif_schedule_id, train_count);
                   train_count++;
@@ -615,6 +615,7 @@ static void depsheet(void)
                {
                   // First visit.  Update this entry
                   trains[index].cif_schedule_location_id = atol(row1[0]);
+                  trains[index].sort_time  = atoi(row1[1]);
                   //printf("<br>Step 4:  Populated entry %d, id=%ld", index, trains[index].cif_schedule_id);
                }
             }
@@ -679,7 +680,7 @@ static void depsheet(void)
                         strcpy(trains[train_count].cif_train_uid, trains[index].cif_train_uid);
                         trains[train_count].cif_stp_indicator = trains[index].cif_stp_indicator;
                         trains[train_count].valid = true;
-                        trains[train_count].sort_time = trains[index].sort_time;
+                        trains[train_count].sort_time = sort_time;
                         trains[train_count].next_day = trains[index].next_day;
                         trains[train_count].cif_schedule_location_id = atol(row1[0]);
                         // printf("Step 4a: Second visit for %ld, populated entry %d", trains[index].cif_schedule_id, train_count);
@@ -689,7 +690,8 @@ static void depsheet(void)
                      {
                         // First visit.  Update this entry
                         trains[index].cif_schedule_location_id = atol(row1[0]);
-                        //printf(" Step 4a:  Populated entry %d, id=%ld", index, trains[index].cif_schedule_id);
+                        trains[index].sort_time = sort_time;
+                       //printf(" Step 4a:  Populated entry %d, id=%ld", index, trains[index].cif_schedule_id);
                      }
                   }
                }
@@ -1153,7 +1155,7 @@ static void report_train_summary(const dword cif_schedule_location_id, const tim
 
             if(status)
             {
-               sprintf(query, "SELECT event_type, loc_stanox, actual_timestamp, timetable_variation, variation_status from trust_movement where trust_id='%s' AND created > %ld AND created < %ld order by actual_timestamp, planned_timestamp, created", trust_id, when - 4*24*60*60, when + 4*24*60*60);
+               sprintf(query, "SELECT event_type, loc_stanox, actual_timestamp, timetable_variation, variation_status, planned_timestamp from trust_movement where trust_id='%s' AND created > %ld AND created < %ld order by actual_timestamp, planned_timestamp, created", trust_id, when - 4*24*60*60, when + 4*24*60*60);
                if(!db_query(query))
                {
                   result1 = db_store_result();
@@ -1179,10 +1181,25 @@ static void report_train_summary(const dword cif_schedule_location_id, const tim
                                  if(!strcasecmp("departure", row1[0]))
                                  {
                                     // Got a departure report at our station
-                                    status = 5;
-                                    strcpy(actual, row1[2]);
-                                    deviation = atoi(row1[3]);
-                                    late = !strcasecmp("late", row1[4]);
+                                    // Check if it is about the right time, in case train calls twice.
+                                    {
+                                       char z[8];
+                                       z[0] = depart[0]; z[1] = depart[1]; z[2] = '\0';
+                                       word sched = atoi(z)*60;
+                                       z[0] = depart[2]; z[1] = depart[3];
+                                       sched += atoi(z);
+                                       time_t planned_timestamp = atol(row1[5]);
+                                       struct tm * broken = localtime(&planned_timestamp);
+                                       word planned = broken->tm_hour * 60 + broken->tm_min;
+                                       if(planned > sched - 3 && planned < sched + 3) // This might fail close to midnight!
+                                       {
+                                          // Near enough!
+                                          status = 5;
+                                          strcpy(actual, row1[2]);
+                                          deviation = atoi(row1[3]);
+                                          late = !strcasecmp("late", row1[4]);
+                                       }
+                                    }
                                  }
                                  else if(status < 4)
                                  {
