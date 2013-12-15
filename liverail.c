@@ -30,7 +30,7 @@ static char * show_expected_time(const char * const scheduled, const word deviat
 
 
 #define NAME "Garner Live Rail"
-#define BUILD "UC14"
+#define BUILD "UC15"
 
 #define COLUMNS 4
 
@@ -356,7 +356,7 @@ static void depsheet(void)
       location[0] = '\0';
    }
    
-   struct tm * broken = localtime(&when);
+   struct tm broken = *localtime(&when);
 
    // Differences for summary reports
    if(!strcasecmp(parameters[0], "depsum"))
@@ -395,7 +395,7 @@ static void depsheet(void)
       printf("<h2>");
       if(summary) printf ("Services Calling");
       else printf("Services");
-      printf(" at %s on %s %02d/%02d/%02d</h2>", (huyton_special?"Huyton and Huyton Junction" : location_name(location, false)), days[broken->tm_wday % 7], broken->tm_mday, broken->tm_mon + 1, broken->tm_year % 100);
+      printf(" at %s on %s %02d/%02d/%02d</h2>", (huyton_special?"Huyton and Huyton Junction" : location_name(location, false)), days[broken.tm_wday % 7], broken.tm_mday, broken.tm_mon + 1, broken.tm_year % 100);
    }
    
    //                    0                          1                      2                             3         4
@@ -418,13 +418,13 @@ static void depsheet(void)
    strcat(query, zs);
    
    // Select the day
-   broken->tm_hour = 12;
-   broken->tm_min = 0;
-   broken->tm_sec = 0;
-   word day = broken->tm_wday;
+   broken.tm_hour = 12;
+   broken.tm_min = 0;
+   broken.tm_sec = 0;
+   word day = broken.tm_wday;
    word yest = (day + 6) % 7;
    word tom = (day + 1) % 7;
-   when = timegm(broken);
+   when = timegm(&broken);
    
    sprintf(zs, " AND ((((%s) AND (schedule_start_date <= %ld) AND (schedule_end_date >= %ld) AND (NOT next_day)) AND (sort_time >= %d))",  days_runs[day],  when + 12*60*60, when - 12*60*60, DAY_START);
    strcat(query, zs);
@@ -1017,7 +1017,7 @@ static void report_train_summary(const dword cif_schedule_location_id, const tim
    word deviation, deduced, late;
    dword cif_schedule_id;
    word next_day, sort_time;
-   char train_details[256], depart[8], destination[128], tiploc[16], analysis[64];
+   char train_details[256], depart[8], wtt_depart[8], destination[128], tiploc[16], analysis[64];
    struct tm * broken;
 
    deviation = late = status = bus = deduced = 0;
@@ -1073,6 +1073,7 @@ static void report_train_summary(const dword cif_schedule_location_id, const tim
       cif_schedule_id = atol(row0[0]); 
       next_day        = atoi(row0[1]);
       sort_time       = atoi(row0[2]);
+      strcpy(wtt_depart, row0[5]);
       strcpy(depart, row0[3]);
       if(!depart[0]) strcpy(depart, row0[5]);
       strcpy(expected, row0[3]);
@@ -1184,9 +1185,9 @@ static void report_train_summary(const dword cif_schedule_location_id, const tim
                                     // Check if it is about the right time, in case train calls twice.
                                     {
                                        char z[8];
-                                       z[0] = depart[0]; z[1] = depart[1]; z[2] = '\0';
+                                       z[0] = wtt_depart[0]; z[1] = wtt_depart[1]; z[2] = '\0';
                                        word sched = atoi(z)*60;
-                                       z[0] = depart[2]; z[1] = depart[3];
+                                       z[0] = wtt_depart[2]; z[1] = wtt_depart[3];
                                        sched += atoi(z);
                                        time_t planned_timestamp = atol(row1[5]);
                                        struct tm * broken = localtime(&planned_timestamp);
@@ -1205,14 +1206,14 @@ static void report_train_summary(const dword cif_schedule_location_id, const tim
                                  {
                                     // Got an arrival from our station AND haven't seen a departure yet
                                     char z[8];
-                                    z[0] = depart[0]; z[1] = depart[1]; z[2] = '\0';
+                                    z[0] = wtt_depart[0]; z[1] = wtt_depart[1]; z[2] = '\0';
                                     word sched = atoi(z)*60;
-                                    z[0] = depart[2]; z[1] = depart[3];
+                                    z[0] = wtt_depart[2]; z[1] = wtt_depart[3];
                                     sched += atoi(z);
                                     time_t planned_timestamp = atol(row1[5]);
                                     struct tm * broken = localtime(&planned_timestamp);
                                     word planned = broken->tm_hour * 60 + broken->tm_min;
-                                    if(planned > sched - 3 && planned < sched + 3) // This might fail close to midnight!
+                                    if(planned > sched - 6 && planned < sched + 6) // This might fail close to midnight!
                                     {
                                        // Near enough!
                                        status = 4;
