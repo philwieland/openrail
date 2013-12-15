@@ -12,7 +12,8 @@ liverail - Web display.
 To Install
 ==========
 
-sudo mkdir /var/log/garner
+sudo mkdir -p /var/log/garner
+sudo mkdir -p /var/backup
 
 cd into the directory where you've put all the source from GIT.
 
@@ -35,7 +36,7 @@ Set Up Empty Database
 Use sudo mysql -p
 
 CREATE DATABASE rail;
-GRANT ALL ON rail.* TO xxxxxx@xxxxxx IDENTIFIED BY 'xxxxxx';
+GRANT ALL ON rail.* TO xxxxx@xxxxx IDENTIFIED BY 'xxxxx';
 (Note that the tables within the database will be created by the programs as required.)
 
 
@@ -56,7 +57,7 @@ Add root cron jobs as follows
 50 00 21 *  *        /usr/sbin/corpusdb
 22 00 *    *    *    /usr/sbin/dump-rail >/tmp/dump-rail.log 2>&1
 
-You now have a timetable database updated daily, with a daily dump stored in /tmp for backup purposes.  (Obviously you wont want to leave the backup there!)
+You now have a timetable database updated daily, with a daily dump stored in /var/backup for backup purposes.
 
 Add streamed VSTP and Train Movement Data
 =========================================
@@ -76,10 +77,11 @@ Set up apache
 
 MORE INFO NEEDED HERE!
 Add authentication stuff inside <Directory /usr/lib/cgi-bin> and rewrite stuff inside <VirtualHost *:80> into /etc/apache2/sites-available/default
+(If the server is used for anything else as well, you may prefer to use a virtual host.)
+
 cd /etc/apache2/mods-enabled && sudo ln -s ../mods-available/rewrite.load rewrite.load
 sudo htpasswd /etc/apache2/.htallpasswords <username> (Add -c switch if this is the first time.)
 restart apache 
-
 
 ./release liverail
 
