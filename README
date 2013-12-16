@@ -75,9 +75,7 @@ sudo cp _etc_logrotate.d_garner /etc/logrotate.d/garner
 Set up apache
 =============
 
-MORE INFO NEEDED HERE!
-Add authentication stuff inside <Directory /usr/lib/cgi-bin> and rewrite stuff inside <VirtualHost *:80> into /etc/apache2/sites-available/default
-(If the server is used for anything else as well, you may prefer to use a virtual host.)
+See Apache-setup.txt
 
 cd /etc/apache2/mods-enabled && sudo ln -s ../mods-available/rewrite.load rewrite.load
 sudo htpasswd /etc/apache2/.htallpasswords <username> (Add -c switch if this is the first time.)

@@ -1,0 +1,48 @@
+To set up apache, /etc/apache2/sites-available/default should be as shown below.  You can, of course, use
+a virtual host if desired.
+
+<VirtualHost *:80>
+	ServerAdmin xxxxxxxxx
+
+	DocumentRoot /var/www
+	<Directory />
+		Options FollowSymLinks
+		AllowOverride None
+	</Directory>
+	<Directory /var/www/>
+		Options Indexes FollowSymLinks MultiViews
+		AllowOverride None
+		Order allow,deny
+		allow from all
+	</Directory>
+
+	ScriptAlias /cgi-bin/ /usr/lib/cgi-bin/
+	<Directory "/usr/lib/cgi-bin">
+		AllowOverride None
+                AddHandler cgi-script .pl .cgi
+		Options +ExecCGI -MultiViews +SymLinksIfOwnerMatch
+		Order allow,deny
+		Allow from all      
+
+		AuthType Basic
+		AuthName "Rail Server"
+                #
+                # Location of the password file
+                # To add users use htpasswd /etc/apache2/.htallpasswords <username>
+                AuthUserFile /etc/apache2/.htallpasswords
+                Require user xxxxxxxxx
+	</Directory>
+
+RewriteEngine   On
+RewriteRule     ^/rail/liverail(.*)$  /usr/lib/cgi-bin/liverail.cgi   [E=PARMS:$1]
+#RewriteLog      /tmp/rewrite.log
+#RewriteLogLevel 9
+
+	ErrorLog ${APACHE_LOG_DIR}/error.log
+
+	# Possible values include: debug, info, notice, warn, error, crit,
+	# alert, emerg.
+	LogLevel warn
+
+	CustomLog ${APACHE_LOG_DIR}/access.log combined
+</VirtualHost>
