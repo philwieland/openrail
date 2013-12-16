@@ -50,9 +50,10 @@ static char * show_expected_time(const char * const scheduled, const word deviat
 
 
 #define NAME "Garner Live Rail"
-#define BUILD "UC15"
+#define BUILD "UC16"
 
 #define COLUMNS 4
+#define URL_BASE "/rail/liverail/"
 
 word debug, refresh;
 static time_t now;
@@ -97,7 +98,6 @@ time_t start_time, done_main_query_time, done_analyse_time, done_analyse_sort_ti
 // (Hours * 60 + Minutes) * 4
 #define DAY_START  4*60*4
 
-
 // location name cache
 #define CACHE_SIZE 16
 static char cache_key[CACHE_SIZE][8];
@@ -109,15 +109,29 @@ int main(void)
 
    now = time(NULL);
 
+   // Set up log
+   {
+      struct tm * broken = localtime(&now);
+      char logfile[128];
+
+      sprintf(logfile, "/tmp/liverail-%04d-%02d-%02d.log", broken->tm_year + 1900, broken->tm_mon + 1, broken->tm_mday);
+      _log_init(logfile, debug?2:0);
+   }
+
    char * parms = getenv("PARMS");
-   sprintf(zs, "PARMS = \"%s\"", parms);
-   _log(GENERAL, zs);
+   if(parms)
+   {
+      sprintf(zs, "PARMS = \"%s\"", parms);
+      _log(GENERAL, zs);
+   }
+   else
+      _log(GENERAL, "No PARMS provided!");
 
    // Parse parms
    word i, j, k, l;
    i = j = k = l = 0;
-   if(parms[0] == '/') i++;
-   while(j < 10 && parms[i] && k < 128)
+   if(parms && parms[0] == '/') i++;
+   while(j < 10 && parms[i] && k < 128 && parms)
    {
       if(parms[i] == '/')
       {
@@ -156,15 +170,6 @@ int main(void)
 
    // TEMPO
    // debug = true;
-
-   // Set up log
-   {
-      struct tm * broken = localtime(&now);
-      char logfile[128];
-
-      sprintf(logfile, "/tmp/liverail-%04d-%02d-%02d.log", broken->tm_year + 1900, broken->tm_mon + 1, broken->tm_mday);
-      _log_init(logfile, debug?2:0);
-   }
 
    // Initialise database
    //db_init(, debug?"rail_test":"rail");
@@ -486,7 +491,6 @@ static void depsheet(void)
          
          if(i == train_count)
          {
-            //printf(" Insert at %d", train_count);
             // Insert in array
             trains[train_count].cif_schedule_id = cif_schedule_id;
             strcpy(trains[train_count].cif_train_uid, row0[1]);
@@ -512,7 +516,6 @@ static void depsheet(void)
             {
                // Hit
                trains[i].valid = false;
-               //printf("<br>Step 2 invalidates %d due to %d", i, index);
             }
          }
       }
@@ -728,13 +731,6 @@ static void depsheet(void)
 
       word run = true;
 
-      //printf("<p>Before sort: ");
-      //for(j=0; j < train_count; j++)
-      //{
-      //   printf("<br>%d %ld %s", j, trains[j].cif_schedule_id, trains[j].valid?"":"Invalidated");
-      //}
-      //printf("</p>\n");
-
       // First, mung the sort_time so that early hours trains come after the others:
       for(j=0; j< train_count; j++)
       {
@@ -849,7 +845,7 @@ static void report_train(const dword cif_schedule_location_id, const time_t when
          vstp = (row0[6][0] == '0' && row0[6][1] == 0);
 
          // Link
-         printf("<td><a class=\"linkbutton\" href=\"/rail/liverail/train/%ld/%s\">Details</a></td>\n", cif_schedule_id, show_date(start_date, false));
+         printf("<td><a class=\"linkbutton\" href=\"%strain/%ld/%s\">Details</a></td>\n", URL_BASE, cif_schedule_id, show_date(start_date, false));
          
          // Status
          if(vstp) printf("<td class=\"small-table-vstp\">V");
@@ -1143,7 +1139,7 @@ static void report_train_summary(const dword cif_schedule_location_id, const tim
          }
 
          // Link
-         sprintf(train_details, "<a class=\"linkbutton-summary\" href=\"/rail/liverail/train/%ld/%s\">%s %s</a>",cif_schedule_id, show_date(start_date, false), depart, destination);
+         sprintf(train_details, "<a class=\"linkbutton-summary\" href=\"%strain/%ld/%s\">%s %s</a>", URL_BASE, cif_schedule_id, show_date(start_date, false), depart, destination);
 
          {
             char zs[512];
@@ -1501,7 +1497,7 @@ static void as(void)
            
                // Link
                dword id = atol(row0[7]);
-               printf("<td><a class=\"linkbutton\" href=\"/rail/liverail/train/%ld\">Details</a></td>\n", id);
+               printf("<td><a class=\"linkbutton\" href=\"%strain/%ld\">Details</a></td>\n", URL_BASE, id);
 
                // Status
                if(vstp) printf("<td class=\"small-table-vstp\">V");
@@ -1918,7 +1914,7 @@ static void train(void)
 
       printf("</td></tr></table>\n"); // Outer table
       ///printf("<table><tr><td class=\"control-panel\">&nbsp;");
-      printf("<a class=\"linkbutton-cp\" href=\"/rail/liverail/train_text/%ld\" target=\"_blank\">Display in plain text</a>\n", schedule_id);
+      printf("<a class=\"linkbutton-cp\" href=\"%strain_text/%ld\" target=\"_blank\">Display in plain text</a>\n", URL_BASE, schedule_id);
       ///printf("&nbsp;</td></tr></table>\n");
 
       // TRUST
@@ -2296,7 +2292,7 @@ static char * location_name_link(const char * const tiploc, const word use_cache
 
    char * name = location_name(tiploc, use_cache);
 
-   sprintf(result, "<a class=\"linkbutton\" href=\"/rail/liverail/depsheet/%s/%s\">%s</a>", tiploc, show_date(when, 0), name);
+   sprintf(result, "<a class=\"linkbutton\" href=\"%sdepsheet/%s/%s\">%s</a>", URL_BASE, tiploc, show_date(when, 0), name);
 
    return result;
 }

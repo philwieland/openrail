@@ -20,7 +20,7 @@ if [ "$1" = "all" -o "$1" = "liverail" ]; then
         cp liverail.css        /var/www/friedbread/liverail.css
         cp liverail.js         /var/www/friedbread/liverail.js
     else
-        echo "Releasing liverail for oakwood"
+        echo "Releasing liverail"
         sudo cp liverail.cgi        /usr/lib/cgi-bin/liverail.cgi
         sudo cp liverail.css        /var/www/liverail.css
         sudo cp liverail.js         /var/www/liverail.js

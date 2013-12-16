@@ -269,24 +269,21 @@ word email_alert(const char * const name, const char * const build, const char *
 
 char * abbreviated_host_id(void)
 {
-   static char result[4];
-   char hostname[256];
+   static char hostname[256];
+   word i;
 
    gethostname(hostname, sizeof(hostname));
 
-   if(!strncasecmp(hostname, "friedbread", 10)) strcpy(result, "fb");
-   else if(!strncasecmp(hostname, "cockfosters", 10)) strcpy(result, "cf");
-   else if(!strncasecmp(hostname, "oakwood", 10)) strcpy(result, "ow");
-   else if(!strncasecmp(hostname, "bubble", 10)) strcpy(result, "bb");
-   else strcpy(result, "zz");
- 
+   for(i=0; hostname[i] && hostname[i] != '.'; i++);
+   hostname[i] = '\0';
+
    {
       char zs[512];
-      sprintf(zs, "abbreviated_host_id() Hostname is \"%s\",  return value \"%s\".", hostname, result);
+      sprintf(zs, "abbreviated_host_id() return value \"%s\".", hostname);
       _log(DEBUG, zs);
    }
 
-   return result;
+   return hostname;
 }
 char * show_time(const char * const input)
 {
