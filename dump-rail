@@ -20,7 +20,7 @@ my $monthly_filename = sprintf('/var/backup/rail-database-monthly-%d-%02d.sql.gz
 print `date`;
 print $name, " build ", $build, " creating \"",$filename,"\"\n";
 
-print `/usr/bin/nice /usr/bin/mysqldump --single-transaction --quick -u garnerd -pRA31GAkvpn rail | /usr/bin/nice gzip --best > $filename`;
+print `/usr/bin/nice /usr/bin/mysqldump --single-transaction --quick -u xxxxxxx -pxxxxxxx rail | /usr/bin/nice gzip --best > $filename`;
 
 print `cp $filename $monthly_filename`;
 
