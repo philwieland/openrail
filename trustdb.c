@@ -37,8 +37,8 @@
 #include "jsmn.h"
 #include "misc.h"
 #include "db.h"
-#include "private.h"
 
+#include <libopenrailconfig.h>
 #define NAME  "trustdb"
 #define BUILD "UC14"
 
@@ -96,6 +96,14 @@ void termination_handler(int signum)
 
 int main(int argc, char *argv[])
 {
+
+   char config_buffer[1025];
+
+   FILE *cfg = fopen("/etc/openrail/openrail.cfg", "r");
+   fread(config_buffer, 1024, 1, cfg);
+   fclose(cfg);
+
+   parse_config(config_buffer);
    int lfp = 0;
 
    // Determine debug mode
@@ -255,7 +263,7 @@ static void perform(void)
    last_report = time(NULL) / REPORT_INTERVAL;
 
    // Initialise database
-   db_init(DB_SERVER, DB_USER, DB_PASSWORD, debug?"rail_test":"rail");
+   db_init(conf.db_server, conf.db_user, conf.db_pass, conf.db_name);
 
    log_message("");
    log_message("");
@@ -280,18 +288,18 @@ static void perform(void)
          {
             strcpy(headers, "CONNECT\n");
             strcat(headers, "login:");
-            strcat(headers, NATIONAL_RAIL_USERNAME);  
+            strcat(headers, conf.nr_user);  
             strcat(headers, "\npasscode:");
-            strcat(headers, NATIONAL_RAIL_PASSWORD);
+            strcat(headers, conf.nr_pass);
             strcat(headers, "\n");          
             if(debug)
             {
-               sprintf(zs, "client-id:%s-trustdb-debug\n", NATIONAL_RAIL_USERNAME);
+               sprintf(zs, "client-id:%s-trustdb-debug\n", conf.nr_user);
                strcat(headers, zs);
             }
             else
             {
-               sprintf(zs, "client-id:%s-trustdb-%s\n", NATIONAL_RAIL_USERNAME, abbreviated_host_id());
+               sprintf(zs, "client-id:%s-trustdb-%s\n", conf.nr_user, abbreviated_host_id());
                strcat(headers, zs);
             }          
             strcat(headers, "heart-beat:0,20000\n");          
@@ -325,12 +333,12 @@ static void perform(void)
                   strcat(headers, "destination:/topic/TRAIN_MVT_ALL_TOC\n");      
                   if(debug)
                   {
-                     sprintf(zs, "activemq.subscriptionName:%s-trustdb-debug\n", NATIONAL_RAIL_USERNAME);
+                     sprintf(zs, "activemq.subscriptionName:%s-trustdb-debug\n", conf.nr_user);
                      strcat(headers, zs);
                   }
                   else
                   {
-                     sprintf(zs, "activemq.subscriptionName:%s-trustdb-%s\n", NATIONAL_RAIL_USERNAME, abbreviated_host_id());
+                     sprintf(zs, "activemq.subscriptionName:%s-trustdb-%s\n", conf.nr_user, abbreviated_host_id());
                      strcat(headers, zs);
                   }
                   strcat(headers, "id:1\n");      

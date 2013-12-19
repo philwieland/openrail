@@ -28,8 +28,8 @@
 
 #include "misc.h"
 #include "db.h"
-#include "private.h"
 
+#include <libopenrailconfig.h>
 static void report(const char * const tiploc, const word year, const word month);
 static void report_day(const char * const tiploc, time_t when);
 static void report_train_day(const dword cif_schedule_location_id, const time_t when);
@@ -51,6 +51,13 @@ static const char * days_runs[8] = {"runs_su", "runs_mo", "runs_tu", "runs_we", 
 
 int main(int argc, char **argv)
 {
+   char config_buffer[1025];
+
+   FILE *cfg = fopen("/etc/openrail/openrail.cfg", "r");
+   fread(config_buffer, 1024, 1, cfg);
+   fclose(cfg);
+
+   parse_config(config_buffer);
    word month, year;
    byte usage = false;
 
@@ -80,7 +87,7 @@ int main(int argc, char **argv)
    _log_init("", debug?1:0);
 
    // Initialise database
-   db_init(DB_SERVER, DB_USER, DB_PASSWORD, "rail");
+   db_init(conf.db_server, conf.db_user, conf.db_pass, conf.db_name);
 
    report(argv[1], year, month);
 
