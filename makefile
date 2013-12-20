@@ -44,7 +44,20 @@ service-report: service-report.o misc.o db.o
 
 service-report.o: service-report.c misc.h db.h
 
+install:
+		mkdir -p $(DESTDIR)$(prefix)/lib/cgi-bin
+		install -m 0755 cifdb $(DESTDIR)$(prefix)/sbin
+		install -m 0755 trustdb $(DESTDIR)$(prefix)/sbin
+		install -m 0755 vstpdb $(DESTDIR)$(prefix)/sbin
+		install -m 0755 corpusdb $(DESTDIR)$(prefix)/sbin
+		install -m 0755 liverail.cgi $(DESTDIR)$(prefix)/lib/cgi-bin
+		install -m 0644 liverail.css $(DESTDIR)/var/www
+		install -m 0644 liverail.js $(DESTDIR)/var/www
+
+.PHONY: install
+
 clean:
-		rm  cifdb liverail.cgi corpusdb vstpdb trustdb service-report *.o lib/libopenrailconfig.a
+		true
+#		rm  cifdb liverail.cgi corpusdb vstpdb trustdb service-report *.o lib/libopenrailconfig.a
 
 
