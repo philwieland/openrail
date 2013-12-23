@@ -152,13 +152,15 @@ void _log(const byte level, const char * text, ...)
       }
    }
 
+   va_end(vargs);
+
    return;
 }
 
 
 void _log_init(const char * l, const word d)
 {
-   // d is mode. 
+   // d is debug mode. 
    // 0 Normal running
    // 1 debug, print as well as log file
    // 2 debug, no print
