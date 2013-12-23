@@ -211,8 +211,7 @@ int main(int argc, char **argv)
    _log_init(debug?"/tmp/cifdb.log":"/var/log/garner/cifdb.log", debug?1:0);
 
    _log(GENERAL, "");
-   sprintf(zs, "%s %s", NAME, BUILD);
-   _log(GENERAL, zs);
+   _log(GENERAL, "%s %s", NAME, BUILD);
 
    if(debug)
    {

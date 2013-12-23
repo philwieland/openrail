@@ -36,7 +36,7 @@ extern time_t parse_datestamp(const char * string);
 extern time_t parse_timestamp(const char * string);
 
 enum log_types {GENERAL, PROC, DEBUG, MINOR, MAJOR, CRITICAL};
-extern void _log(const byte level, const char * text);
+extern void _log(const byte level, const char * text, ...);
 extern void _log_init(const char * log_file, const word debug);
 extern char * commas(const dword n);
 extern char * commas_ll(const unsigned long long int n);

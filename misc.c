@@ -24,6 +24,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <sys/timex.h>
+#include <stdarg.h>
 #include "misc.h"
 
 static char log_file[512];
@@ -88,12 +89,15 @@ time_t parse_timestamp(const char * string)
    return timegm(&broken);
 }
 
-void _log(const byte level, const char * text)
+void _log(const byte level, const char * text, ...)
 {
-   char log[512];
+   char log[32];
    FILE * fp;
 
    if((level == PROC || level == DEBUG) && !debug) return;
+
+   va_list vargs;
+   va_start(vargs, text);
 
    strcpy(log, time_text(time(NULL), false));
 
@@ -121,27 +125,29 @@ void _log(const byte level, const char * text)
       if(level == CRITICAL) strcat(log, "CRITICAL: ");
    }
 
-   int i = strlen(log);
-   strncat(log, text, 400);
-   log[400 + i] = '\0';
-   if(strlen(log) && (log[strlen(log) - 1] == '\n')) log[strlen(log) - 1] = '\0'; // Trailing \n
-   
-   if(strlen(text) > 400) strcat(log, " ...");
-
    if(!debug)
    {
       if(log_file[0] && (fp = fopen(log_file, "a")))
       {
-         fprintf(fp, "%s\n", log);
+         fprintf(fp, "%s", log);
+         vfprintf(fp, text, vargs);
+         fprintf(fp, "\n");
          fclose(fp);
       }
    }
    else
    {
-      if(debug == 1) printf("%s\n", log);
+      if(debug == 1) 
+      {
+         printf("%s", log);
+         vprintf(text, vargs);
+         printf("\n");
+      }
       if(log_file[0] && (fp = fopen(log_file, "a")))
       {
-         fprintf(fp, "%s\n", log);
+         fprintf(fp, "%s", log);
+         vfprintf(fp, text, vargs);
+         fprintf(fp, "\n");
          fclose(fp);
       }
    }
