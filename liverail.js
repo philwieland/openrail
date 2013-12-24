@@ -19,7 +19,7 @@
 */
 
 var url_base = "/rail/liverail/";
-var refresh_tick = 4096; /* ms between ticks */
+var refresh_tick = 3072; /* ms between ticks */
 //var refresh_tick = 400; /* Testing only */
 var refresh_period = 25; /* Number of ticks before refresh.  If not 25, css styles must be changed */
 var refresh_count = 0;
@@ -154,11 +154,14 @@ function smart_update(url)
 
    // Process individual trains.
    var index = 8;
-   while(results[index].substr(0, 2) == 'tr')
+   while(results.length > index && results[index].length > 2 && results[index].substr(0, 2) == 'tr')
    {
       var parts = results[index].split('|');
-      document.getElementById(parts[0]).className = parts[1];
-      document.getElementById(parts[0]).innerHTML = parts[2];
+      if(parts.length > 2)
+      {
+         document.getElementById(parts[0]).className = parts[1];
+         document.getElementById(parts[0]).innerHTML = parts[2];
+      }
       index++;
    }
    refresh_count = 0;

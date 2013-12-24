@@ -50,7 +50,7 @@ static char * show_expected_time(const char * const scheduled, const word deviat
 
 
 #define NAME "Garner Live Rail"
-#define BUILD "UC16"
+#define BUILD "UC19+"
 
 #define COLUMNS 4
 #define URL_BASE "/rail/liverail/"
@@ -418,9 +418,9 @@ static void depsheet(void)
    {
       display_control_panel(location, when);
       printf("<h2>");
-      if(summary) printf ("Services Calling");
-      else printf("Services");
-      printf(" at %s on %s %02d/%02d/%02d</h2>", (huyton_special?"Huyton and Huyton Junction" : location_name(location, false)), days[broken.tm_wday % 7], broken.tm_mday, broken.tm_mon + 1, broken.tm_year % 100);
+      if(summary) printf ("Departures from ");
+      else printf("Services at ");
+      printf("%s on %s %02d/%02d/%02d</h2>", (huyton_special?"Huyton and Huyton Junction" : location_name(location, false)), days[broken.tm_wday % 7], broken.tm_mday, broken.tm_mon + 1, broken.tm_year % 100);
    }
    
    //                    0                          1                      2                             3         4
@@ -1924,7 +1924,7 @@ static void train(void)
          printf("<table><tr>\n");
          printf("<td>Real Time Data For %s %02d/%02d/%02d</td>\n", days[broken->tm_wday % 7], broken->tm_mday, broken->tm_mon + 1, broken->tm_year % 100);
          printf("<td width = \"10%%\">&nbsp;</td>\n");
-         printf("<td class=\"control-panel-row\"> Show live data for date ");
+         printf("<td class=\"control-panel-row\"> Show real time data for date ");
          printf("<input type=\"text\" id=\"train_date\" size=8 maxlength=8 value=\"\" onkeydown=\"if(event.keyCode == 13) train_date_onclick(); else ar_off();\">\n");
          printf(" <button id=\"search\" class=\"cp-button\" onclick=\"train_date_onclick();\">Show</button> </td>\n");
          printf("</tr></table>\n");

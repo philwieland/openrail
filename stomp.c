@@ -16,6 +16,7 @@
 
     phil@philwieland.com
 
+   Warning:  This is NOT a full implementation of the STOMP standard.
 */
 
 #include <netdb.h>
@@ -80,7 +81,7 @@ int stomp_connect(const char * const dn, const int port)
 int stomp_tx(const char * const headers)
 {
    if(sockfd < 0) return -11;
-   // Headers must alredy have the appropriate NLs in and must be \0 terminated.
+   // Headers must already have the appropriate \n in and must be \0 terminated.
    ssize_t sent = write(sockfd, headers, strlen(headers) + 1);
    if(sent < 0) return errno;
    
