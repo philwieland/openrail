@@ -23,6 +23,7 @@
 #include <string.h>
 #include <regex.h>
 #include <time.h>
+#include <sys/time.h>
 #include <mysql.h>
 #include <unistd.h>
 
@@ -50,7 +51,7 @@ static char * show_expected_time(const char * const scheduled, const word deviat
 
 
 #define NAME "Garner Live Rail"
-#define BUILD "UC19+"
+#define BUILD "UC25"
 
 #define COLUMNS 4
 #define URL_BASE "/rail/liverail/"
@@ -93,8 +94,6 @@ static const char * days[] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thurs
 // Days runs fields
 static const char * days_runs[8] = {"runs_su", "runs_mo", "runs_tu", "runs_we", "runs_th", "runs_fr", "runs_sa", "runs_su"};
 
-time_t start_time, done_main_query_time, done_analyse_time, done_analyse_sort_time;
-
 // (Hours * 60 + Minutes) * 4
 #define DAY_START  4*60*4
 
@@ -108,6 +107,11 @@ int main(void)
    char zs[1024];
 
    now = time(NULL);
+
+   struct timeval ha_clock;
+   gettimeofday(&ha_clock, NULL);
+   qword start_time = ha_clock.tv_sec;
+   start_time = start_time * 1000 + ha_clock.tv_usec / 1000;
 
    // Set up log
    {
@@ -166,8 +170,6 @@ int main(void)
    // Initialise location name cache
    location_name(NULL, false);
 
-   start_time = now;
-
    // TEMPO
    // debug = true;
 
@@ -191,16 +193,20 @@ int main(void)
    if(!strcasecmp(parameters[0], "train_text")) train_text();
 
    {
+
       char host[256];
       if(gethostname(host, sizeof(host))) host[0] = '\0';
-      time_t elapsed = time(NULL) - start_time;
+      gettimeofday(&ha_clock, NULL);
+      qword elapsed = ha_clock.tv_sec;
+      elapsed = elapsed * 1000 + ha_clock.tv_usec / 1000;
+      elapsed -= start_time;
       if(!strcasecmp(parameters[0], "depsumu"))
       {
-         printf("Report updated at %s by %s %s at %s.  Elapsed time %ld second%s.\n", time_text(time(NULL), 1), NAME, BUILD, host, elapsed, (elapsed!=1)?"s":"");
+         printf("Report updated at %s by %s %s at %s.  Elapsed time %s ms.\n", time_text(time(NULL), 1), NAME, BUILD, host, commas_q(elapsed));
       }
       else
       {
-         printf("<p id=\"bottom-line\">Report completed at %s by %s %s at %s.  Elapsed time %ld second%s.</p>\n", time_text(time(NULL), 1), NAME, BUILD, host, elapsed, (elapsed!=1)?"s":"");
+         printf("<p id=\"bottom-line\">Report completed at %s by %s %s at %s.  Elapsed time %s ms.</p>\n", time_text(time(NULL), 1), NAME, BUILD, host, commas_q(elapsed));
          printf("</body></html>\n\n");
       }
    }
@@ -311,7 +317,7 @@ static void depsheet(void)
    // LOCATION
    if(parameters[1][0])
    {
-      strcpy(location, parameters[1]);
+      db_real_escape_string(location, parameters[1], strlen(parameters[1]));
       huyton_special = false;
       {
          MYSQL_ROW row0;
@@ -793,12 +799,6 @@ static void depsheet(void)
       }
       
       printf("</table>\n");
-   }
-      
-   if(debug)
-   {
-      printf("<p>%s %s found %d schedules.  Main query time %ld seconds, analyse time %ld seconds, sort time %ld seconds, total elapsed time %ld seconds.</p>\n", NAME, BUILD,
-             cif_schedule_count, done_main_query_time - start_time, done_analyse_time - done_main_query_time, done_analyse_sort_time - done_analyse_time, time(NULL) - start_time);
    }
 }
 
@@ -1451,15 +1451,21 @@ static void as(void)
          strcat(query,  " FROM cif_schedules WHERE ");
          if(parameters[2][0])
          {
-            sprintf(zs, "signalling_id = '%s'", parameters[2]);
+            // Sanitise
+            char safe[256];
+            db_real_escape_string(safe, parameters[2], strlen(parameters[2]));
+            sprintf(zs, "signalling_id = '%s'", safe);
          }
          else
          {
+            // Sanitise
+            char safe[256];
+            db_real_escape_string(safe, parameters[1], strlen(parameters[1]));
             // Insert missing leading space if necessary
             if(strlen(parameters[1]) == 5)
-               sprintf(zs, "CIF_train_uid = ' %s'", parameters[1]);
+               sprintf(zs, "CIF_train_uid = ' %s'", safe);
             else
-               sprintf(zs, "CIF_train_uid = '%s'", parameters[1]);
+               sprintf(zs, "CIF_train_uid = '%s'", safe);
          }
          strcat(query, zs);
          strcat(query, " ORDER BY schedule_start_date LIMIT 128");

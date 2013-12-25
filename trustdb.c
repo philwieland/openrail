@@ -40,7 +40,7 @@
 #include "private.h"
 
 #define NAME  "trustdb"
-#define BUILD "UC14"
+#define BUILD "UC25"
 
 static void perform(void);
 static void process_message(const char * const body);
@@ -75,8 +75,8 @@ static time_t start_time;
 enum stats_categories {Bytes, ConnectAttempt, GoodMessage, // Don't insert any here
                        Mess1, Mess2, Mess3, Mess4, Mess5, Mess6, Mess7, Mess8,
                        NotMessage, NotRecog, Mess1Miss, MovtNoAct, DeducedAct, MAXstats};
-unsigned long long int stats[MAXstats];
-unsigned long long grand_stats[MAXstats];
+qword stats[MAXstats];
+qword grand_stats[MAXstats];
 const char * stats_category[MAXstats] = 
    {
       "Bytes", "Connect Attempt", "Good Message", 
@@ -1118,8 +1118,8 @@ static void report_stats(void)
    for(i=0; i<MAXstats; i++)
    {
       grand_stats[i] += stats[i];
-      sprintf(zs, "%25s: %-12s ", stats_category[i], commas_ll(stats[i]));
-      strcat(zs, commas_ll(grand_stats[i]));
+      sprintf(zs, "%25s: %-12s ", stats_category[i], commas_q(stats[i]));
+      strcat(zs, commas_q(grand_stats[i]));
       _log(GENERAL, zs);
       strcat(report, zs);
       strcat(report, "\n");

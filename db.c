@@ -219,15 +219,9 @@ dword db_insert_id(void)
    return 0;
 }
 
-dword db_real_escape_string(char * to, char* from, size_t size)
+word db_real_escape_string(char * to, const char * const from, const size_t size)
 {
-   if(mysql_object)
-   {
-      return mysql_real_escape_string(mysql_object, to, from, size);
-   }
-   else
-   {
-      to[0] = '\0';
-      return 0;
-   }
+   if(db_connect()) return 9;
+   
+   return mysql_real_escape_string(mysql_object, to, from, size);
 }

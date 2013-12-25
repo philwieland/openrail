@@ -29,4 +29,4 @@ extern void db_disconnect(void);
 extern void dump_mysql_result_query(const char * const query);
 extern void dump_mysql_result(MYSQL_RES * result);
 extern dword db_insert_id(void);
-extern dword db_real_escape_string(char * to, char* from, size_t size);
+extern word db_real_escape_string(char * to, const char * const from, const size_t size);

@@ -189,7 +189,7 @@ char * commas(const dword n)
    return result;
 }
 
-char * commas_ll(const unsigned long long int n)
+char * commas_q(const qword n)
 {
    static char result[64];
    char zs[64];
