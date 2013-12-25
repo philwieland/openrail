@@ -89,8 +89,17 @@ function startup()
    refresh_count = 0;
    if(document.getElementById("ar").checked)
    {
+      // Refresh has been enabled.
       show_progress(); 
       document.getElementById("progress").style.display='';
+ 
+      var url = document.URL;
+      var url_parts = url.split('/');
+      if(url_parts[5] == "depsum")
+      {
+         // trigger an immediate update
+         refresh_count = refresh_period;
+      }
    }
    else
    {

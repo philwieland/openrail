@@ -35,7 +35,7 @@ static void depsheet(void);
 static void display_choice(MYSQL_RES * result0, const time_t when);
 static void display_control_panel(const char * const location, const time_t when);
 static void report_train(const dword cif_schedule_location_id, const time_t when, const word huyton_special);
-static void report_train_summary(const dword cif_schedule_location_id, const time_t when, const word summaryu);
+static void report_train_summary(const dword cif_schedule_location_id, const time_t when, const word summaryu, const word ntrains);
 static void as(void);
 static char * show_date(const time_t time, const byte local);
 static void train(void);
@@ -773,12 +773,12 @@ static void depsheet(void)
             cif_schedule_count++;
          }
       }
-      report_train_summary(0, cif_schedule_count, summaryu);
+      report_train_summary(0, when, summaryu, cif_schedule_count);
       for(index = 0; index < train_count; index++)
       {
          if(trains[train_sequence[index]].valid)
          {
-            report_train_summary(trains[train_sequence[index]].cif_schedule_location_id, when, summaryu);
+            report_train_summary(trains[train_sequence[index]].cif_schedule_location_id, when, summaryu, cif_schedule_count);
          }
       }
       if(!summaryu) printf("</table>\n");
@@ -1020,7 +1020,7 @@ static void report_train(const dword cif_schedule_location_id, const time_t when
    return;
 }
 
-static void report_train_summary(const dword cif_schedule_location_id, const time_t when, const word summaryu)
+static void report_train_summary(const dword cif_schedule_location_id, const time_t when, const word summaryu, const word ntrains)
 {
    MYSQL_RES * result0, * result1;
    MYSQL_ROW row0, row1;
@@ -1046,17 +1046,11 @@ static void report_train_summary(const dword cif_schedule_location_id, const tim
    // Initialise
    if(cif_schedule_location_id == 0)
    {
-      trains = when;
+      trains = ntrains;
       rows = (trains + COLUMNS - 1) / COLUMNS;
       if(rows < 20) rows = 20;
       train = row = 0;
       nlate = ncape = nbus = ndeduced = narrival = 0;
-      return;
-   }
-
-   // Before first train
-   if(!train)
-   {
       broken = localtime(&when);
       if(summaryu)
       {
@@ -1067,6 +1061,7 @@ static void report_train_summary(const dword cif_schedule_location_id, const tim
          printf("\n<input type=\"hidden\" id=\"display_handle\" value=\"%d%02d%s\">", trains, broken->tm_mday, BUILD);
          printf("<table><tr>");
       }
+      return;
    }
 
    // Before print
