@@ -92,15 +92,20 @@ function startup()
    if(document.getElementById("ar").checked)
    {
       // Refresh has been enabled.
-      show_progress(); 
-      document.getElementById("progress").style.display='';
  
       var url = document.URL;
       var url_parts = url.split('/');
       if(url_parts[5] == "depsum")
       {
          // trigger an immediate update
+         document.getElementById("progress").style.display='none';
          refresh_count = refresh_period;
+         ar();
+      }
+      else
+      {
+         show_progress(); 
+         document.getElementById("progress").style.display='';
       }
    }
    else
@@ -130,16 +135,20 @@ function ar()
             {
                // Smart update
                smart_update(url);
+               document.getElementById("progress").style.display='';
             }
             else
             {
                window.location = url;
             }
+            updating = 0;
          }
          else if(refresh_count > refresh_period * 2)
          {
             // Update seems to have timed out.  Try again.
             refresh_count = refresh_period;
+            var url = document.URL;
+            if(url.substr(-2,2) != "/r") { url += "/r"; }
             window.location = url;
          }
       }
