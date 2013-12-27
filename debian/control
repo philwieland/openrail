@@ -1,0 +1,15 @@
+Source: openrail
+Maintainer: Matthew Macdonald-Wallace <mmw@greenandsecure.co.uk>
+Section: misc
+Priority: optional
+Standards-Version: 3.9.2
+Build-Depends: 
+        debhelper (>= 9),
+        libmysqlclient-dev,
+        libcurl4-openssl-dev
+
+Package: openrail
+Architecture: all
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: Open Rail Data Utilites
+ Openrail provides a number of tools to help download and interpret the data available from https://datafeeds.networkrail.co.uk

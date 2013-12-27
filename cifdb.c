@@ -31,7 +31,8 @@
 #include "misc.h"
 #include "jsmn.h"
 #include "db.h"
-#include "private.h"
+
+#include <libopenrailconfig.h>
 
 #define NAME  "cifdb"
 #define BUILD "UC09"
@@ -193,6 +194,13 @@ static const char * const create_table_cif_schedule_locations =
 
 int main(int argc, char **argv)
 {
+   char config_buffer[1025];
+
+   FILE *cfg = fopen("/etc/openrail/openrail.cfg", "r");
+   fread(config_buffer, 1024, 1, cfg);
+   fclose(cfg);
+
+   parse_config(config_buffer);
    char zs[1024];
 
    start_time = time(NULL);
@@ -238,7 +246,7 @@ int main(int argc, char **argv)
    }
 
    // Initialise database
-   db_init(DB_SERVER, DB_USER, DB_PASSWORD, debug?"rail_test":"rail");
+   db_init(conf.db_server, conf.db_user, conf.db_pass, conf.db_name);
 
    reset_db = false;
    opt_filename = NULL;
@@ -1138,7 +1146,7 @@ static word fetch_file(void)
 
       // URL and login
       curl_easy_setopt(curlh, CURLOPT_URL,     url);
-      sprintf(zs, "%s:%s", NATIONAL_RAIL_USERNAME, NATIONAL_RAIL_PASSWORD);
+      sprintf(zs, "%s:%s", conf.nr_user, conf.nr_pass);
       curl_easy_setopt(curlh, CURLOPT_USERPWD, zs);
       curl_easy_setopt(curlh, CURLOPT_FOLLOWLOCATION,        1);
 

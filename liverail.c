@@ -29,8 +29,8 @@
 
 #include "misc.h"
 #include "db.h"
-#include "private.h"
 
+#include <libopenrailconfig.h>
 static void depsheet(void);
 static void display_choice(MYSQL_RES * result0, const time_t when);
 static void display_control_panel(const char * const location, const time_t when);
@@ -104,6 +104,13 @@ static char cache_val[CACHE_SIZE][128];
 
 int main(void)
 {
+   char config_buffer[1025];
+
+   FILE *cfg = fopen("/etc/openrail/openrail.cfg", "r");
+   fread(config_buffer, 1024, 1, cfg);
+   fclose(cfg);
+
+   parse_config(config_buffer);
    char zs[1024];
 
    now = time(NULL);
@@ -175,7 +182,7 @@ int main(void)
 
    // Initialise database
    //db_init(, debug?"rail_test":"rail");
-   db_init(DB_SERVER, DB_USER, DB_PASSWORD, "rail");
+   db_init(conf.db_server, conf.db_user, conf.db_pass, conf.db_name);
 
    sprintf(zs, "Parameters:  (l = %d)", l);
    _log(GENERAL, zs);
