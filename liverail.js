@@ -23,6 +23,7 @@ var refresh_tick = 3072; /* ms between ticks */
 //var refresh_tick = 400; /* Testing only */
 var refresh_period = 25; /* Number of ticks before refresh.  If not 25, css styles must be changed */
 var refresh_count = 0;
+var updating = 0;
 
 function search_onclick()
 {
@@ -87,6 +88,7 @@ function startup()
 {
    setInterval('ar()', refresh_tick);
    refresh_count = 0;
+   updating = 0;
    if(document.getElementById("ar").checked)
    {
       // Refresh has been enabled.
@@ -117,18 +119,27 @@ function ar()
       }
       else
       {
-         show_progress();
-         document.getElementById("ar").checked = false; /* So if reload takes longer than tick time we don't try again */
-         var url = document.URL;
-         if(url.substr(-2,2) != "/r") { url += "/r"; }
-         var url_parts = url.split('/');
-         if(url_parts[5] == "depsum")
+         if(!updating)
          {
-            // Smart update
-            smart_update(url);
+            show_progress();
+            updating = 1;
+            var url = document.URL;
+            if(url.substr(-2,2) != "/r") { url += "/r"; }
+            var url_parts = url.split('/');
+            if(url_parts[5] == "depsum")
+            {
+               // Smart update
+               smart_update(url);
+            }
+            else
+            {
+               window.location = url;
+            }
          }
-         else
+         else if(refresh_count > refresh_period * 2)
          {
+            // Update seems to have timed out.  Try again.
+            refresh_count = refresh_period;
             window.location = url;
          }
       }
@@ -175,7 +186,6 @@ function smart_update(url)
    }
    refresh_count = 0;
    show_progress();
-   document.getElementById("ar").checked = true;
 
    document.getElementById("bottom-line").innerHTML = results[index];
 }
