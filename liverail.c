@@ -51,7 +51,7 @@ static char * show_expected_time(const char * const scheduled, const word deviat
 
 
 #define NAME "Garner Live Rail"
-#define BUILD "UC25"
+#define BUILD "UC28"
 
 #define COLUMNS 4
 #define URL_BASE "/rail/liverail/"
@@ -102,6 +102,11 @@ static const char * days_runs[8] = {"runs_su", "runs_mo", "runs_tu", "runs_we", 
 static char cache_key[CACHE_SIZE][8];
 static char cache_val[CACHE_SIZE][128];
 
+// Depsheet output modes
+enum modes {FULL, SUMMARY, UPDATE, MOBILE};
+
+static word mobile_trains, mobile_time;
+
 int main(void)
 {
    char zs[1024];
@@ -113,24 +118,8 @@ int main(void)
    qword start_time = ha_clock.tv_sec;
    start_time = start_time * 1000 + ha_clock.tv_usec / 1000;
 
-   // Set up log
-   {
-      struct tm * broken = localtime(&now);
-      char logfile[128];
-
-      sprintf(logfile, "/tmp/liverail-%04d-%02d-%02d.log", broken->tm_year + 1900, broken->tm_mon + 1, broken->tm_mday);
-      _log_init(logfile, debug?2:0);
-   }
 
    char * parms = getenv("PARMS");
-   if(parms)
-   {
-      sprintf(zs, "PARMS = \"%s\"", parms);
-      _log(GENERAL, zs);
-   }
-   else
-      _log(GENERAL, "No PARMS provided!");
-
    // Parse parms
    word i, j, k, l;
    i = j = k = l = 0;
@@ -156,6 +145,22 @@ int main(void)
    debug = !strcasecmp(parameters[l], "debug");
    refresh = !strcasecmp(parameters[l], "r");
 
+   // Set up log
+   {
+      struct tm * broken = localtime(&now);
+      char logfile[128];
+
+      sprintf(logfile, "/tmp/liverail-%04d-%02d-%02d.log", broken->tm_year + 1900, broken->tm_mon + 1, broken->tm_mday);
+      _log_init(logfile, debug?2:0);
+   }
+
+   if(parms)
+   {
+      _log(GENERAL, "PARMS = \"%s\"", parms);
+   }
+   else
+      _log(GENERAL, "No PARMS provided!");
+
    if(refresh || debug) parameters[l][0] = '\0';
 
    printf("Content-Type: text/html; charset=iso-8859-1\n\n");
@@ -170,11 +175,7 @@ int main(void)
    // Initialise location name cache
    location_name(NULL, false);
 
-   // TEMPO
-   // debug = true;
-
    // Initialise database
-   //db_init(, debug?"rail_test":"rail");
    db_init(DB_SERVER, DB_USER, DB_PASSWORD, "rail");
 
    sprintf(zs, "Parameters:  (l = %d)", l);
@@ -188,6 +189,7 @@ int main(void)
    if(!parameters[0][0] || !strcasecmp(parameters[0], "depsheet")) depsheet();
    if(!strcasecmp(parameters[0], "depsum")) depsheet();
    if(!strcasecmp(parameters[0], "depsumu")) depsheet();
+   if(!strcasecmp(parameters[0], "depsumm")) depsheet();
    if(!strcasecmp(parameters[0], "as")) as();
    if(!strcasecmp(parameters[0], "train")) train();
    if(!strcasecmp(parameters[0], "train_text")) train_text();
@@ -257,7 +259,7 @@ static void display_control_panel(const char * const location, const time_t when
 
    printf("&nbsp;</td><td width=\"8%%\"></td><td class=\"control-panel-row\">&nbsp;Auto-refresh&nbsp;<input type=\"checkbox\" id=\"ar\" onclick=\"ar_onclick();\"%s>&nbsp;\n", refresh?" checked":"");
    
-   printf("</td><td id=\"progress\" class=\"control-panel-row\" width=\"1%%\" valign=\"top\">&nbsp;");
+   printf("</td><td id=\"progress\" class=\"control-panel-row\" style=\"display:none;\" width=\"1%%\" valign=\"top\">&nbsp;");
 
    printf("</td></tr></table>");
 }
@@ -266,7 +268,9 @@ static void display_control_panel(const char * const location, const time_t when
 static void depsheet(void)
 {
    word cif_schedule_count;
-   word huyton_special, summary, summaryu;
+   word huyton_special;
+   enum modes mode;
+
 
 #define MAX_TRAINS 2048
    struct train_details
@@ -291,6 +295,13 @@ static void depsheet(void)
    time_t when;
    char location[128];
    // Process parameters
+   // MODE
+   mode = FULL;
+   if(!strcasecmp(parameters[0], "depsum")) mode = SUMMARY;
+   else if(!strcasecmp(parameters[0], "depsumu")) mode = UPDATE;
+   else if(!strcasecmp(parameters[0], "depsumm")) mode = MOBILE;
+   _log(DEBUG, "Mode = %d", mode);
+
    // DATE
    {
       struct tm broken;
@@ -389,42 +400,36 @@ static void depsheet(void)
    
    struct tm broken = *localtime(&when);
 
-   // Differences for summary reports
-   if(!strcasecmp(parameters[0], "depsum"))
+   // Differences for different reports
+   switch(mode)
    {
-      summary = true;
+   case SUMMARY:
+   case UPDATE:
+   case MOBILE:
       if(huyton_special)
       {
          huyton_special = false;
          strcpy(location, "HUYTON");
       }
+      break;
+
+   case FULL:
+      break;
    }
-   else
+
+   // Additional parameters for mobile
+   if(mode ==MOBILE)
    {
-      summary = false;
+      // Time
+      mobile_time   = atoi(parameters[5]);
+      mobile_trains = atoi(parameters[6]);
    }
-   if(!strcasecmp(parameters[0], "depsumu"))
-   {
-      summaryu = true;
-      if(huyton_special)
-      {
-         huyton_special = false;
-         strcpy(location, "HUYTON");
-      }
-   }
-   else
-   {
-      summaryu = false;
-   }
-   
-   if(summaryu) 
-   {
-   }
-   else
+
+   if(mode == FULL || mode == SUMMARY)
    {
       display_control_panel(location, when);
       printf("<h2>");
-      if(summary) printf ("Departures from ");
+      if(mode == SUMMARY) printf ("Departures from ");
       else printf("Services at ");
       printf("%s on %s %02d/%02d/%02d</h2>", (huyton_special?"Huyton and Huyton Junction" : location_name(location, false)), days[broken.tm_wday % 7], broken.tm_mday, broken.tm_mon + 1, broken.tm_year % 100);
    }
@@ -466,7 +471,7 @@ static void depsheet(void)
    sprintf(zs, " OR   (((%s) AND (schedule_start_date <= %ld) AND (schedule_end_date >= %ld) AND (    next_day)) AND (sort_time <  %d)))", days_runs[day],  when + 12*60*60, when - 12*60*60, DAY_START);
    strcat(query, zs);
    
-   if(summary || summaryu)
+   if(mode == SUMMARY || mode == UPDATE || mode == MOBILE)
    {
       sprintf(zs, " AND (public_departure != '' OR departure != '') AND (train_status = 'P' OR train_status = 'B' OR train_status = '1' OR train_status = '5')");
       strcat(query, zs);
@@ -762,9 +767,12 @@ static void depsheet(void)
          }
       }
    }
-   
-   if(summary || summaryu)
+
+   switch(mode)
    {
+   case SUMMARY:
+   case UPDATE:
+   case MOBILE:
       cif_schedule_count = 0;
       for(index = 0; index < train_count; index++)
       {
@@ -773,18 +781,18 @@ static void depsheet(void)
             cif_schedule_count++;
          }
       }
-      report_train_summary(0, when, summaryu, cif_schedule_count);
+      report_train_summary(0, when, mode, cif_schedule_count);
       for(index = 0; index < train_count; index++)
       {
          if(trains[train_sequence[index]].valid)
          {
-            report_train_summary(trains[train_sequence[index]].cif_schedule_location_id, when, summaryu, cif_schedule_count);
+            report_train_summary(trains[train_sequence[index]].cif_schedule_location_id, when, mode, cif_schedule_count);
          }
       }
-      if(!summaryu) printf("</table>\n");
-   }
-   else
-   {
+      if(mode == SUMMARY) printf("</table>\n");
+      break;
+
+   case FULL:
       printf("<table>\n");
       printf("<tr class=\"small-table\"><th>Detail</th><th>Type</th><th>ID</th><th>CIF ID</th><th>Latest Live Data</th><th>P</th><th>Times WTT(Public)</th><th>From</th><th>To</th></tr>\n");
       cif_schedule_count = 0;
@@ -1020,28 +1028,25 @@ static void report_train(const dword cif_schedule_location_id, const time_t when
    return;
 }
 
-static void report_train_summary(const dword cif_schedule_location_id, const time_t when, const word summaryu, const word ntrains)
+static void report_train_summary(const dword cif_schedule_location_id, const time_t when, const word mode, const word ntrains)
 {
    MYSQL_RES * result0, * result1;
    MYSQL_ROW row0, row1;
 
    char query[1024];
-   static word trains, rows, train, row, bus;
+   static word trains, rows, train, row, bus, shown;
    static word nlate, ncape, nbus, ndeduced, narrival;
-   word vstp, status;
+   word vstp, status, mobile_sched, mobile_act;
    char actual[16], expected[16];
    word deviation, deduced, late;
    dword cif_schedule_id;
    word next_day, sort_time;
-   char train_details[256], depart[8], wtt_depart[8], destination[128], tiploc[16], analysis[64];
+   char train_details[256], depart[8], wtt_depart[8], destination[128], tiploc[16], analysis[64], mobile_analysis[32];
    struct tm * broken;
 
    deviation = late = status = bus = deduced = 0;
-   {
-      char zs[256];
-      sprintf(zs, "report_train_summary(%ld, %ld, %d)", cif_schedule_location_id, when, summaryu);
-      _log(DEBUG, zs);
-   }
+
+   _log(PROC, "report_train_summary(%ld, %ld, %d, %d)", cif_schedule_location_id, when, mode, ntrains);
 
    // Initialise
    if(cif_schedule_location_id == 0)
@@ -1050,13 +1055,13 @@ static void report_train_summary(const dword cif_schedule_location_id, const tim
       rows = (trains + COLUMNS - 1) / COLUMNS;
       if(rows < 20) rows = 20;
       train = row = 0;
-      nlate = ncape = nbus = ndeduced = narrival = 0;
+      nlate = ncape = nbus = ndeduced = narrival = shown = 0;
       broken = localtime(&when);
-      if(summaryu)
+      if(mode == UPDATE)
       {
          printf("%d%02d%s\n", trains, broken->tm_mday, BUILD);
       }
-      else
+      else if(mode == SUMMARY)
       {
          printf("\n<input type=\"hidden\" id=\"display_handle\" value=\"%d%02d%s\">", trains, broken->tm_mday, BUILD);
          printf("<table><tr>");
@@ -1067,12 +1072,12 @@ static void report_train_summary(const dword cif_schedule_location_id, const tim
    // Before print
    if(row && (!(row % rows)))
    {
-      if(!summaryu) printf("</table></td>\n");
+      if(mode == SUMMARY) printf("</table></td>\n");
    }
 
    if((!(row % rows)) && row < trains)
    {
-      if(!summaryu) printf("<td><table><tr class=\"summ-table-head\"><th>Train</th><th>Report</th></tr>\n");
+      if(mode == SUMMARY) printf("<td><table><tr class=\"summ-table-head\"><th>Train</th><th>Report</th></tr>\n");
    }
  
    // Find schedule id
@@ -1260,6 +1265,8 @@ static void report_train_summary(const dword cif_schedule_location_id, const tim
    }
 
    // Build analysis
+   mobile_sched = atoi(depart);
+   mobile_act = mobile_sched;
    char row_class[32];
    switch(status)
    {
@@ -1267,38 +1274,38 @@ static void report_train_summary(const dword cif_schedule_location_id, const tim
       if(bus) 
       {
          sprintf(analysis, "<td>(Bus)");
+         strcpy(mobile_analysis, "Bus");
          nbus++;
       }
       else 
       {
          sprintf(analysis, "<td>&nbsp"); 
+         strcpy(mobile_analysis, "");
       }
       strcpy(row_class, "summ-table-idle");
       break;
 
    case 1: // Activated
       sprintf(analysis, "<td>Activated");
+      strcpy(mobile_analysis, "");
       strcpy(row_class, "summ-table-act");
       break;
 
    case 2: // Moved
       strcpy(row_class, "summ-table-move");
       if(!deviation ) sprintf(analysis, "<td class=\"summ-table-good\">Exp. On time");
-#if 0
-      else if(deviation < 3) sprintf(analysis, "<td class=\"summ-table-good\">Exp. %s %d %s",  show_expected_time(expected, deviation, late), deviation, late?"late":"early");
-      else if(deviation < 6) sprintf(analysis, "<td class=\"summ-table-minor\">Exp. %s %d %s", show_expected_time(expected, deviation, late), deviation, late?"late":"early");
-      else                   sprintf(analysis, "<td class=\"summ-table-major\">Exp. %s %d %s", show_expected_time(expected, deviation, late), deviation, late?"late":"early");
-#else
       else if(deviation < 3) sprintf(analysis, "<td class=\"summ-table-good\">Exp. %s %d%s",  show_expected_time(expected, deviation, late), deviation, late?"L":"E");
       else if(deviation < 6) sprintf(analysis, "<td class=\"summ-table-minor\">Exp. %s %d%s", show_expected_time(expected, deviation, late), deviation, late?"L":"E");
       else                   sprintf(analysis, "<td class=\"summ-table-major\">Exp. %s %d%s", show_expected_time(expected, deviation, late), deviation, late?"L":"E");
-#endif
+      sprintf(mobile_analysis, "%d%s", deviation, late?"L":"E");
       if(deviation >= 3) nlate++;
+      mobile_act = 0; // TODO
       break;
 
    case 3: // Cape
       strcpy(row_class, "summ-table-cape");
       sprintf(analysis, "<td class=\"small-table-crit\">Cancelled");
+      strcpy(mobile_analysis, "");
       ncape++;
       break;
 
@@ -1306,16 +1313,12 @@ static void report_train_summary(const dword cif_schedule_location_id, const tim
    case 5: // Departed
       strcpy(row_class, "summ-table-gone");
       if(!deviation ) sprintf(analysis, "<td class=\"summ-table-good\">On time");
-#if 0
-      else if(deviation < 3) sprintf(analysis, "<td class=\"summ-table-good\">%s %d %s", show_trust_time_nocolon(actual, true), deviation, late?"late":"early");
-      else if(deviation < 6) sprintf(analysis, "<td class=\"summ-table-minor\">%s %d %s", show_trust_time_nocolon(actual, true), deviation, late?"late":"early");
-      else                   sprintf(analysis, "<td class=\"summ-table-major\">%s %d %s", show_trust_time_nocolon(actual, true), deviation, late?"late":"early");
-#else
       else if(deviation < 3) sprintf(analysis, "<td class=\"summ-table-good\">%s %d%s",  show_trust_time_nocolon(actual, true), deviation, late?"L":"E");
       else if(deviation < 6) sprintf(analysis, "<td class=\"summ-table-minor\">%s %d%s", show_trust_time_nocolon(actual, true), deviation, late?"L":"E");
       else                   sprintf(analysis, "<td class=\"summ-table-major\">%s %d%s", show_trust_time_nocolon(actual, true), deviation, late?"L":"E");
-#endif
+      sprintf(mobile_analysis, "%d%s", deviation, late?"L":"E");
       if(deviation >= 3) nlate++;
+      mobile_act = 0; // TODO
       break;
 
    }
@@ -1324,8 +1327,9 @@ static void report_train_summary(const dword cif_schedule_location_id, const tim
    if(status == 4) narrival++;
 
    // Print it
-   if(summaryu)
+   switch(mode)
    {
+   case UPDATE:
       printf("tr%d%d|%s|<td>%s</td>%s", row/rows, row%rows, row_class, train_details, analysis );
       if(deduced || status == 4)
       {
@@ -1335,9 +1339,9 @@ static void report_train_summary(const dword cif_schedule_location_id, const tim
          printf("</span>");
       }
       printf("</td>\n");
-   }
-   else
-   {
+      break;
+
+   case SUMMARY:
       printf("<tr id=\"tr%d%d\" class=\"%s\"><td>%s</td>%s", row/rows, row%rows, row_class, train_details, analysis);
       // Symbols
       if(deduced || status == 4)
@@ -1348,6 +1352,18 @@ static void report_train_summary(const dword cif_schedule_location_id, const tim
          printf("</span>");
       }
       printf("</td></tr>\n");
+      break;
+
+   case MOBILE:
+      if(shown < mobile_trains)
+      {
+         if(mobile_sched > mobile_time || mobile_act > mobile_time)
+         {
+            printf("%s %s|%d|%s|%ld\n", depart, destination, status, mobile_analysis, 0L);
+            shown++;
+         }
+      }
+      break;
    }
 
    // After print
@@ -1359,18 +1375,15 @@ static void report_train_summary(const dword cif_schedule_location_id, const tim
       // Last one printed, do the tail
       while((row++) % rows)
       {
-         if(summaryu)
-         {
-         }
-         else
+         if(mode == SUMMARY)
          {
             printf("<tr class=\"summ-table-idle\"><td>&nbsp;</td><td>&nbsp;</td></tr>\n");
          }
       }
-      if(!summaryu) printf("</table></td><td>");
+      if(mode == SUMMARY) printf("</table></td><td>");
       
       // Last column of outer table - Key
-      if(summaryu)
+      if(mode == UPDATE)
       {
          printf("tr49|summ-table-idle|<td>%d trains.</td>\n", trains - nbus);
          printf("tr410|summ-table-idle|<td%s>%d not on time.</td>\n", nlate?" class=\"summ-table-minor\"":"", nlate);
@@ -1379,7 +1392,7 @@ static void report_train_summary(const dword cif_schedule_location_id, const tim
          printf("tr413|summ-table-idle|<td>%d activation deduced.</td>\n", ndeduced);
          printf("tr414|summ-table-idle|<td>%d departure not reported.</td>\n", narrival);
       }
-      else
+      else if(mode == SUMMARY)
       {
          printf("<table>");
          printf("<tr class=\"summ-table-head\"><th>Key</th></tr>\n");
