@@ -590,13 +590,14 @@ static void depsheet(void)
                {
                   // Overlay
                   // We will come here with an overlay we already know about OR one which *doesn't come here*
-                  //printf("Examining details...");
+                  // In either case we invalidate this schedule.  If the overlay comes here it will already be in the list, somewhere.
+                  _log(DEBUG, "Examining overlay.");
                   dword overlay_id = atol(row0[0]);
-                  if(overlay_id > trains[index].cif_schedule_id || trains[index].cif_stp_indicator == 'N')
+                  if(overlay_id > trains[index].cif_schedule_id || trains[index].cif_stp_indicator == 'N' || trains[index].cif_stp_indicator == 'P')
                   {
-                     // ID is higher, so supercede
+                     // Supercede
                      trains[index].valid = false;
-                     //printf("<br>Step 3:  %d invalidated due to O id = %s", index, row0[0]);
+                     _log(DEBUG, "Step 3:  %d invalidated due to O id = %s", index, row0[0]);
                   }
                }
             }
