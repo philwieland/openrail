@@ -35,7 +35,7 @@ static void depsheet(void);
 static void display_choice(MYSQL_RES * result0, const time_t when);
 static void display_control_panel(const char * const location, const time_t when);
 static void report_train(const dword cif_schedule_location_id, const time_t when, const word huyton_special);
-static void report_train_summary(const dword cif_schedule_location_id, const time_t when, const word summaryu, const word ntrains);
+static void report_train_summary(const dword cif_schedule_location_id, const time_t when, const word ntrains);
 static void as(void);
 static char * show_date(const time_t time, const byte local);
 static void train(void);
@@ -51,7 +51,7 @@ static char * show_expected_time(const char * const scheduled, const word deviat
 
 
 #define NAME "Garner Live Rail"
-#define BUILD "UC28"
+#define BUILD "V102"
 
 #define COLUMNS 4
 #define URL_BASE "/rail/liverail/"
@@ -102,8 +102,8 @@ static const char * days_runs[8] = {"runs_su", "runs_mo", "runs_tu", "runs_we", 
 static char cache_key[CACHE_SIZE][8];
 static char cache_val[CACHE_SIZE][128];
 
-// Depsheet output modes
-enum modes {FULL, SUMMARY, UPDATE, MOBILE};
+// Display modes
+enum modes {FULL, SUMMARY, UPDATE, MOBILE, AS, TRAIN, TRAINT} mode ;
 
 static word mobile_trains, mobile_time;
 
@@ -163,15 +163,32 @@ int main(void)
 
    if(refresh || debug) parameters[l][0] = '\0';
 
-   printf("Content-Type: text/html; charset=iso-8859-1\n\n");
-   printf("<html xmlns=\"http://www.w3.org/1999/xhtml\" lang=\"en-US\" xml:lang=\"en-US\">\n");
-   printf("<head>\n");
-   printf("<title>%s %s</title>\n", NAME, BUILD);
-   printf("<link rel=\"stylesheet\" type=\"text/css\" href=\"/liverail.css\">\n");
-   printf("</head>\n");
-   printf("<body style=\"font-family: arial,sans-serif;\" onload=\"startup();\">\n");
-   printf("<script type=\"text/javascript\" src=\"/liverail.js\"></script>\n");
+   mode = FULL;
+   if(!strcasecmp(parameters[0], "depsheet")) mode = FULL;
+   else if(!strcasecmp(parameters[0], "depsum")) mode = SUMMARY;
+   else if(!strcasecmp(parameters[0], "depsumu")) mode = UPDATE;
+   else if(!strcasecmp(parameters[0], "depsumm")) mode = MOBILE;
+   else if(!strcasecmp(parameters[0], "as")) mode = AS;
+   else if(!strcasecmp(parameters[0], "train")) mode = TRAIN;
+   else if(!strcasecmp(parameters[0], "train_text")) mode = TRAINT;
+   _log(DEBUG, "Display mode  = %d", mode);
 
+   if(mode == FULL || mode == SUMMARY || mode == AS || mode == TRAIN || mode == TRAINT)
+   {
+      printf("Content-Type: text/html; charset=iso-8859-1\n\n");
+      printf("<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.01 Transitional//EN\" \"http://www.w3.org/TR/html4/loose.dtd\">\n");
+      printf("<html xmlns=\"http://www.w3.org/1999/xhtml\" lang=\"en\" xml:lang=\"en\">\n");
+      printf("<head>\n");
+      printf("<title>%s %s</title>\n", NAME, BUILD);
+      printf("<link rel=\"stylesheet\" type=\"text/css\" href=\"/liverail.css\">\n");
+      printf("</head>\n");
+      printf("<body style=\"font-family: arial,sans-serif;\" onload=\"startup();\">\n");
+      printf("<script type=\"text/javascript\" src=\"/liverail.js\"></script>\n");
+   }
+   else
+   {
+      printf("Content-Type: text/plain\n\n");
+   }
    // Initialise location name cache
    location_name(NULL, false);
 
@@ -186,23 +203,37 @@ int main(void)
       _log(GENERAL, zs);
    }
 
-   if(!parameters[0][0] || !strcasecmp(parameters[0], "depsheet")) depsheet();
-   if(!strcasecmp(parameters[0], "depsum")) depsheet();
-   if(!strcasecmp(parameters[0], "depsumu")) depsheet();
-   if(!strcasecmp(parameters[0], "depsumm")) depsheet();
-   if(!strcasecmp(parameters[0], "as")) as();
-   if(!strcasecmp(parameters[0], "train")) train();
-   if(!strcasecmp(parameters[0], "train_text")) train_text();
-
+   switch(mode)
    {
+   case FULL:
+   case SUMMARY:
+   case MOBILE:
+   case UPDATE:
+      depsheet();
+      break;
 
+   case AS:
+      as();
+      break;
+
+   case TRAIN:
+      train();
+      break;
+
+   case TRAINT:
+      train_text();
+      break;
+   }
+
+   if(mode == FULL || mode == SUMMARY || mode == UPDATE || mode == TRAIN || mode == TRAINT)
+   {
       char host[256];
       if(gethostname(host, sizeof(host))) host[0] = '\0';
       gettimeofday(&ha_clock, NULL);
       qword elapsed = ha_clock.tv_sec;
       elapsed = elapsed * 1000 + ha_clock.tv_usec / 1000;
       elapsed -= start_time;
-      if(!strcasecmp(parameters[0], "depsumu"))
+      if(mode == UPDATE)
       {
          printf("Report updated at %s by %s %s at %s.  Elapsed time %s ms.\n", time_text(time(NULL), 1), NAME, BUILD, host, commas_q(elapsed));
       }
@@ -235,14 +266,14 @@ static void display_control_panel(const char * const location, const time_t when
 {
    printf("<table><tr><td class=\"control-panel-row\">\n");
    
-   printf("&nbsp;Show trains at <input type=\"text\" id=\"search_loc\" size=32 maxlength=64 value=\"%s\" onkeydown=\"if(event.keyCode == 13) search_onclick(); else ar_off();\">\n", location);
+   printf("&nbsp;Show trains at <input type=\"text\" id=\"search_loc\" size=\"32\" maxlength=\"64\" value=\"%s\" onkeydown=\"if(event.keyCode == 13) search_onclick(); else ar_off();\">\n", location);
 
    struct tm * broken = localtime(&now);
    word d = broken->tm_mday;
    word m = broken->tm_mon;
    word y = broken->tm_year;
    broken = localtime(&when);
-   printf("on <input type=\"text\" id=\"search_date\" size=8 maxlength=8 value=\"");
+   printf("on <input type=\"text\" id=\"search_date\" size=\"8\" maxlength=\"8\" value=\"");
    if(!when || (d == broken->tm_mday && m == broken->tm_mon && y == broken->tm_year))
    {
    }
@@ -269,7 +300,6 @@ static void depsheet(void)
 {
    word cif_schedule_count;
    word huyton_special;
-   enum modes mode;
 
 
 #define MAX_TRAINS 2048
@@ -295,13 +325,6 @@ static void depsheet(void)
    time_t when;
    char location[128];
    // Process parameters
-   // MODE
-   mode = FULL;
-   if(!strcasecmp(parameters[0], "depsum")) mode = SUMMARY;
-   else if(!strcasecmp(parameters[0], "depsumu")) mode = UPDATE;
-   else if(!strcasecmp(parameters[0], "depsumm")) mode = MOBILE;
-   _log(DEBUG, "Mode = %d", mode);
-
    // DATE
    {
       struct tm broken;
@@ -413,7 +436,7 @@ static void depsheet(void)
       }
       break;
 
-   case FULL:
+   default:
       break;
    }
 
@@ -422,16 +445,23 @@ static void depsheet(void)
    {
       // Time
       mobile_time   = atoi(parameters[5]);
+      if(mobile_time < 400) mobile_time += 2400;
       mobile_trains = atoi(parameters[6]);
    }
 
-   if(mode == FULL || mode == SUMMARY)
+   switch(mode)
    {
+   case FULL:
+   case SUMMARY:
       display_control_panel(location, when);
       printf("<h2>");
       if(mode == SUMMARY) printf ("Departures from ");
       else printf("Services at ");
       printf("%s on %s %02d/%02d/%02d</h2>", (huyton_special?"Huyton and Huyton Junction" : location_name(location, false)), days[broken.tm_wday % 7], broken.tm_mday, broken.tm_mon + 1, broken.tm_year % 100);
+      break;
+
+   default:
+      break;
    }
    
    //                    0                          1                      2                             3         4
@@ -782,12 +812,12 @@ static void depsheet(void)
             cif_schedule_count++;
          }
       }
-      report_train_summary(0, when, mode, cif_schedule_count);
+      report_train_summary(0, when, cif_schedule_count);
       for(index = 0; index < train_count; index++)
       {
          if(trains[train_sequence[index]].valid)
          {
-            report_train_summary(trains[train_sequence[index]].cif_schedule_location_id, when, mode, cif_schedule_count);
+            report_train_summary(trains[train_sequence[index]].cif_schedule_location_id, when, cif_schedule_count);
          }
       }
       if(mode == SUMMARY) printf("</table>\n");
@@ -808,6 +838,10 @@ static void depsheet(void)
       }
       
       printf("</table>\n");
+      break;
+
+   default:
+      break;
    }
 }
 
@@ -1029,7 +1063,7 @@ static void report_train(const dword cif_schedule_location_id, const time_t when
    return;
 }
 
-static void report_train_summary(const dword cif_schedule_location_id, const time_t when, const word mode, const word ntrains)
+static void report_train_summary(const dword cif_schedule_location_id, const time_t when, const word ntrains)
 {
    MYSQL_RES * result0, * result1;
    MYSQL_ROW row0, row1;
@@ -1047,7 +1081,7 @@ static void report_train_summary(const dword cif_schedule_location_id, const tim
 
    deviation = late = status = bus = deduced = 0;
 
-   _log(PROC, "report_train_summary(%ld, %ld, %d, %d)", cif_schedule_location_id, when, mode, ntrains);
+   _log(PROC, "report_train_summary(%ld, %ld, %d)", cif_schedule_location_id, when, ntrains);
 
    // Initialise
    if(cif_schedule_location_id == 0)
@@ -1300,7 +1334,7 @@ static void report_train_summary(const dword cif_schedule_location_id, const tim
       else                   sprintf(analysis, "<td class=\"summ-table-major\">Exp. %s %d%s", show_expected_time(expected, deviation, late), deviation, late?"L":"E");
       sprintf(mobile_analysis, "%d%s", deviation, late?"L":"E");
       if(deviation >= 3) nlate++;
-      mobile_act = 0; // TODO
+      mobile_act = mobile_sched; // TODO
       break;
 
    case 3: // Cape
@@ -1319,13 +1353,19 @@ static void report_train_summary(const dword cif_schedule_location_id, const tim
       else                   sprintf(analysis, "<td class=\"summ-table-major\">%s %d%s", show_trust_time_nocolon(actual, true), deviation, late?"L":"E");
       sprintf(mobile_analysis, "%d%s", deviation, late?"L":"E");
       if(deviation >= 3) nlate++;
-      mobile_act = 0; // TODO
+      mobile_act = mobile_sched; // TODO
       break;
 
    }
 
    if(deduced) ndeduced++;
    if(status == 4) narrival++;
+
+   // Mung mobile times
+   if(mobile_sched < 400) mobile_sched += 2400;
+   if(mobile_act   < 400) mobile_act   += 2400;
+
+   _log(DEBUG, "Mobile times: sched %d, act %d, requested time = %d", mobile_sched, mobile_act, mobile_time);
 
    // Print it
    switch(mode)
@@ -1364,6 +1404,9 @@ static void report_train_summary(const dword cif_schedule_location_id, const tim
             shown++;
          }
       }
+      break;
+
+   default:
       break;
    }
 
@@ -1431,15 +1474,15 @@ static void as(void)
       // No parameters, display screen
       printf("<table><tr valign=\"top\"><td class=\"control-panel\">");
       printf("<h4>Go direct to schedule</h4>\n");
-      printf("Garner schedule ID <input type=\"text\" id=\"as-g-id\" size=10 maxlength=10 value=\"\" onkeydown=\"if(event.keyCode == 13) as_go_onclick();\">&nbsp; &nbsp\n");
+      printf("Garner schedule ID <input type=\"text\" id=\"as-g-id\" size=\"10\" maxlength=\"10\" value=\"\" onkeydown=\"if(event.keyCode == 13) as_go_onclick();\">&nbsp; &nbsp\n");
       printf("<br><button class=\"cp-button\" onclick=\"as_go_onclick();\">Go</button>\n");
 
       printf("</td><td width=\"10%%\">&nbsp;</td><td class=\"control-panel\">\n");
    
       printf("<h4>Advanced Search</h4>\n");
       printf("<table>");
-      printf("<tr><td>CIF UID</td><td><input type=\"text\" id=\"as-uid\" size=16 maxlength=64 value=\"\" onkeydown=\"if(event.keyCode == 13) as_search_onclick();\"></td><td></td></tr>\n");
-      printf("<tr><td>Headcode</td><td><input type=\"text\" id=\"as-head\" size=16 maxlength=64 value=\"\" onkeydown=\"if(event.keyCode == 13) as_search_onclick();\"></td><td></td></tr>\n");
+      printf("<tr><td>CIF UID</td><td><input type=\"text\" id=\"as-uid\" size=\"16\" maxlength=\"64\" value=\"\" onkeydown=\"if(event.keyCode == 13) as_search_onclick();\"></td><td></td></tr>\n");
+      printf("<tr><td>Headcode</td><td><input type=\"text\" id=\"as-head\" size=\"16\" maxlength=\"64\" value=\"\" onkeydown=\"if(event.keyCode == 13) as_search_onclick();\"></td><td></td></tr>\n");
       printf("</table>\n");
 
       printf("<br><button class=\"cp-button\" onclick=\"as_search_onclick();\">Search</button>\n");
@@ -1940,7 +1983,7 @@ static void train(void)
          printf("<td>Real Time Data For %s %02d/%02d/%02d</td>\n", days[broken->tm_wday % 7], broken->tm_mday, broken->tm_mon + 1, broken->tm_year % 100);
          printf("<td width = \"10%%\">&nbsp;</td>\n");
          printf("<td class=\"control-panel-row\"> Show real time data for date ");
-         printf("<input type=\"text\" id=\"train_date\" size=8 maxlength=8 value=\"\" onkeydown=\"if(event.keyCode == 13) train_date_onclick(); else ar_off();\">\n");
+         printf("<input type=\"text\" id=\"train_date\" size=\"8\" maxlength=\"8\" value=\"\" onkeydown=\"if(event.keyCode == 13) train_date_onclick(); else ar_off();\">\n");
          printf(" <button id=\"search\" class=\"cp-button\" onclick=\"train_date_onclick();\">Show</button> </td>\n");
          printf("</tr></table>\n");
          printf("<table>");
@@ -2013,8 +2056,8 @@ static void train(void)
       else
       {
          printf("<p>\n");
-         printf("<table><tr><td class=\"control-panel-row\"> Show live data for date ");
-         printf("<input type=\"text\" id=\"train_date\" size=8 maxlength=8 value=\"\" onkeydown=\"if(event.keyCode == 13) train_date_onclick(); else ar_off();\">\n");
+         printf("<table><tr><td class=\"control-panel-row\"> Show real time data for date ");
+         printf("<input type=\"text\" id=\"train_date\" size=\"8\" maxlength=\"8\" value=\"\" onkeydown=\"if(event.keyCode == 13) train_date_onclick(); else ar_off();\">\n");
          printf(" <button id=\"search\" class=\"cp-button\" onclick=\"train_date_onclick();\">Show</button> \n");
          printf("</td></tr></table>\n");
          printf("</p>\n");

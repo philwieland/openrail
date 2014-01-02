@@ -53,8 +53,13 @@ if [ "$1" = "all" -o "$1" = "sendreport" ]; then
 fi
 
 if [ "$1" = "all" -o "$1" = "dump-rail" ]; then
-    echo "Releasing dump-rail"
-    sudo cp dump-rail /usr/sbin/dump-rail 
+    if [ "$host" = "friedbread.liverpub.com" ]; then
+        echo "Releasing dump-rail for friedbread"
+        sudo cp dump-rail-fb /usr/sbin/dump-rail 
+    else
+        echo "Releasing dump-rail"
+        sudo cp dump-rail /usr/sbin/dump-rail 
+    fi
     DONE="dump-rail"
 fi
 

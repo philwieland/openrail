@@ -145,7 +145,7 @@ function ar()
          }
          else if(refresh_count > refresh_period * 2)
          {
-            // Update seems to have timed out.  Try again.
+            // Update seems to have timed out.  Try a reload.
             refresh_count = refresh_period;
             var url = document.URL;
             if(url.substr(-2,2) != "/r") { url += "/r"; }
@@ -173,16 +173,17 @@ function smart_update(url)
    req.send();
    var results = req.responseText.split("\n");
 
+   var index = 1; // Index of first train data line.
+
    // Check display handle
-   if(results.length < 8 || results[7] != document.getElementById('display_handle').value)
+   if(results.length < index || results[index-1] != document.getElementById('display_handle').value)
    {
-      // Fetch has failed or page layout has changed or date has changed.  Reload whole page.
+      // Fetch has failed or page layout has changed or date has changed or software version has changed.  Reload whole page from scratch.
       window.location = url;
       return;
    }
 
    // Process individual trains.
-   var index = 8;
    while(results.length > index && results[index].length > 2 && results[index].substr(0, 2) == 'tr')
    {
       var parts = results[index].split('|');
