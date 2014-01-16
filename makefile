@@ -57,7 +57,6 @@ install:
 .PHONY: install
 
 clean:
-		true
-#		rm  cifdb liverail.cgi corpusdb vstpdb trustdb service-report *.o lib/libopenrailconfig.a
+		rm -f cifdb liverail.cgi corpusdb vstpdb trustdb service-report *.o lib/libopenrailconfig.a
 
 

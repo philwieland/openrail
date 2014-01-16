@@ -99,162 +99,177 @@ int main(int argc, char *argv[])
 {
    char config_buffer[1025];
 
-   FILE *cfg = fopen("/etc/openrail/openrail.cfg", "r");
-   fread(config_buffer, 1024, 1, cfg);
-   fclose(cfg);
-
-   parse_config(config_buffer);
-   int lfp = 0;
-
-   // Determine debug mode
-   if(geteuid() == 0)
-   {
-      debug = false;
+   if ( argc != 2 ) /* argc should be two to ensure we have a filename */
+   { 
+     /* print the usage and exit */
+     printf("No config file passed.\n\n\tUsage: %s /path/to/config/file.conf\n\n", argv[0] );
    }
    else
    {
-      debug = true;
+     FILE *cfg = fopen(argv[1], "r");
+     fread(config_buffer, 1024, 1, cfg);
+     fclose(cfg);
+
+     parse_config(config_buffer);
+     int lfp = 0;
+
+     /* Determine debug mode
+     
+     We don't always want to run in production mode, so we
+     read the content of the debug config variable and act 
+     on it accordingly.
+     
+     If we do not have a variable set, we assume production 
+     mode */
+     if ( strcmp(conf.debug,"true") == 0  )
+     {
+       debug = 1;
+     }
+     else
+     {
+       debug = 0;
+     }
+
+     start_time = time(NULL);
+
+     // Set up log
+     _log_init(debug?"/tmp/vstpdb.log":"/var/log/garner/vstpdb.log", debug?1:0);
+
+     // Enable core dumps
+     struct rlimit limit;
+     if(!getrlimit(RLIMIT_CORE, &limit))
+     {
+        limit.rlim_cur = RLIM_INFINITY;
+        setrlimit(RLIMIT_CORE, &limit);
+     }
+
+     // DAEMONISE
+     if(debug != 1)
+     {
+        int i=fork();
+        if (i<0)
+        {
+           /* fork error */
+           _log(CRITICAL, "fork() error.  Aborting.");
+           exit(1);
+        }
+        if (i>0) exit(0); /* parent exits */
+        /* child (daemon) continues */
+        
+        pid_t sid = setsid(); /* obtain a new process group */   
+        if(sid < 0)
+        {
+           /* setsid error */
+           _log(CRITICAL, "setsid() error.  Aborting.");
+           exit(1);
+        }
+
+        for (i=getdtablesize(); i>=0; --i) close(i); /* close all descriptors */
+
+        umask(022); // Created files will be rw for root, r for all others
+
+        i = chdir("/var/run/");  
+        if(i < 0)
+        {
+           /* chdir error */
+           _log(CRITICAL, "chdir() error.  Aborting.");
+           exit(1);
+        }
+        
+        if((lfp = open("/var/run/vstpdb.pid", O_RDWR|O_CREAT, 0640)) < 0)
+        {
+           _log(CRITICAL, "Unable to open pid file \"/var/run/vstpdb.pid\".  Aborting.");
+           exit(1); /* can not open */
+        }
+           
+        if (lockf(lfp,F_TLOCK,0)<0)
+        {
+           _log(CRITICAL, "Failed to obtain lock.  Aborting.");
+           exit(1); /* can not lock */
+        }
+        
+        char str[128];
+        sprintf(str, "%d\n", getpid());
+        i = write(lfp, str, strlen(str)); /* record pid to lockfile */
+        
+        _log(GENERAL, "");
+        sprintf(zs, "%s %s", NAME, BUILD);
+        _log(GENERAL, zs);
+        _log(GENERAL, "Running as daemon.");
+     }
+     else
+     {
+        _log(GENERAL, "");
+        sprintf(zs, "%s %s", NAME, BUILD);
+        _log(GENERAL, zs);
+        _log(GENERAL, "Running in local mode.");
+     }
+     
+     // Check core dumps
+     if(prctl(PR_GET_DUMPABLE, 0, 0, 0, 0) != 1)
+     {
+        _log(MAJOR, "PR_GET_DUMPABLE not 1.");
+     }
+     else
+     {
+        _log(DEBUG, "PR_GET_DUMPABLE is 1.");
+     }
+     if(!getrlimit(RLIMIT_CORE, &limit))
+     {
+        if(limit.rlim_cur != RLIM_INFINITY)
+        {
+           _log(MAJOR, "RLIMIT_CORE not RLIM_INFINITY.");
+        }
+        else
+        {
+           _log(DEBUG, "RLIMIT_CORE is RLIM_INFINITY.");
+        }
+     }
+     else
+     {
+        _log(MAJOR, "Unable to determine RLIMIT_CORE.");
+     }
+
+     run = true;
+     interrupt = false;
+
+     if(signal(SIGTERM, termination_handler) == SIG_IGN) signal(SIGTERM, SIG_IGN);
+     if(signal(SIGINT,  termination_handler) == SIG_IGN) signal(SIGINT,  SIG_IGN);
+     if(signal(SIGHUP,  termination_handler) == SIG_IGN) signal(SIGHUP,  SIG_IGN);
+     if(!debug) signal(SIGCHLD,SIG_IGN); /* ignore child */
+     if(!debug) signal(SIGTSTP,SIG_IGN); /* ignore tty signals */
+     if(!debug) signal(SIGTTOU,SIG_IGN);
+     if(!debug) signal(SIGTTIN,SIG_IGN);
+
+     // Zero the stats
+     {
+        word i;
+        for(i=0; i < MAXstats; i++) 
+        {
+           stats[i] = 0;
+           grand_stats[i] = 0;
+        }
+     }
+
+     // Startup delay
+     if(!debug)
+     {
+        struct sysinfo info;
+        // If uptime query fails OR uptime is small, wait for system to stabilise.
+        if(sysinfo(&info) || info.uptime < 64)
+        {
+           _log(GENERAL, "Startup delay ...");
+           word i;
+           for(i = 0; i < 64 && run; i++) sleep(1);
+        }
+     }
+
+     perform();
+
+     if(lfp) close(lfp);
+
+     return 0;
    }
-
-   start_time = time(NULL);
-
-   // Set up log
-   _log_init(debug?"/tmp/vstpdb.log":"/var/log/garner/vstpdb.log", debug?1:0);
-
-   // Enable core dumps
-   struct rlimit limit;
-   if(!getrlimit(RLIMIT_CORE, &limit))
-   {
-      limit.rlim_cur = RLIM_INFINITY;
-      setrlimit(RLIMIT_CORE, &limit);
-   }
-
-   // DAEMONISE
-   if(!debug)
-   {
-      int i=fork();
-      if (i<0)
-      {
-         /* fork error */
-         _log(CRITICAL, "fork() error.  Aborting.");
-         exit(1);
-      }
-      if (i>0) exit(0); /* parent exits */
-      /* child (daemon) continues */
-      
-      pid_t sid = setsid(); /* obtain a new process group */   
-      if(sid < 0)
-      {
-         /* setsid error */
-         _log(CRITICAL, "setsid() error.  Aborting.");
-         exit(1);
-      }
-
-      for (i=getdtablesize(); i>=0; --i) close(i); /* close all descriptors */
-
-      umask(022); // Created files will be rw for root, r for all others
-
-      i = chdir("/var/run/");  
-      if(i < 0)
-      {
-         /* chdir error */
-         _log(CRITICAL, "chdir() error.  Aborting.");
-         exit(1);
-      }
-      
-      if((lfp = open("/var/run/vstpdb.pid", O_RDWR|O_CREAT, 0640)) < 0)
-      {
-         _log(CRITICAL, "Unable to open pid file \"/var/run/vstpdb.pid\".  Aborting.");
-         exit(1); /* can not open */
-      }
-         
-      if (lockf(lfp,F_TLOCK,0)<0)
-      {
-         _log(CRITICAL, "Failed to obtain lock.  Aborting.");
-         exit(1); /* can not lock */
-      }
-      
-      char str[128];
-      sprintf(str, "%d\n", getpid());
-      i = write(lfp, str, strlen(str)); /* record pid to lockfile */
-      
-      _log(GENERAL, "");
-      sprintf(zs, "%s %s", NAME, BUILD);
-      _log(GENERAL, zs);
-      _log(GENERAL, "Running as daemon.");
-   }
-   else
-   {
-      _log(GENERAL, "");
-      sprintf(zs, "%s %s", NAME, BUILD);
-      _log(GENERAL, zs);
-      _log(GENERAL, "Running in local mode.");
-   }
-   
-   // Check core dumps
-   if(prctl(PR_GET_DUMPABLE, 0, 0, 0, 0) != 1)
-   {
-      _log(MAJOR, "PR_GET_DUMPABLE not 1.");
-   }
-   else
-   {
-      _log(DEBUG, "PR_GET_DUMPABLE is 1.");
-   }
-   if(!getrlimit(RLIMIT_CORE, &limit))
-   {
-      if(limit.rlim_cur != RLIM_INFINITY)
-      {
-         _log(MAJOR, "RLIMIT_CORE not RLIM_INFINITY.");
-      }
-      else
-      {
-         _log(DEBUG, "RLIMIT_CORE is RLIM_INFINITY.");
-      }
-   }
-   else
-   {
-      _log(MAJOR, "Unable to determine RLIMIT_CORE.");
-   }
-
-   run = true;
-   interrupt = false;
-
-   if(signal(SIGTERM, termination_handler) == SIG_IGN) signal(SIGTERM, SIG_IGN);
-   if(signal(SIGINT,  termination_handler) == SIG_IGN) signal(SIGINT,  SIG_IGN);
-   if(signal(SIGHUP,  termination_handler) == SIG_IGN) signal(SIGHUP,  SIG_IGN);
-   if(!debug) signal(SIGCHLD,SIG_IGN); /* ignore child */
-   if(!debug) signal(SIGTSTP,SIG_IGN); /* ignore tty signals */
-   if(!debug) signal(SIGTTOU,SIG_IGN);
-   if(!debug) signal(SIGTTIN,SIG_IGN);
-
-   // Zero the stats
-   {
-      word i;
-      for(i=0; i < MAXstats; i++) 
-      {
-         stats[i] = 0;
-         grand_stats[i] = 0;
-      }
-   }
-
-   // Startup delay
-   if(!debug)
-   {
-      struct sysinfo info;
-      // If uptime query fails OR uptime is small, wait for system to stabilise.
-      if(sysinfo(&info) || info.uptime < 64)
-      {
-         _log(GENERAL, "Startup delay ...");
-         word i;
-         for(i = 0; i < 64 && run; i++) sleep(1);
-      }
-   }
-
-   perform();
-
-   if(lfp) close(lfp);
-
-   return 0;
 }
 
 static void perform(void)

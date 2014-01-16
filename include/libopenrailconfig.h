@@ -11,5 +11,6 @@ typedef struct Conf {
     char* db_user;
     char* nr_user;
     char* nr_pass;
+    char* debug;
 } conf_t;
 conf_t conf;

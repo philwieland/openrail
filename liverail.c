@@ -103,11 +103,18 @@ time_t start_time, done_main_query_time, done_analyse_time, done_analyse_sort_ti
 static char cache_key[CACHE_SIZE][8];
 static char cache_val[CACHE_SIZE][128];
 
-int main(void)
+int main(int argc, char *argv[] )
 {
    char config_buffer[1025];
 
-   FILE *cfg = fopen("/etc/openrail/openrail.cfg", "r");
+   if ( argc != 2 ) /* argc should be two to ensure we have a filename */
+   { 
+     /* print the usage and exit */
+     printf("No config file passed.\n\n\tUsage: %s /path/to/config/file.conf\n\n", argv[0] );
+   }
+   else
+   {
+   FILE *cfg = fopen(argv[1], "r");
    fread(config_buffer, 1024, 1, cfg);
    fclose(cfg);
 
@@ -212,6 +219,7 @@ int main(void)
       }
    }
    exit(0);
+   }
 }
 
 static void display_choice(MYSQL_RES * result0, const time_t when)

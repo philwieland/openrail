@@ -99,22 +99,36 @@ int main(int argc, char *argv[])
 
    char config_buffer[1025];
 
-   FILE *cfg = fopen("/etc/openrail/openrail.cfg", "r");
+   if ( argc != 2 ) /* argc should be two to ensure we have a filename */
+   { 
+     /* print the usage and exit */
+     printf("No config file passed.\n\n\tUsage: %s /path/to/config/file.conf\n\n", argv[0] );
+   }
+   else
+   {
+   FILE *cfg = fopen(argv[1], "r");
    fread(config_buffer, 1024, 1, cfg);
    fclose(cfg);
 
    parse_config(config_buffer);
    int lfp = 0;
 
-   // Determine debug mode
-   if(geteuid() == 0)
-   {
-      debug = false;
-   }
-   else
-   {
-      debug = true;
-   }
+     /* Determine debug mode
+     
+     We don't always want to run in production mode, so we
+     read the content of the debug config variable and act 
+     on it accordingly.
+     
+     If we do not have a variable set, we assume production 
+     mode */
+     if ( strcmp(conf.debug,"true") == 0  )
+     {
+       debug = 1;
+     }
+     else
+     {
+       debug = 0;
+     }
 
    // Set up log
    _log_init(debug?"/tmp/trustdb.log":"/var/log/garner/trustdb.log", debug?1:0);
@@ -130,7 +144,7 @@ int main(int argc, char *argv[])
    start_time  = time(NULL);
 
    // DAEMONISE
-   if(!debug)
+   if(debug != 1)
    {
       int i=fork();
       if (i<0)
@@ -253,6 +267,7 @@ int main(int argc, char *argv[])
    if(lfp) close(lfp);
 
    return 0;
+   }
 }
 
 static void perform(void)

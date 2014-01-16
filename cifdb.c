@@ -196,7 +196,14 @@ int main(int argc, char **argv)
 {
    char config_buffer[1025];
 
-   FILE *cfg = fopen("/etc/openrail/openrail.cfg", "r");
+   if ( argc < 2 ) /* argc should be two to ensure we have a filename */
+   { 
+     /* print the usage and exit */
+     printf("No config file passed.\n\n\tUsage: %s /path/to/config/file.conf\n\n", argv[0] );
+   }
+   else
+   {
+   FILE *cfg = fopen(argv[1], "r");
    fread(config_buffer, 1024, 1, cfg);
    fclose(cfg);
 
@@ -206,15 +213,22 @@ int main(int argc, char **argv)
    start_time = time(NULL);
    last_reported_time = start_time;
 
-   // Determine debug mode
-   if(geteuid() == 0)
-   {
-      debug = 0;
-   }
-   else
-   {
-      debug = 1;
-   }
+     /* Determine debug mode
+     
+     We don't always want to run in production mode, so we
+     read the content of the debug config variable and act 
+     on it accordingly.
+     
+     If we do not have a variable set, we assume production 
+     mode */
+     if ( strcmp(conf.debug,"true") == 0  )
+     {
+       debug = 1;
+     }
+     else
+     {
+       debug = 0;
+     }
 
    _log_init(debug?"/tmp/cifdb.log":"/var/log/garner/cifdb.log", debug?1:0);
 
@@ -222,10 +236,10 @@ int main(int argc, char **argv)
    sprintf(zs, "%s %s", NAME, BUILD);
    _log(GENERAL, zs);
 
-   if(debug)
+   if(debug == 1)
    {
       _log(GENERAL, "Debug mode selected.  Using TEST database.");
-      _log(GENERAL, "To use live database, run as root.");
+      _log(GENERAL, "To use live database, change the debug flag in the config file to 'false'");
    }
 
    // Enable core dumps
@@ -493,6 +507,7 @@ int main(int argc, char **argv)
 #endif
 
    exit(0);
+   }
 }
 
 static void process_object(const char * object_string)

@@ -53,7 +53,14 @@ int main(int argc, char **argv)
 {
    char config_buffer[1025];
 
-   FILE *cfg = fopen("/etc/openrail/openrail.cfg", "r");
+   if ( argc != 2 ) /* argc should be two to ensure we have a filename */
+   { 
+     /* print the usage and exit */
+     printf("No config file passed.\n\n\tUsage: %s /path/to/config/file.conf\n\n", argv[0] );
+   }
+   else
+   {
+   FILE *cfg = fopen(argv[1], "r");
    fread(config_buffer, 1024, 1, cfg);
    fclose(cfg);
 
@@ -92,6 +99,7 @@ int main(int argc, char **argv)
    report(argv[1], year, month);
 
    exit(0);
+   }
 }
 
 static void report(const char * const tiploc, const word year, const word month)

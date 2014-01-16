@@ -8,6 +8,7 @@ typedef struct Conf {
     char* db_user;
     char* nr_user;
     char* nr_pass;
+    char* debug;
 } conf_t;
 conf_t conf;
 
@@ -50,6 +51,8 @@ void parse_config(char *buf) {
             conf.nr_user = val_start;
         else if (strcmp(line_start, "nr_pass") == 0)
             conf.nr_pass = val_start;
+        else if (strcmp(line_start, "debug") == 0)
+            conf.debug = val_start;
 
         line_start = line_end+1;
     }
