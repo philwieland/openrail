@@ -3,7 +3,7 @@
 use strict;
 
 #
-my $build = 'UC10';
+my $build = 'V125';
 my $name = 'dump-rail';
 
 my $day_file_rotation = 4; ### Maximum 36
@@ -13,14 +13,29 @@ my $day_number = int(time() / (24 * 60 * 60));
 $day_number = int($day_number / $frequency);
 $day_number %= $day_file_rotation;
 
-my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = gmtime();
-my $filename = sprintf('/var/backup/rail-database-%d.sql.gz', $day_number);
-my $monthly_filename = sprintf('/var/backup/rail-database-monthly-%d-%02d.sql.gz', $year + 1900, $mon + 1);
+
+# Read config
+my ($conf_db_server, $conf_db_name, $conf_db_user, $conf_db_pass);
+
+open(CFG, $ARGV[0]) or die "Failed to read config file \"$ARGV[0]\"";
+while(<CFG>)
+{
+   chomp;
+   if($_ =~ m/^db_server:\s*(.*)$/) { $conf_db_server = $1; }
+   if($_ =~ m/^db_name:\s*(.*)$/) { $conf_db_name = $1; }
+   if($_ =~ m/^db_user:\s*(.*)$/) { $conf_db_user = $1; }
+   if($_ =~ m/^db_password:\s*(.*)$/) { $conf_db_pass = $1; }
+}
+
+
+my ($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = localtime();
+my $filename = sprintf('/var/backup/%s-database-%d.sql.gz', $conf_db_name, $day_number);
+my $monthly_filename = sprintf('/var/backup/%s-database-monthly-%d-%02d.sql.gz', $conf_db_name, $year + 1900, $mon + 1);
 
 print `date`;
 print $name, " build ", $build, " creating \"",$filename,"\"\n";
 
-print `/usr/bin/nice /usr/bin/mysqldump --single-transaction --quick -u xxxxxxx -pxxxxxxx rail | /usr/bin/nice gzip --best > $filename`;
+print `/usr/bin/nice /usr/bin/mysqldump --single-transaction --quick -h $conf_db_server -u $conf_db_user -p$conf_db_pass $conf_db_name | /usr/bin/nice gzip --best > $filename`;
 
 print `cp $filename $monthly_filename`;
 

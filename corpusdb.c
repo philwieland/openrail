@@ -30,10 +30,9 @@
 #include "jsmn.h"
 #include "misc.h"
 #include "db.h"
-#include "private.h"
 
 #define NAME  "corpusdb"
-#define BUILD "UB30"
+#define BUILD "V125"
 
 #define FILEPATH       "/tmp/corpusdb"
 #define FILEPATH_DEBUG "/tmp/corpusdb-debug"
@@ -70,8 +69,39 @@ const char const * create_table_corpus =
 
 dword count_locations, count_fns;
 
+
 int main(int argc, char **argv)
 {
+   int c;
+   word usage = true;
+   while ((c = getopt (argc, argv, "c:")) != -1)
+   {
+      switch (c)
+      {
+      case 'c':
+         if(load_config(optarg))
+         {
+            printf("Failed to read config file \"%s\".\n", optarg);
+            usage = true;
+         }
+         else
+         {
+            usage = false;
+         }
+         break;
+      case '?':
+      default:
+         usage = true;
+         break;
+      }
+   }
+
+   if(usage)
+   {
+      printf("No config file passed.\n\n\tUsage: %s -c /path/to/config/file.conf\n\n", argv[0] );
+      exit(1);
+   }
+
    char zs[1024];
 
    time_t start_time = time(NULL);
@@ -80,15 +110,22 @@ int main(int argc, char **argv)
 
    fp_result = NULL;
 
-   // Determine debug mode
-   if(geteuid() == 0)
-   {
-      debug = 0;
-   }
-   else
-   {
-      debug = 1;
-   }
+     /* Determine debug mode
+     
+     We don't always want to run in production mode, so we
+     read the content of the debug config variable and act 
+     on it accordingly.
+     
+     If we do not have a variable set, we assume production 
+     mode */
+     if ( strcmp(conf.debug,"true") == 0  )
+     {
+       debug = 1;
+     }
+     else
+     {
+       debug = 0;
+     }
 
    _log_init(debug?"/tmp/corpusdb.log":"/var/log/garner/corpusdb.log", debug?1:0);
 
@@ -96,10 +133,10 @@ int main(int argc, char **argv)
    sprintf(zs, "%s %s", NAME, BUILD);
    _log(GENERAL, zs);
 
-   if(debug)
+   if(debug == 1)
    {
       _log(GENERAL, "Debug mode selected.  Using TEST database.");
-      _log(GENERAL, "To use live database, run as root.");
+      _log(GENERAL, "To use live database, update the debug option in the config file to 'false'.");
 
       strcpy(filepath, FILEPATH_DEBUG);
    }
@@ -119,7 +156,7 @@ int main(int argc, char **argv)
    }
 
    // Initialise database
-   db_init(DB_SERVER, DB_USER, DB_PASSWORD, debug?"rail_test":"rail");
+   db_init(conf.db_server, conf.db_user, conf.db_pass, conf.db_name);
 
    if(!fetch_corpus() && !process_corpus() && !update_friendly_names())
    {
@@ -190,11 +227,11 @@ static word fetch_corpus(void)
       curl_easy_setopt(curlh, CURLOPT_CONNECTTIMEOUT,       64);
 
       // Debugging prints.
-      // curl_easy_setopt(curlh, CURLOPT_VERBOSE,               1);
+      //   curl_easy_setopt(curlh, CURLOPT_VERBOSE,               1);
 
       // URL and login
       curl_easy_setopt(curlh, CURLOPT_URL,     url);
-      sprintf(zs, "%s:%s", NATIONAL_RAIL_USERNAME, NATIONAL_RAIL_PASSWORD);
+      sprintf(zs, "%s:%s", conf.nr_user, conf.nr_pass);
       curl_easy_setopt(curlh, CURLOPT_USERPWD, zs);
       curl_easy_setopt(curlh, CURLOPT_FOLLOWLOCATION,        1);
 

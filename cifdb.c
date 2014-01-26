@@ -31,10 +31,9 @@
 #include "misc.h"
 #include "jsmn.h"
 #include "db.h"
-#include "private.h"
 
 #define NAME  "cifdb"
-#define BUILD "UC09"
+#define BUILD "V125"
 
 static void process_object(const char * object);
 static void process_timetable(const char * string, const jsmntok_t * tokens);
@@ -193,63 +192,28 @@ static const char * const create_table_cif_schedule_locations =
 
 int main(int argc, char **argv)
 {
-   char zs[1024];
-
-   start_time = time(NULL);
-   last_reported_time = start_time;
-
-   // Determine debug mode
-   if(geteuid() == 0)
-   {
-      debug = 0;
-   }
-   else
-   {
-      debug = 1;
-   }
-
-   _log_init(debug?"/tmp/cifdb.log":"/var/log/garner/cifdb.log", debug?1:0);
-
-   _log(GENERAL, "");
-   _log(GENERAL, "%s %s", NAME, BUILD);
-
-   if(debug)
-   {
-      _log(GENERAL, "Debug mode selected.  Using TEST database.");
-      _log(GENERAL, "To use live database, run as root.");
-   }
-
-   // Enable core dumps
-   struct rlimit limit;
-   if(!getrlimit(RLIMIT_CORE, &limit))
-   {
-      limit.rlim_cur = RLIM_INFINITY;
-      setrlimit(RLIMIT_CORE, &limit);
-   }
-
-   int i;
-   for(i = 0; i < MATCHES; i++)
-   {
-      if(regcomp(&match[i], match_strings[i], REG_ICASE + REG_EXTENDED))
-      {
-         sprintf(zs, "Failed to compile regex match %d", i);
-         _log(MAJOR, zs);
-      }
-   }
-
-   // Initialise database
-   db_init(DB_SERVER, DB_USER, DB_PASSWORD, debug?"rail_test":"rail");
-
    reset_db = false;
    opt_filename = NULL;
    opt_url = NULL;
    fetch_all = false;
    test_mode = false;
-   word usage = false;
+
+   word usage = true;
    int c;
-   while ((c = getopt (argc, argv, "u:f:atrh")) != -1)
+   while ((c = getopt (argc, argv, "c:u:f:atrh")) != -1)
       switch (c)
       {
+      case 'c':
+         if(load_config(optarg))
+         {
+            printf("Failed to read config file \"%s\".\n", optarg);
+            usage = true;
+         }
+         else
+         {
+            usage = false;
+         }
+         break;
       case 'u':
          if(!opt_filename) opt_url = optarg;
          break;
@@ -271,26 +235,81 @@ int main(int argc, char **argv)
       case '?':
       default:
          usage = true;
-         break;
+      break;
       }
 
    if(usage) 
    {
       printf(
-"Usage:\n"
-"Data source:\n"
-"default    Fetch latest update.\n"
-"-u <url>   Fetch from specified URL.\n"
-"-f <file>  Use specified file.  (Must already be decompressed.)\n"
-"-a         Fetch latest full timetable.\n"
-"Actions:\n"
-"default    Apply data to database.\n"
-"-t         Report datestamp on file, do not apply to database.\n"
-"-r         Reset database.  Do not process any data.\n"
+             "Usage:\n"
+             "-c <file>  Path to config file.\n"
+             "Data source:\n"
+             "default    Fetch latest update.\n"
+             "-u <url>   Fetch from specified URL.\n"
+             "-f <file>  Use specified file.  (Must already be decompressed.)\n"
+             "-a         Fetch latest full timetable.\n"
+             "Actions:\n"
+             "default    Apply data to database.\n"
+             "-t         Report datestamp on file, do not apply to database.\n"
+             "-r         Reset database.  Do not process any data.\n"
              );
-      exit(0);
+      exit(1);
    }
 
+   char zs[1024];
+
+   start_time = time(NULL);
+   last_reported_time = start_time;
+
+   /* Determine debug mode
+     
+      We don't always want to run in production mode, so we
+      read the content of the debug config variable and act 
+      on it accordingly.
+     
+      If we do not have a variable set, we assume production 
+      mode */
+   if ( strcmp(conf.debug,"true") == 0  )
+   {
+      debug = 1;
+   }
+   else
+   {
+      debug = 0;
+   }
+   
+   _log_init(debug?"/tmp/cifdb.log":"/var/log/garner/cifdb.log", debug?1:0);
+   
+   _log(GENERAL, "");
+   _log(GENERAL, "%s %s", NAME, BUILD);
+   
+   if(debug == 1)
+   {
+      _log(GENERAL, "Debug mode selected.  Using TEST database.");
+      _log(GENERAL, "To use live database, change the debug flag in the config file to 'false'");
+   }
+   
+   // Enable core dumps
+   struct rlimit limit;
+   if(!getrlimit(RLIMIT_CORE, &limit))
+   {
+      limit.rlim_cur = RLIM_INFINITY;
+      setrlimit(RLIMIT_CORE, &limit);
+   }
+   
+   int i;
+   for(i = 0; i < MATCHES; i++)
+   {
+      if(regcomp(&match[i], match_strings[i], REG_ICASE + REG_EXTENDED))
+      {
+         sprintf(zs, "Failed to compile regex match %d", i);
+         _log(MAJOR, zs);
+      }
+   }
+   
+   // Initialise database
+   if(db_init(conf.db_server, conf.db_user, conf.db_pass, conf.db_name)) exit(1);
+   
    if(reset_db) 
    {
       reset_database();
@@ -442,46 +461,7 @@ int main(int argc, char **argv)
    _log(GENERAL, zs);
    strcat(report, zs); strcat(report, "\n");
 
-#if 0
-   sprintf(zs, "Schedule purged          : %s", commas(count_purge_sched));
-   _log(GENERAL, zs);
-   strcat(report, zs); strcat(report, "\n");
-
-   sprintf(zs, "Schedule location purged : %s", commas(count_purge_sched_loc));
-   _log(GENERAL, zs);
-   strcat(report, zs); strcat(report, "\n");
-
-   sprintf(zs, "Association purged       : %s", commas(count_purge_assoc));
-   _log(GENERAL, zs);
-   strcat(report, zs); strcat(report, "\n");
-#endif
-
    email_alert(NAME, BUILD, "Timetable Update Report", report);
-
-#if 0
-   if(!test_mode)
-   {
-      char filename[256];
-      time_t now = time(NULL);
-      struct tm * broken = gmtime(&now);
-      
-      sprintf(filename, "/tmp/%s-database-%04d-%02d-%02d-%02d-%02d-%02dZ.sql", (debug?"rail_test":"rail"), 
-              broken->tm_year + 1900,
-              broken->tm_mon + 1, 
-              broken->tm_mday,
-              broken->tm_hour,
-              broken->tm_min,
-              broken->tm_sec
-              );
-      sprintf(zs, "Dumping copy of database to \"%s\"", filename);
-      _log(GENERAL, zs);
-      sprintf(zs, "/usr/bin/mysqldump --single-transaction --quick -u garnerd -pRA31GAkvpn %s > %s", (debug?"rail_test":"rail"), filename);
-      if(system(zs))
-      {
-      }
-      _log(GENERAL, "Dump completed.");
-   }
-#endif
 
    exit(0);
 }
@@ -1138,7 +1118,7 @@ static word fetch_file(void)
 
       // URL and login
       curl_easy_setopt(curlh, CURLOPT_URL,     url);
-      sprintf(zs, "%s:%s", NATIONAL_RAIL_USERNAME, NATIONAL_RAIL_PASSWORD);
+      sprintf(zs, "%s:%s", conf.nr_user, conf.nr_pass);
       curl_easy_setopt(curlh, CURLOPT_USERPWD, zs);
       curl_easy_setopt(curlh, CURLOPT_FOLLOWLOCATION,        1);
 

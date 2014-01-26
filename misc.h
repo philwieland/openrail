@@ -26,16 +26,25 @@ typedef unsigned long long qword;
 typedef unsigned long      dword;
 typedef unsigned short     word;
 typedef unsigned char      byte;
+typedef struct Conf {
+    char* db_server;
+    char* db_pass;
+    char* db_name;
+    char* db_user;
+    char* nr_user;
+    char* nr_pass;
+    char* debug;
+} conf_t;
+extern conf_t conf;
 
 #define false 0
 #define true ~0
+enum log_types {GENERAL, PROC, DEBUG, MINOR, MAJOR, CRITICAL};
 
 extern char * time_text(const time_t time, const byte local);
 extern char * date_text(const time_t time, const byte local);
 extern time_t parse_datestamp(const char * string);
 extern time_t parse_timestamp(const char * string);
-
-enum log_types {GENERAL, PROC, DEBUG, MINOR, MAJOR, CRITICAL};
 extern void _log(const byte level, const char * text, ...);
 extern void _log_init(const char * log_file, const word debug);
 extern char * commas(const dword n);
@@ -45,5 +54,6 @@ extern word email_alert(const char * const name, const char * const build, const
 extern char * abbreviated_host_id(void);
 extern char * show_time(const char * const input);
 extern char * show_time_text(const char * const input);
+extern int load_config(const char * const filepath);
 
 #endif

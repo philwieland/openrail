@@ -22,7 +22,7 @@ PATH=/sbin:/usr/sbin:/bin:/usr/bin
 DESC="vstpdb"
 NAME=vstpdb
 DAEMON=/usr/sbin/$NAME
-DAEMON_ARGS=""
+DAEMON_ARGS="-c /etc/openrail.conf"
 PIDFILE=/var/run/$NAME.pid
 SCRIPTNAME=/etc/init.d/$NAME
 

@@ -37,10 +37,9 @@
 #include "jsmn.h"
 #include "misc.h"
 #include "db.h"
-#include "private.h"
 
 #define NAME  "vstpdb"
-#define BUILD "UC25"
+#define BUILD "V125"
 
 static void perform(void);
 static void process_message(const char * body);
@@ -97,18 +96,55 @@ void termination_handler(int signum)
 
 int main(int argc, char *argv[])
 {
+   int c;
+   word usage = true;
+   while ((c = getopt (argc, argv, "c:")) != -1)
+   {
+      switch (c)
+      {
+      case 'c':
+         if(load_config(optarg))
+         {
+            printf("Failed to read config file \"%s\".\n", optarg);
+            usage = true;
+         }
+         else
+         {
+            usage = false;
+         }
+         break;
+      case '?':
+      default:
+         usage = true;
+         break;
+      }
+   }
+
+   if(usage)
+   {
+      printf("No config file passed.\n\n\tUsage: %s -c /path/to/config/file.conf\n\n", argv[0] );
+      exit(1);
+   }
+
    int lfp = 0;
 
-   // Determine debug mode
-   if(geteuid() == 0)
+   /* Determine debug mode
+     
+      We don't always want to run in production mode, so we
+      read the content of the debug config variable and act 
+      on it accordingly.
+     
+      If we do not have a variable set, we assume production 
+      mode */
+   if ( strcmp(conf.debug,"true") == 0  )
    {
-      debug = false;
+      debug = 1;
    }
    else
    {
-      debug = true;
+      debug = 0;
    }
-
+   
    start_time = time(NULL);
 
    // Set up log
@@ -123,7 +159,7 @@ int main(int argc, char *argv[])
    }
 
    // DAEMONISE
-   if(!debug)
+   if(debug != 1)
    {
       int i=fork();
       if (i<0)
@@ -134,7 +170,7 @@ int main(int argc, char *argv[])
       }
       if (i>0) exit(0); /* parent exits */
       /* child (daemon) continues */
-      
+        
       pid_t sid = setsid(); /* obtain a new process group */   
       if(sid < 0)
       {
@@ -154,19 +190,19 @@ int main(int argc, char *argv[])
          _log(CRITICAL, "chdir() error.  Aborting.");
          exit(1);
       }
-      
+        
       if((lfp = open("/var/run/vstpdb.pid", O_RDWR|O_CREAT, 0640)) < 0)
       {
          _log(CRITICAL, "Unable to open pid file \"/var/run/vstpdb.pid\".  Aborting.");
          exit(1); /* can not open */
       }
-         
+           
       if (lockf(lfp,F_TLOCK,0)<0)
       {
          _log(CRITICAL, "Failed to obtain lock.  Aborting.");
          exit(1); /* can not lock */
       }
-      
+        
       char str[128];
       sprintf(str, "%d\n", getpid());
       i = write(lfp, str, strlen(str)); /* record pid to lockfile */
@@ -183,7 +219,7 @@ int main(int argc, char *argv[])
       _log(GENERAL, zs);
       _log(GENERAL, "Running in local mode.");
    }
-   
+     
    // Check core dumps
    if(prctl(PR_GET_DUMPABLE, 0, 0, 0, 0) != 1)
    {
@@ -258,7 +294,7 @@ static void perform(void)
    last_report = time(NULL) / REPORT_INTERVAL;
 
    // Initialise database
-   db_init(DB_SERVER, DB_USER, DB_PASSWORD, debug?"rail_test":"rail");
+   db_init(conf.db_server, conf.db_user, conf.db_pass, conf.db_name);
 
    log_message("");
    log_message("");
@@ -280,18 +316,18 @@ static void perform(void)
          {
             strcpy(headers, "CONNECT\n");
             strcat(headers, "login:");
-            strcat(headers, NATIONAL_RAIL_USERNAME);  
+            strcat(headers, conf.nr_user);  
             strcat(headers, "\npasscode:");
-            strcat(headers, NATIONAL_RAIL_PASSWORD);
+            strcat(headers, conf.nr_pass);
             strcat(headers, "\n");          
             if(debug)
             {
-               sprintf(zs, "client-id:%s-vstpdb-debug\n", NATIONAL_RAIL_USERNAME);
+               sprintf(zs, "client-id:%s-vstpdb-debug\n", conf.nr_user);
                strcat(headers, zs);
             }
             else
             {
-               sprintf(zs, "client-id:%s-vstpdb-%s\n", NATIONAL_RAIL_USERNAME, abbreviated_host_id());
+               sprintf(zs, "client-id:%s-vstpdb-%s\n", conf.nr_user, abbreviated_host_id());
                strcat(headers, zs);
             }          
             strcat(headers, "heart-beat:0,20000\n");          
@@ -325,12 +361,12 @@ static void perform(void)
                   strcat(headers, "destination:/topic/VSTP_ALL\n");      
                   if(debug)
                   {
-                     sprintf(zs, "activemq.subscriptionName:%s-vstpdb-debug\n", NATIONAL_RAIL_USERNAME);
+                     sprintf(zs, "activemq.subscriptionName:%s-vstpdb-debug\n", conf.nr_user);
                      strcat(headers, zs);
                   }
                   else
                   {
-                     sprintf(zs, "activemq.subscriptionName:%s-vstpdb-%s\n", NATIONAL_RAIL_USERNAME, abbreviated_host_id());
+                     sprintf(zs, "activemq.subscriptionName:%s-vstpdb-%s\n", conf.nr_user, abbreviated_host_id());
                      strcat(headers, zs);
                   }
                   strcat(headers, "id:1\n");      

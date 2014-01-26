@@ -40,7 +40,9 @@ word db_init(const char * const s, const char * const u, const char * const p, c
    strcpy(password, p);
    strcpy(database, d);
    mysql_object = 0;
-   return 0;
+
+   // Test if database is there
+   return db_connect();
 }
 
 word db_query(const char * const query)

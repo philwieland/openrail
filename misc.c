@@ -30,6 +30,9 @@
 static char log_file[512];
 static word debug;
 
+/* Public data */
+conf_t conf;
+
 char * time_text(const time_t time, const byte local)
 {
    struct tm * broken;
@@ -362,3 +365,63 @@ char * show_time_text(const char * const input)
    return output;
 }
 
+int load_config(const char * const filepath)
+{
+    char *line_start, *val_start, *val_end, *line_end, *ic;
+    static char buf[1025];
+
+    FILE *cfg;
+    if((cfg = fopen(filepath, "r")))
+    {
+       size_t z = fread(buf, 1, 1024, cfg);
+       fclose(cfg);
+       if(z < 1) return 2;
+    }
+    else
+       return 1;
+
+    buf[1024] = 0;
+
+    conf.db_server = conf.db_name = conf.db_user = conf.db_pass = conf.nr_user = conf.nr_pass = conf.debug = &buf[1024];
+
+    line_start=buf;
+    while(1) {
+        ic = strchr(line_start, ':');
+        line_end = strchr(line_start, '\n');
+
+        // config is finished
+        if (line_end == NULL || ic == NULL)
+            return 0;
+
+        val_start = ic;
+        val_end = line_end;
+        while (*(--ic) == ' ');
+        *(++ic) = 0;
+        while (*(++val_start) == ' ');
+        while (*(--val_end) == ' ');
+        *(++val_end) = 0;
+
+        if (*val_start == '"' && *(val_end-1) == '"') {
+            val_start++;
+            val_end--;
+            *val_end=0;
+        }
+
+        if (strcmp(line_start, "db_server") == 0)
+            conf.db_server = val_start;
+        else if (strcmp(line_start, "db_name") == 0)
+            conf.db_name = val_start;
+        else if (strcmp(line_start, "db_user") == 0)
+            conf.db_user = val_start;
+        else if (strcmp(line_start, "db_password") == 0)
+            conf.db_pass = val_start;
+        else if (strcmp(line_start, "nr_user") == 0)
+            conf.nr_user = val_start;
+        else if (strcmp(line_start, "nr_password") == 0)
+            conf.nr_pass = val_start;
+        else if (strcmp(line_start, "debug") == 0)
+            conf.debug = val_start;
+
+        line_start = line_end+1;
+    }
+}

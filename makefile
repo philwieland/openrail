@@ -1,8 +1,6 @@
+CC=gcc -c -g -O2 -Wall -I/usr/include/mysql -DBIG_JOINS=1 -D_GNU_SOURCE -D_FILE_OFFSET_BITS=64 -fno-strict-aliasing -DUNIV_LINUX -I./include
 
-CC=gcc -c -g -O2 -Wall -I/usr/include/mysql -DBIG_JOINS=1 -D_GNU_SOURCE -D_FILE_OFFSET_BITS=64 -fno-strict-aliasing -DUNIV_LINUX
-
-
-all:            cifdb corpusdb vstpdb trustdb liverail.cgi service-report
+all:            cifdb corpusdb vstpdb trustdb liverail.cgi service-report 
 
 jsmn.o:		jsmn.c jsmn.h misc.h
 
@@ -12,48 +10,49 @@ db.o:           db.c misc.h db.h
 
 misc.o:         misc.c misc.h
 
-cifdb:          cifdb.o jsmn.o misc.o db.o
-		gcc -g -O2 cifdb.o jsmn.o misc.o db.o -lmysqlclient -lcurl -o cifdb
+cifdb:          cifdb.o jsmn.o misc.o db.o 
+		gcc -g -O2 -I./include -L./lib cifdb.o jsmn.o misc.o db.o -lmysqlclient -lcurl -o cifdb
 
-cifdb.o:	cifdb.c jsmn.h misc.h db.h private.h
+cifdb.o:	cifdb.c jsmn.h misc.h db.h
 
-liverail.cgi:	liverail.o misc.o db.o
-		gcc -g -O2 liverail.o misc.o db.o -lmysqlclient -o liverail.cgi
+liverail.cgi:	liverail.o misc.o db.o 
+		gcc -g -O2 -I./include -L./lib liverail.o misc.o db.o -lmysqlclient -o liverail.cgi 
 
-liverail.o:	liverail.c db.h misc.h private.h
+liverail.o:	liverail.c db.h misc.h
 
-#timetable.cgi:	timetable.o misc.o db.o
-#		gcc -g -O2 timetable.o misc.o db.o -lmysqlclient -o timetable.cgi
+corpusdb:       corpusdb.o jsmn.o misc.o db.o 
+		gcc -g -O2 -L./lib -I./include corpusdb.o jsmn.o misc.o db.o -lcurl -lmysqlclient -o corpusdb 
 
-#timetable.o:	timetable.c db.h misc.h
+corpusdb.o:     corpusdb.c misc.h db.h
 
-#timetable_live.cgi:	timetable_live.o misc.o db.o
-#			gcc -g -O2 timetable_live.o misc.o db.o -lmysqlclient -o timetable_live.cgi
+vstpdb:         vstpdb.o jsmn.o stomp.o misc.o db.o 
+		gcc -g -O2 -L./lib -I./include vstpdb.o jsmn.o stomp.o misc.o db.o -lmysqlclient -o vstpdb 
 
-#timetable_live.o:	timetable.c db.h misc.h
-#			gcc -c -g -O2 -Wall -I/usr/include/mysql -DTIMETABLE_LIVE -DBIG_JOINS=1 -D_GNU_SOURCE -D_FILE_OFFSET_BITS=64 -fno-strict-aliasing -DUNIV_LINUX timetable.c -o timetable_live.o
+vstpdb.o:       vstpdb.c jsmn.h stomp.h misc.h db.h
 
-corpusdb:       corpusdb.o jsmn.o misc.o db.o
-		gcc -g -O2 corpusdb.o jsmn.o misc.o db.o -lcurl -lmysqlclient -o corpusdb
+trustdb:        trustdb.o jsmn.o stomp.o misc.o db.o 
+		gcc -g -O2 -L./lib -I./include trustdb.o jsmn.o stomp.o misc.o db.o -lmysqlclient -o trustdb 
 
-corpusdb.o:     corpusdb.c misc.h db.h private.h
+trustdb.o:      trustdb.c jsmn.h stomp.h misc.h db.h
 
-vstpdb:         vstpdb.o jsmn.o stomp.o misc.o db.o
-		gcc -g -O2 vstpdb.o jsmn.o stomp.o misc.o db.o -lmysqlclient -o vstpdb
+service-report: service-report.o misc.o db.o 
+		gcc -g -O2 -L./lib -I./include service-report.o misc.o db.o -lmysqlclient -o service-report
 
-vstpdb.o:       vstpdb.c jsmn.h stomp.h misc.h db.h private.h
+service-report.o: service-report.c misc.h db.h
 
-trustdb:        trustdb.o jsmn.o stomp.o misc.o db.o
-		gcc -g -O2 trustdb.o jsmn.o stomp.o misc.o db.o -lmysqlclient -o trustdb
+install:
+		mkdir -p $(DESTDIR)$(prefix)/lib/cgi-bin
+		install -m 0755 cifdb $(DESTDIR)$(prefix)/sbin
+		install -m 0755 trustdb $(DESTDIR)$(prefix)/sbin
+		install -m 0755 vstpdb $(DESTDIR)$(prefix)/sbin
+		install -m 0755 corpusdb $(DESTDIR)$(prefix)/sbin
+		install -m 0755 liverail.cgi $(DESTDIR)$(prefix)/lib/cgi-bin
+		install -m 0644 liverail.css $(DESTDIR)/var/www
+		install -m 0644 liverail.js $(DESTDIR)/var/www
 
-trustdb.o:      trustdb.c jsmn.h stomp.h misc.h db.h private.h
-
-service-report: service-report.o misc.o db.o
-		gcc -g -O2 service-report.o misc.o db.o -lmysqlclient -o service-report
-
-service-report.o: service-report.c misc.h db.h private.h
+.PHONY: install
 
 clean:
-		rm  cifdb liverail.cgi corpusdb vstpdb trustdb service-report *.o
+		rm -f cifdb liverail.cgi corpusdb vstpdb trustdb service-report *.o 
 
 

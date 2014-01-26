@@ -29,7 +29,6 @@
 
 #include "misc.h"
 #include "db.h"
-#include "private.h"
 
 static void depsheet(void);
 static void display_choice(MYSQL_RES * result0, const time_t when);
@@ -51,7 +50,7 @@ static char * show_expected_time(const char * const scheduled, const word deviat
 
 
 #define NAME "Garner Live Rail"
-#define BUILD "V102"
+#define BUILD "V125"
 
 #define COLUMNS 4
 #define URL_BASE "/rail/liverail/"
@@ -102,12 +101,13 @@ static const char * days_runs[8] = {"runs_su", "runs_mo", "runs_tu", "runs_we", 
 static char cache_key[CACHE_SIZE][8];
 static char cache_val[CACHE_SIZE][128];
 
+
 // Display modes
 enum modes {FULL, SUMMARY, UPDATE, MOBILE, AS, TRAIN, TRAINT} mode ;
 
 static word mobile_trains, mobile_time;
 
-int main(void)
+int main()
 {
    char zs[1024];
 
@@ -144,6 +144,12 @@ int main(void)
 
    debug = !strcasecmp(parameters[l], "debug");
    refresh = !strcasecmp(parameters[l], "r");
+
+   if(load_config("/etc/openrail.conf"))
+   {
+      printf("Failed to load config.\n");
+      exit(1);
+   }
 
    // Set up log
    {
@@ -193,7 +199,7 @@ int main(void)
    location_name(NULL, false);
 
    // Initialise database
-   db_init(DB_SERVER, DB_USER, DB_PASSWORD, "rail");
+   db_init(conf.db_server, conf.db_user, conf.db_pass, conf.db_name);
 
    sprintf(zs, "Parameters:  (l = %d)", l);
    _log(GENERAL, zs);

@@ -37,10 +37,9 @@
 #include "jsmn.h"
 #include "misc.h"
 #include "db.h"
-#include "private.h"
 
 #define NAME  "trustdb"
-#define BUILD "UC25"
+#define BUILD "V125"
 
 static void perform(void);
 static void process_message(const char * const body);
@@ -96,20 +95,69 @@ void termination_handler(int signum)
 
 int main(int argc, char *argv[])
 {
+
+   int c;
+   word usage = true;
+   while ((c = getopt (argc, argv, "c:")) != -1)
+   {
+      switch (c)
+      {
+      case 'c':
+         if(load_config(optarg))
+         {
+            printf("Failed to read config file \"%s\".\n", optarg);
+            usage = true;
+         }
+         else
+         {
+            usage = false;
+         }
+         break;
+      case '?':
+      default:
+         usage = true;
+         break;
+      }
+   }
+
+   if(usage)
+   {
+      printf("No config file passed.\n\n\tUsage: %s -c /path/to/config/file.conf\n\n", argv[0] );
+      exit(1);
+   }
+
    int lfp = 0;
 
-   // Determine debug mode
-   if(geteuid() == 0)
-   {
-      debug = false;
-   }
-   else
-   {
-      debug = true;
-   }
+     /* Determine debug mode
+     
+     We don't always want to run in production mode, so we
+     read the content of the debug config variable and act 
+     on it accordingly.
+     
+     If we do not have a variable set, we assume production 
+     mode */
+     if ( strcmp(conf.debug,"true") == 0  )
+     {
+       debug = 1;
+     }
+     else
+     {
+       debug = 0;
+     }
 
    // Set up log
    _log_init(debug?"/tmp/trustdb.log":"/var/log/garner/trustdb.log", debug?1:0);
+
+   if(debug)
+   {
+      _log(DEBUG, "db_server = \"%s\"", conf.db_server);
+      _log(DEBUG, "db_name = \"%s\"", conf.db_name);
+      _log(DEBUG, "db_user = \"%s\"", conf.db_user);
+      _log(DEBUG, "db_pass = \"%s\"", conf.db_pass);
+      _log(DEBUG, "nr_user = \"%s\"", conf.nr_user);
+      _log(DEBUG, "nr_pass = \"%s\"", conf.nr_pass);
+      _log(DEBUG, "debug = \"%s\"", conf.debug);
+   }
 
    // Enable core dumps
    struct rlimit limit;
@@ -122,7 +170,7 @@ int main(int argc, char *argv[])
    start_time  = time(NULL);
 
    // DAEMONISE
-   if(!debug)
+   if(debug != 1)
    {
       int i=fork();
       if (i<0)
@@ -255,7 +303,7 @@ static void perform(void)
    last_report = time(NULL) / REPORT_INTERVAL;
 
    // Initialise database
-   db_init(DB_SERVER, DB_USER, DB_PASSWORD, debug?"rail_test":"rail");
+   if(db_init(conf.db_server, conf.db_user, conf.db_pass, conf.db_name)) return
 
    log_message("");
    log_message("");
@@ -280,18 +328,18 @@ static void perform(void)
          {
             strcpy(headers, "CONNECT\n");
             strcat(headers, "login:");
-            strcat(headers, NATIONAL_RAIL_USERNAME);  
+            strcat(headers, conf.nr_user);  
             strcat(headers, "\npasscode:");
-            strcat(headers, NATIONAL_RAIL_PASSWORD);
+            strcat(headers, conf.nr_pass);
             strcat(headers, "\n");          
             if(debug)
             {
-               sprintf(zs, "client-id:%s-trustdb-debug\n", NATIONAL_RAIL_USERNAME);
+               sprintf(zs, "client-id:%s-trustdb-debug\n", conf.nr_user);
                strcat(headers, zs);
             }
             else
             {
-               sprintf(zs, "client-id:%s-trustdb-%s\n", NATIONAL_RAIL_USERNAME, abbreviated_host_id());
+               sprintf(zs, "client-id:%s-trustdb-%s\n", conf.nr_user, abbreviated_host_id());
                strcat(headers, zs);
             }          
             strcat(headers, "heart-beat:0,20000\n");          
@@ -325,12 +373,12 @@ static void perform(void)
                   strcat(headers, "destination:/topic/TRAIN_MVT_ALL_TOC\n");      
                   if(debug)
                   {
-                     sprintf(zs, "activemq.subscriptionName:%s-trustdb-debug\n", NATIONAL_RAIL_USERNAME);
+                     sprintf(zs, "activemq.subscriptionName:%s-trustdb-debug\n", conf.nr_user);
                      strcat(headers, zs);
                   }
                   else
                   {
-                     sprintf(zs, "activemq.subscriptionName:%s-trustdb-%s\n", NATIONAL_RAIL_USERNAME, abbreviated_host_id());
+                     sprintf(zs, "activemq.subscriptionName:%s-trustdb-%s\n", conf.nr_user, abbreviated_host_id());
                      strcat(headers, zs);
                   }
                   strcat(headers, "id:1\n");      
@@ -930,7 +978,8 @@ static void create_database(void)
    create_trust_activation = create_trust_cancellation = create_trust_movement = true;
    create_trust_changeorigin = create_trust_changeid = true;
 
-   db_query("show tables");
+   if(db_query("show tables")) return;
+   
    result0 = db_store_result();
    while((row0 = mysql_fetch_row(result0))) 
    {

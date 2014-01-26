@@ -28,7 +28,6 @@
 
 #include "misc.h"
 #include "db.h"
-#include "private.h"
 
 static void report(const char * const tiploc, const word year, const word month);
 static void report_day(const char * const tiploc, time_t when);
@@ -36,7 +35,7 @@ static void report_train_day(const dword cif_schedule_location_id, const time_t 
 static char * percentage(const dword num, const dword den);
 
 #define NAME "service-report"
-#define BUILD "UC11"
+#define BUILD "V125"
 
 static word debug;
 static word bus;
@@ -51,20 +50,48 @@ static const char * days_runs[8] = {"runs_su", "runs_mo", "runs_tu", "runs_we", 
 
 int main(int argc, char **argv)
 {
+   int c;
    word month, year;
-   byte usage = false;
+   word usage = true;
+   while ((c = getopt (argc, argv, "c:")) != -1)
+   {
+      switch (c)
+      {
+      case 'c':
+         if(load_config(optarg))
+         {
+            printf("Failed to read config file \"%s\".\n", optarg);
+            usage = true;
+         }
+         else
+         {
+            usage = false;
+         }
+         break;
+      case '?':
+      default:
+         usage = true;
+         break;
+      }
+   }
 
-   if(argc < 4)
+   if(argc < 5)
    {
       usage = true;
    }
    else
    {
-      if(strlen(argv[1]) > 8) usage = true;
-      month = atoi(argv[2]);
-      year  = atoi(argv[3]);
+      if(strlen(argv[2]) > 8) usage = true;
+      month = atoi(argv[3]);
+      year  = atoi(argv[4]);
       if(month < 1 || month > 12 || year < 2013 || year > 2099) usage = true;
    }
+   if(usage)
+   {
+      printf("No config file passed.\n\n\tUsage: %s -c /path/to/config/file.conf <TIPLOC> <month> <year>\n\n", argv[0] );
+      exit(1);
+   }
+
    if(usage)
    {
       printf("Usage %s <TIPLOC> <month> <year>\n",argv[0]);
@@ -72,17 +99,15 @@ int main(int argc, char **argv)
    }
 
    debug = false;
-   if(argc > 4) debug = !strcasecmp(argv[4], "debug");
-   // TEMPO
-   // debug = true;
+   if(argc > 5) debug = !strcasecmp(argv[5], "debug");
 
    // Initialise logging
    _log_init("", debug?1:0);
 
    // Initialise database
-   db_init(DB_SERVER, DB_USER, DB_PASSWORD, "rail");
+   db_init(conf.db_server, conf.db_user, conf.db_pass, conf.db_name);
 
-   report(argv[1], year, month);
+   report(argv[2], year, month);
 
    exit(0);
 }

@@ -9,4 +9,14 @@ vstpdb - Collect VSTP timetable updates and record in database.
 trustdb - Collect train movement reports and record in database.
 liverail - Web display.
 
+A configuration file is required with the following format:
+
+db_password: <password for database>
+db_server:   <server with openrail database>
+db_user:     <database username>
+db_name:     <database name>
+nr_user:     <amqp/stomp user>
+nr_pass:     <amqp/stomp password>
+debug:       <should debug be enabled (true/false)>
+
 For more information see the GIT Wiki.
