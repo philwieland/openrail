@@ -53,7 +53,12 @@ int main(int argc, char **argv)
    int c;
    word month, year;
    word usage = true;
-   while ((c = getopt (argc, argv, "c:")) != -1)
+
+   printf("argc = %d\n", argc);
+
+   debug = false;
+
+   while ((c = getopt (argc, argv, "c:d")) != -1)
    {
       switch (c)
       {
@@ -68,6 +73,10 @@ int main(int argc, char **argv)
             usage = false;
          }
          break;
+      case 'd':
+         debug = true;
+         break;
+
       case '?':
       default:
          usage = true;
@@ -75,31 +84,23 @@ int main(int argc, char **argv)
       }
    }
 
-   if(argc < 5)
+   if(argc - optind < 3)
    {
       usage = true;
    }
-   else
+   else if(!usage)
    {
-      if(strlen(argv[2]) > 8) usage = true;
-      month = atoi(argv[3]);
-      year  = atoi(argv[4]);
+      if(strlen(argv[optind]) > 8) usage = true;
+      month = atoi(argv[optind+1]);
+      year  = atoi(argv[optind+2]);
+      printf("month=%d year=%d tiploc=\"%s\"\n", month, year, argv[optind]);
       if(month < 1 || month > 12 || year < 2013 || year > 2099) usage = true;
    }
    if(usage)
    {
-      printf("No config file passed.\n\n\tUsage: %s -c /path/to/config/file.conf <TIPLOC> <month> <year>\n\n", argv[0] );
+      printf("Usage: %s -c /path/to/config/file.conf [-d] <TIPLOC> <month> <year>\n\n", argv[0] );
       exit(1);
    }
-
-   if(usage)
-   {
-      printf("Usage %s <TIPLOC> <month> <year>\n",argv[0]);
-      exit(1);
-   }
-
-   debug = false;
-   if(argc > 5) debug = !strcasecmp(argv[5], "debug");
 
    // Initialise logging
    _log_init("", debug?1:0);
@@ -107,7 +108,7 @@ int main(int argc, char **argv)
    // Initialise database
    db_init(conf.db_server, conf.db_user, conf.db_pass, conf.db_name);
 
-   report(argv[2], year, month);
+   report(argv[optind], year, month);
 
    exit(0);
 }
