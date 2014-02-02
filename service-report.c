@@ -35,7 +35,7 @@ static void report_train_day(const dword cif_schedule_location_id, const time_t 
 static char * percentage(const dword num, const dword den);
 
 #define NAME "service-report"
-#define BUILD "V125"
+#define BUILD "V202"
 
 static word debug;
 static word bus;
@@ -53,8 +53,6 @@ int main(int argc, char **argv)
    int c;
    word month, year;
    word usage = true;
-
-   printf("argc = %d\n", argc);
 
    debug = false;
 
@@ -93,7 +91,6 @@ int main(int argc, char **argv)
       if(strlen(argv[optind]) > 8) usage = true;
       month = atoi(argv[optind+1]);
       year  = atoi(argv[optind+2]);
-      printf("month=%d year=%d tiploc=\"%s\"\n", month, year, argv[optind]);
       if(month < 1 || month > 12 || year < 2013 || year > 2099) usage = true;
    }
    if(usage)
