@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2013 Phil Wieland
+    Copyright (C) 2013, 2014 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -39,7 +39,7 @@
 #include "db.h"
 
 #define NAME  "trustdb"
-#define BUILD "V125"
+#define BUILD "V202"
 
 static void perform(void);
 static void process_message(const char * const body);
@@ -436,7 +436,7 @@ static void perform(void)
                               
                         if(debug || waited < 2)
                         {
-                           sprintf(zs, "Message receive wait time was %ld seconds.", waited);
+                           sprintf(zs, "Message receive wait time was %ld second%s.", waited, (waited != 1)?"s":"");
                            _log(MINOR, zs);
                         }
                         char message_id[256];
@@ -775,10 +775,9 @@ static void process_trust_0003(const char * string, const jsmntok_t * tokens, co
    db_query(query);
 
    // Old one?
-   if(planned_timestamp && now - actual_timestamp > 6*60*60)
+   if(planned_timestamp && now - actual_timestamp > 12*60*60)
    {
-      sprintf(query, "Late movement message received, actual timestamp %s.", time_text(actual_timestamp, true));
-      _log(MINOR, query);
+      _log(MINOR, "Late movement message received, actual timestamp %s.", time_text(actual_timestamp, true));
    }
    sprintf(query, "SELECT * from trust_activation where trust_id = '%s' and created > %ld and cif_schedule_id > 0", train_id, now - (4*24*60*60));
    if(!db_query(query))
@@ -898,7 +897,7 @@ static void process_trust_0003(const char * string, const jsmntok_t * tokens, co
                {
                   sprintf(query, "INSERT INTO trust_activation VALUES(%ld, '%s', %ld, 1)", now, train_id, cif_schedule_id);
                   db_query(query);
-                  sprintf(query, "   Successfully deduced activation %ld", cif_schedule_id);
+                  sprintf(query, "   Successfully deduced activation %ld in %ld seconds.", cif_schedule_id, time(NULL) - now);
                   _log(MINOR, query);
                }
             }
@@ -915,7 +914,7 @@ static void process_trust_0003(const char * string, const jsmntok_t * tokens, co
             
             sprintf(query, "      stanox = %s, tiploc = \"%s\", planned_timestamp %s, derived sort time = %d", loc_stanox, tiploc, time_text(planned_timestamp, true), sort_time);
             _log(MINOR, query);
-            // jsmn_dump_tokens(string, tokens, index);
+            _log(MINOR, "   Analysis took %ld seconds.", time(NULL) - now);
          }
       }
    }

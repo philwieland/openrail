@@ -35,7 +35,7 @@ static void report_train_day(const dword cif_schedule_location_id, const time_t 
 static char * percentage(const dword num, const dword den);
 
 #define NAME "service-report"
-#define BUILD "V202"
+#define BUILD "V207"
 
 static word debug;
 static word bus;
@@ -140,13 +140,24 @@ static void report(const char * const tiploc, const word year, const word month)
       broken = *gmtime(&when);
    }
 
-   printf("<tr><td>%s</td><td>%d</td><td>%d</td><td>(%s%%)</td>",
-          "Month", gtrain, gtrain-gcape, percentage(gtrain-gcape, gtrain));
-   printf("<td>%d</td><td>(%s%%)</td>",
-          gtrain - glate, percentage(gtrain - glate, gtrain));
-   printf("<td>%d</td><td>(%s%%)</td><td>%s</td></tr>\n",
-          gtrain - glater, percentage(gtrain - glater, gtrain), "&nbsp;");
-
+   if(gtrain)
+   {
+      printf("<tr><td>%s</td><td>%d</td><td>%d</td><td>(%s%%)</td>",
+             "Month", gtrain, gtrain-gcape, percentage(gtrain-gcape, gtrain));
+      printf("<td>%d</td><td>(%s%%)</td>",
+             gtrain - glate, percentage(gtrain - glate, gtrain));
+      printf("<td>%d</td><td>(%s%%)</td><td>%s</td></tr>\n",
+             gtrain - glater, percentage(gtrain - glater, gtrain), "&nbsp;");
+   }
+   else
+   {
+      printf("<tr><td>%s</td><td>%d</td><td>%d</td><td>&nbsp;</td>",
+             "Month", gtrain, gtrain-gcape);
+      printf("<td>%d</td><td>&nbsp;</td>",
+             gtrain - glate);
+      printf("<td>%d</td><td>&nbsp;</td><td>%s</td></tr>\n",
+             gtrain - glater, "&nbsp;");
+   }
    printf("<!-- End of report -->\n\n"); 
   
 }
@@ -459,12 +470,25 @@ static void report_day(const char * const tiploc, time_t when)
       }
       if(notes[strlen(notes) - 1] == '\n') notes[strlen(notes) - 1] = '\0';
    }
-   printf("<tr><td>%02d</td><td>%d</td><td>%d</td><td>(%s%%)</td>",
-          mday, ntrain, ntrain-ncape, percentage(ntrain-ncape, ntrain));
-   printf("<td>%d</td><td>(%s%%)</td>",
-          ntrain - nlate, percentage(ntrain - nlate, ntrain));
-   printf("<td>%d</td><td>(%s%%)</td><td align=\"left\">%s</td></tr>\n",
-          ntrain - nlater, percentage(ntrain - nlater, ntrain), notes);
+
+   if(ntrain)
+   {
+      printf("<tr><td>%02d</td><td>%d</td><td>%d</td><td>(%s%%)</td>",
+             mday, ntrain, ntrain-ncape, percentage(ntrain-ncape, ntrain));
+      printf("<td>%d</td><td>(%s%%)</td>",
+             ntrain - nlate, percentage(ntrain - nlate, ntrain));
+      printf("<td>%d</td><td>(%s%%)</td><td align=\"left\">%s</td></tr>\n",
+             ntrain - nlater, percentage(ntrain - nlater, ntrain), notes);
+   }
+   else
+   {
+      printf("<tr><td>%02d</td><td>%d</td><td>%d</td><td>&nbsp;</td>",
+             mday, ntrain, ntrain-ncape);
+      printf("<td>%d</td><td>&nbsp;</td>",
+             ntrain - nlate);
+      printf("<td>%d</td><td>&nbsp;</td><td align=\"left\">%s</td></tr>\n",
+             ntrain - nlater, notes);
+   }
 
    gtrain += ntrain;
    gcape += ncape;
