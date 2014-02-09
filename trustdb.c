@@ -39,7 +39,7 @@
 #include "db.h"
 
 #define NAME  "trustdb"
-#define BUILD "V202"
+#define BUILD "V209"
 
 static void perform(void);
 static void process_message(const char * const body);
@@ -167,7 +167,7 @@ int main(int argc, char *argv[])
       setrlimit(RLIMIT_CORE, &limit);
    }
 
-   start_time  = time(NULL);
+   start_time = time(NULL);
 
    // DAEMONISE
    if(debug != 1)
@@ -318,8 +318,7 @@ static void perform(void)
       rc=stomp_connect("datafeeds.networkrail.co.uk", 61618);
       if(rc)
       {
-         sprintf(zs,"Failed to connect.  Error %d %s", rc, report_error(rc));
-         _log(CRITICAL, zs);
+         _log(CRITICAL, "Failed to connect.  Error %d %s", rc, report_error(rc));
       }
       else
       {
@@ -349,8 +348,7 @@ static void perform(void)
          }
          if(rc)
          {
-            sprintf(zs,"Failed to transmit CONNECT message.  Error %d %s", rc, report_error(rc));
-            _log(CRITICAL, zs);
+            _log(CRITICAL, "Failed to transmit CONNECT message.  Error %d %s", rc, report_error(rc));
          }
          else
          {
@@ -358,13 +356,11 @@ static void perform(void)
             rc = stomp_rx(headers, sizeof(headers), body, sizeof(body));
             if(rc)
             {
-               sprintf(zs,"Failed to receive.  Error %d %s", rc, report_error(rc));
-               _log(CRITICAL, zs);
+               _log(CRITICAL, "Failed to receive.  Error %d %s", rc, report_error(rc));
             }
             else
             {
-               sprintf(zs, "Response: Body=\"%s\", Headers:", body);
-               _log(GENERAL, zs);
+               _log(GENERAL, "Response: Body=\"%s\", Headers:", body);
                dump_headers();
                {
                   strcpy(headers, "SUBSCRIBE\n");
@@ -389,8 +385,7 @@ static void perform(void)
                }
                if(rc)
                {
-                  sprintf(zs,"Failed to transmit SUBSCRIBE message.  Error %d %s", rc, report_error(rc));
-                  _log(CRITICAL, zs);
+                  _log(CRITICAL, "Failed to transmit SUBSCRIBE message.  Error %d %s", rc, report_error(rc));
                }
                else
                {
@@ -410,8 +405,7 @@ static void perform(void)
                      if(rc && run)
                      {
                         // Don't report if the error is due to an interrupt
-                        sprintf(zs, "Error receiving frame: %d %s", rc, report_error(rc));
-                        _log(MAJOR, zs);
+                        _log(MAJOR, "Error receiving frame: %d %s", rc, report_error(rc));
                      }
                      
                      if(run_receive)
@@ -436,8 +430,7 @@ static void perform(void)
                               
                         if(debug || waited < 2)
                         {
-                           sprintf(zs, "Message receive wait time was %ld second%s.", waited, (waited != 1)?"s":"");
-                           _log(MINOR, zs);
+                           _log(MINOR, "Message receive wait time was %ld second%s.", waited, (waited != 1)?"s":"");
                         }
                         char message_id[256];
                         message_id[0] = '\0';
@@ -471,9 +464,6 @@ static void perform(void)
                            }
                         }
 
-                        //sprintf(zs, "Message id = \"%s\"", message_id);
-                        //_log(GENERAL, zs);
-                        
                         // Process the message
                         if(run_receive) process_message(body);
 
@@ -488,16 +478,9 @@ static void perform(void)
                            rc = stomp_tx(headers);
                            if(rc)
                            {
-                              sprintf(zs,"Failed to transmit ACK message.  Error %d %s", rc, report_error(rc));
-                              _log(CRITICAL, zs);
+                              _log(CRITICAL, "Failed to transmit ACK message.  Error %d %s", rc, report_error(rc));
                               run_receive = false;
                            }
-                           else
-                           {
-                              //_log(GENERAL, "Ack sent OK.");
-                           }
-                           //sprintf(zs, "%d messages, total size %ld bytes.", count, size);
-                           //_log(GENERAL, zs);
                         }
                      }
                   } // while(run && run_receive)
@@ -509,8 +492,7 @@ static void perform(void)
       rc = stomp_tx(headers);
       if(rc)
       {
-         sprintf(zs, "Failed to send DISCONNECT:  Error %d %s", rc, report_error(rc));
-         _log(GENERAL, zs);
+         _log(GENERAL, "Failed to send DISCONNECT:  Error %d %s", rc, report_error(rc));
       }
       else _log(GENERAL, "Sent DISCONNECT.");
       
@@ -518,8 +500,7 @@ static void perform(void)
       rc = stomp_disconnect(); 
       if(rc)
       {
-         sprintf(zs, "Failed to disconnect:  Error %d %s", rc, report_error(rc));
-         _log(GENERAL, zs);
+         _log(GENERAL, "Failed to disconnect:  Error %d %s", rc, report_error(rc));
       }
       else _log(GENERAL, "Disconnected.");
 
@@ -573,7 +554,7 @@ static void process_message(const char * const body)
       }
       _log(DEBUG,zs);
 
-      for(i=0; i < messages; i++)
+      for(i=0; i < messages && run; i++)
       {
          char message_name[128];
          jsmn_find_extract_token(body, tokens, index, "msg_type", message_name, sizeof(message_name));
@@ -617,9 +598,7 @@ static void process_message(const char * const body)
    elapsed = time(NULL) - elapsed;
    if(debug || elapsed > 1)
    {
-      char zs[128];
-      sprintf(zs, "Transaction took %ld seconds.", elapsed);
-      _log(MINOR, zs);
+      _log(MINOR, "Transaction took %ld seconds.", elapsed);
    }
 }
 
@@ -877,8 +856,7 @@ static void process_trust_0003(const char * string, const jsmntok_t * tokens, co
 
                while((row0 = mysql_fetch_row(result0)))
                {
-                  sprintf(query, "   Found potential match:%8s (%s) %s STP=%s", row0[0], row0[1], row0[2], row0[3]);
-                  _log(MINOR, query);
+                  _log(MINOR, "   Found potential match:%8s (%s) %4s STP=%s", row0[0], row0[1], row0[2], row0[3]);
                   if (!reason[0])
                   {
                      if(save_uid[0] && strcmp(save_uid, row0[1]))  strcpy(reason, "Multiple matching schedule UIDs");
@@ -897,8 +875,8 @@ static void process_trust_0003(const char * string, const jsmntok_t * tokens, co
                {
                   sprintf(query, "INSERT INTO trust_activation VALUES(%ld, '%s', %ld, 1)", now, train_id, cif_schedule_id);
                   db_query(query);
-                  sprintf(query, "   Successfully deduced activation %ld in %ld seconds.", cif_schedule_id, time(NULL) - now);
-                  _log(MINOR, query);
+                  time_t elapsed = time(NULL) - now;
+                  _log(MINOR, "   Successfully deduced activation %ld in %ld second%s.", cif_schedule_id, elapsed, (elapsed == 1)?"":"s");
                }
             }
          }
@@ -909,12 +887,10 @@ static void process_trust_0003(const char * string, const jsmntok_t * tokens, co
          }
          else
          {
-            sprintf(query, "   Failed to deduce an activation - Reason:  %s.", reason );
-            _log(MINOR, query);
-            
-            sprintf(query, "      stanox = %s, tiploc = \"%s\", planned_timestamp %s, derived sort time = %d", loc_stanox, tiploc, time_text(planned_timestamp, true), sort_time);
-            _log(MINOR, query);
-            _log(MINOR, "   Analysis took %ld seconds.", time(NULL) - now);
+            _log(MINOR, "   Failed to deduce an activation - Reason:  %s.", reason );
+            _log(MINOR, "      stanox = %s, tiploc = \"%s\", planned_timestamp %s, derived sort time = %d", loc_stanox, tiploc, time_text(planned_timestamp, true), sort_time);
+            time_t elapsed = time(NULL) - now;
+            _log(MINOR, "   Analysis took %ld second%s.", elapsed, (elapsed == 1)?"":"s");
          }
       }
    }

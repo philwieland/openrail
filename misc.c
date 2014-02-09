@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2013 Phil Wieland
+    Copyright (C) 2013, 2014 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -62,6 +62,8 @@ char * date_text(const time_t time, const byte local)
 time_t parse_datestamp(const char * string)
 {
    // ONLY works for yyyy-mm-dd
+   // Return 0 for failure to parse
+   // Returns the time_t value for 12:00Z on the date in question.
 
    char zs[128];
    if(strlen(string) != 10) return 0;
@@ -73,13 +75,14 @@ time_t parse_datestamp(const char * string)
 time_t parse_timestamp(const char * string)
 {
    // ONLY works for yyyy-mm-ddThh:mm:ssZ
+   // Return 0 for failure to parse
+
    char zs[128];
 
    if(strlen(string) < 20 || strlen(string) > 64) return 0;
    if(string[19] != 'Z') return 0;
                 
    strcpy(zs, string);
-   if(zs[19] != 'Z') return 0;
 
    zs[19] = '\0';
 
@@ -102,10 +105,16 @@ void _log(const byte level, const char * text, ...)
    va_list vargs;
    va_start(vargs, text);
 
-   strcpy(log, time_text(time(NULL), false));
-
-   // strcat(log, log_module_10);
-   strcat(log, " ");
+   time_t now = time(NULL);
+   struct tm * broken = gmtime(&now);
+      
+   sprintf(log, "%02d/%02d/%02d %02d:%02d:%02dZ ",
+           broken->tm_mday, 
+           broken->tm_mon + 1, 
+           broken->tm_year % 100,
+           broken->tm_hour,
+           broken->tm_min,
+           broken->tm_sec);
 
    if(debug)
    {
@@ -214,10 +223,11 @@ char * commas_q(const qword n)
 
 char * show_spaces(const char * string)
 {
+   // Replace spaces in a string with an inverted delta.  String truncated if too long.
    static char result[128];
    word i,j;
 
-   for(j=i=0; string[i] && j < 100; i++)
+   for(j=i=0; string[i] && j < 127; i++)
    {
       if(string[i] == ' ')
       {
@@ -238,12 +248,10 @@ char * show_spaces(const char * string)
    return result;
 }
 
-
 word email_alert(const char * const name, const char * const build, const char * const title, const char * const message)
 {
-   // DANGER - Recursion:  DO NOT RAISE A CRITICAL ALERT IN HERE!
    FILE * fp;
-   char command[1024], zs[256], tmp_file[256], host[256];
+   char command[1024], tmp_file[256], host[256];
    int i;
 
    _log(PROC, "email_alert()");
@@ -271,8 +279,7 @@ word email_alert(const char * const name, const char * const build, const char *
            name, title, tmp_file, tmp_file);
    i = system(command);
    
-   sprintf(zs, "system(\"%s\") returned %d", command, i);
-   _log(DEBUG, zs);
+   _log(DEBUG, "email_alert():  system(\"%s\") returned %d", command, i);
            
    // Success
    return 0;
@@ -280,6 +287,8 @@ word email_alert(const char * const name, const char * const build, const char *
 
 char * abbreviated_host_id(void)
 {
+   // Return a "unique name" of this host, so that more than one machine can connect to the stream without an id clash
+   // Currently this is just the first part of the FQDN but it could be something more clever in the future.
    static char hostname[256];
    word i;
 
@@ -296,6 +305,7 @@ char * abbreviated_host_id(void)
 
    return hostname;
 }
+
 char * show_time(const char * const input)
 {
    static char output[16];
