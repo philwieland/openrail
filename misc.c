@@ -435,3 +435,13 @@ int load_config(const char * const filepath)
         line_start = line_end+1;
     }
 }
+
+qword time_ms(void)
+{
+   static struct timeval ha_clock;
+   gettimeofday(&ha_clock, NULL);
+   qword result = ha_clock.tv_sec;
+   result = result * 1000 + ha_clock.tv_usec / 1000;
+
+   return result;
+}

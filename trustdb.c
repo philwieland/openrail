@@ -39,7 +39,7 @@
 #include "db.h"
 
 #define NAME  "trustdb"
-#define BUILD "V209"
+#define BUILD "V210"
 
 static void perform(void);
 static void process_message(const char * const body);
@@ -59,7 +59,7 @@ static void report_stats(void);
 static void log_message(const char * const message);
 static time_t correct_trust_timestamp(const time_t in);
 
-static time_t last_idle;
+static qword last_idle;
 static word debug, run, interrupt, holdoff, high_load;
 static char zs[4096];
 
@@ -67,7 +67,11 @@ static char headers[1024], body[65536];
 #define NUM_TOKENS 8192
 static jsmntok_t tokens[NUM_TOKENS];
 
+// Time in ms after last idle period before we commence task shedding.
+#define LAST_IDLE_LIMIT 64000
+// Time in seconds between statistical reports.
 #define REPORT_INTERVAL (24*60*60)
+
 static time_t start_time;
 
 // Stats
@@ -394,12 +398,15 @@ static void perform(void)
                   int run_receive = 1;
                   while(run && run_receive)
                   {
-                     time_t waited = time(NULL);
-                     if( waited / REPORT_INTERVAL != last_report)
                      {
-                        report_stats();
-                        last_report = waited / REPORT_INTERVAL;
+                        time_t now = time(NULL);
+                        if( now / REPORT_INTERVAL != last_report)
+                        {
+                           report_stats();
+                           last_report = now / REPORT_INTERVAL;
+                        }
                      }
+                     qword elapsed = time_ms();
                      rc = stomp_rx(headers, sizeof(headers), body, sizeof(body));
                      run_receive = (rc == 0);
                      if(rc && run)
@@ -410,17 +417,18 @@ static void perform(void)
                      
                      if(run_receive)
                      {
-                        time_t now = time(NULL);
-                        waited = now - waited;
-                        if(waited > 1) 
+                        qword now = time_ms();
+                        elapsed = now - elapsed;
+                        if(elapsed > 1000) 
                         {
+                           // Deemed idle.  Drop out of task shedding
                            last_idle = now;
                            if(high_load) _log(MINOR, "Ceasing task shedding.");
                            high_load = false;
                         }
                         else
                         {
-                           if(!high_load && now - last_idle > 64)
+                           if(!high_load && now - last_idle > LAST_IDLE_LIMIT)
                            {
                               // Enter high load
                               high_load = true;
@@ -428,9 +436,9 @@ static void perform(void)
                            }
                         }
                               
-                        if(debug || waited < 2)
+                        if(debug || elapsed < 2000)
                         {
-                           _log(MINOR, "Message receive wait time was %ld second%s.", waited, (waited != 1)?"s":"");
+                           _log(MINOR, "Message receive wait time was %s ms.", commas_q(elapsed));
                         }
                         char message_id[256];
                         message_id[0] = '\0';
@@ -524,7 +532,7 @@ static void perform(void)
 static void process_message(const char * const body)
 {
    jsmn_parser parser;
-   time_t elapsed = time(NULL);
+   qword elapsed = time_ms();
    
    log_message(body);
 
@@ -593,12 +601,19 @@ static void process_message(const char * const body)
          size_t message_ends = tokens[index].end;
          do  index++; 
          while ( tokens[index].start < message_ends && tokens[index].start >= 0 && index < NUM_TOKENS);
+
+         if(!high_load && time_ms() - last_idle > LAST_IDLE_LIMIT)
+         {
+            // Enter high load
+            high_load = true;
+            _log(MINOR, "High load detected.  Shedding tasks.");
+         }
       }
    }
-   elapsed = time(NULL) - elapsed;
-   if(debug || elapsed > 1)
+   elapsed = time_ms() - elapsed;
+   if(debug || elapsed > 1000)
    {
-      _log(MINOR, "Transaction took %ld seconds.", elapsed);
+      _log(MINOR, "Transaction took %s ms.", commas_q(elapsed));
    }
 }
 
@@ -777,6 +792,7 @@ static void process_trust_0003(const char * string, const jsmntok_t * tokens, co
          char tiploc[128], reason[128];
          word sort_time;
          time_t now = time(NULL);
+         qword elapsed = time_ms();
 
          strcpy(reason, "");
          tiploc[0] = '\0';
@@ -875,8 +891,8 @@ static void process_trust_0003(const char * string, const jsmntok_t * tokens, co
                {
                   sprintf(query, "INSERT INTO trust_activation VALUES(%ld, '%s', %ld, 1)", now, train_id, cif_schedule_id);
                   db_query(query);
-                  time_t elapsed = time(NULL) - now;
-                  _log(MINOR, "   Successfully deduced activation %ld in %ld second%s.", cif_schedule_id, elapsed, (elapsed == 1)?"":"s");
+                  elapsed = time_ms() - elapsed;
+                  _log(MINOR, "   Successfully deduced activation %ld.  Elapsed time %s ms.", cif_schedule_id, commas_q(elapsed));
                }
             }
          }
@@ -887,10 +903,9 @@ static void process_trust_0003(const char * string, const jsmntok_t * tokens, co
          }
          else
          {
-            _log(MINOR, "   Failed to deduce an activation - Reason:  %s.", reason );
+            elapsed = time_ms() - elapsed;
+            _log(MINOR, "   Failed to deduce an activation.  Reason:  %s.   Elapsed time %s ms.", reason, commas_q(elapsed));
             _log(MINOR, "      stanox = %s, tiploc = \"%s\", planned_timestamp %s, derived sort time = %d", loc_stanox, tiploc, time_text(planned_timestamp, true), sort_time);
-            time_t elapsed = time(NULL) - now;
-            _log(MINOR, "   Analysis took %ld second%s.", elapsed, (elapsed == 1)?"":"s");
          }
       }
    }

@@ -55,5 +55,6 @@ extern char * abbreviated_host_id(void);
 extern char * show_time(const char * const input);
 extern char * show_time_text(const char * const input);
 extern int load_config(const char * const filepath);
+extern qword time_ms(void);
 
 #endif
