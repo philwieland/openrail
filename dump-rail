@@ -6,7 +6,7 @@ use strict;
 my $build = 'V125';
 my $name = 'dump-rail';
 
-my $day_file_rotation = 4; ### Maximum 36
+my $day_file_rotation = 4;
 my $frequency = 1; #          # Number of days between backups - Set in crontab call
 
 my $day_number = int(time() / (24 * 60 * 60));

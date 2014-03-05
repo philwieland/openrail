@@ -39,7 +39,7 @@
 #include "db.h"
 
 #define NAME  "trustdb"
-#define BUILD "V210"
+#define BUILD "V225"
 
 static void perform(void);
 static void process_message(const char * const body);
@@ -307,7 +307,12 @@ static void perform(void)
    last_report = time(NULL) / REPORT_INTERVAL;
 
    // Initialise database
-   if(db_init(conf.db_server, conf.db_user, conf.db_pass, conf.db_name)) return
+   while(db_init(conf.db_server, conf.db_user, conf.db_pass, conf.db_name) && run) 
+   {
+      _log(CRITICAL, "Failed to initialise database connection.  Will retry...");
+      word i;
+      for(i = 0; i < 64 && run; i++) sleep(1);
+   }
 
    log_message("");
    log_message("");
@@ -436,7 +441,7 @@ static void perform(void)
                            }
                         }
                               
-                        if(debug || elapsed < 2000)
+                        if(debug || elapsed < 1500)
                         {
                            _log(MINOR, "Message receive wait time was %s ms.", commas_q(elapsed));
                         }
@@ -552,15 +557,14 @@ static void process_message(const char * const body)
       {
          messages = tokens[0].size;
          index = 1;
-         sprintf(zs, "STOMP message is array of %d TRUST messages.", messages);
+          _log(DEBUG, "STOMP message is array of %d TRUST messages.", messages);
       }
       else
       {
          messages = 1;
          index = 0;
-         sprintf(zs, "STOMP message contains a single TRUST message.");
+          _log(DEBUG, "STOMP message contains a single TRUST message.");
       }
-      _log(DEBUG,zs);
 
       for(i=0; i < messages && run; i++)
       {
@@ -569,8 +573,7 @@ static void process_message(const char * const body)
          word message_type = atoi(message_name);
          if(debug)
          {
-            sprintf(zs, "Processing TRUST message %d", i);
-            _log(DEBUG, zs);
+            _log(DEBUG, "Processing TRUST message %d", i);
          }
          if(!strncmp(message_name, "000", 3) && message_type > 0 && message_type < 9) 
          {
@@ -585,15 +588,13 @@ static void process_message(const char * const body)
             case 6: process_trust_0006(body, tokens, index); break;
             case 7: process_trust_0007(body, tokens, index); break;
             default:
-               sprintf(zs, "Message type \"%s\" discarded.", message_name);
-               _log(MINOR, zs);
+               _log(MINOR, "Message type \"%s\" discarded.", message_name);
                break;
             }
          }
          else
          {
-            sprintf(zs, "Unrecognised message type \"%s\".", message_name);
-            _log(MINOR, zs);
+            _log(MINOR, "Unrecognised message type \"%s\".", message_name);
             jsmn_dump_tokens(body, tokens, index);
             stats[NotRecog]++;
          }
@@ -964,6 +965,8 @@ static void create_database(void)
    MYSQL_ROW row0;
    word create_trust_activation, create_trust_cancellation, create_trust_movement;
    word create_trust_changeorigin, create_trust_changeid;
+
+   _log(PROC, "create_database()");
 
    create_trust_activation = create_trust_cancellation = create_trust_movement = true;
    create_trust_changeorigin = create_trust_changeid = true;

@@ -49,8 +49,8 @@ static char * show_trust_time_nocolon(const char * const ms, const word local);
 static char * show_expected_time(const char * const scheduled, const word deviation, const word late);
 
 
-#define NAME "Garner Live Rail"
-#define BUILD "V125"
+#define NAME "Live Rail"
+#define BUILD "V126"
 
 #define COLUMNS 4
 #define URL_BASE "/rail/liverail/"

@@ -31,6 +31,8 @@ static char server[256], user[256], password[256], database[256];
 
 word db_init(const char * const s, const char * const u, const char * const p, const char * const d)
 {
+   _log(PROC, "db_init(\"%s\", \"%s\", \"%s\", \"%s\")",s, u, p, d);
+ 
    if(strlen(s) > 250) return 1;
    if(strlen(u) > 250) return 1;
    if(strlen(p) > 250) return 1;
