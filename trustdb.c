@@ -276,7 +276,7 @@ int main(int argc, char *argv[])
    // Zero the stats
    {
       word i;
-      for(i=0; i < MAXstats; i++) stats[i] = 0;
+      for(i=0; i < MAXstats; i++) { stats[i] = 0; grand_stats[i] = 0; }
    }
 
    // Startup delay

@@ -39,7 +39,7 @@
 #include "db.h"
 
 #define NAME  "vstpdb"
-#define BUILD "V125"
+#define BUILD "V312"
 
 static void perform(void);
 static void process_message(const char * body);
@@ -894,7 +894,7 @@ static word process_create_schedule_location(const char * string, const jsmntok_
    EXTRACT_APPEND_SQL_OBJECT("CIF_engineering_allowance");
    EXTRACT_APPEND_SQL_OBJECT("CIF_pathing_allowance");
    EXTRACT_APPEND_SQL_OBJECT("CIF_performance_allowance");
-   strcat(query, ", 0)");
+   strcat(query, ")");
 
    (void) db_query(query); 
 

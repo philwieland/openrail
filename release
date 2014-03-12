@@ -7,6 +7,12 @@ if [ "$1" = "all" -o "$1" = "cifdb" ]; then
     DONE="cifdb"
 fi
 
+if [ "$1" = "all" -o "$1" = "archdb" ]; then
+    echo "Releasing archdb"
+    sudo cp archdb   /usr/sbin/archdb
+    DONE="archdb"
+fi
+
 if [ "$1" = "all" -o "$1" = "corpusdb" ]; then
     echo "Releasing corpusdb"
     sudo cp corpusdb   /usr/sbin/corpusdb
@@ -64,6 +70,6 @@ if [ "$1" = "all" -o "$1" = "dump-rail" ]; then
 fi
 
 if [ "$DONE" = "" ]; then
-    echo "Usage:  $0 cifdb|corpusdb|vstpdb|trustdb|liverail|sendreport|all    -    Release specified unit or all."
+    echo "Usage:  $0 cifdb|archdb|corpusdb|vstpdb|trustdb|liverail|sendreport|all    -    Release specified unit or all."
 fi
 

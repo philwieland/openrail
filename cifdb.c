@@ -33,7 +33,7 @@
 #include "db.h"
 
 #define NAME  "cifdb"
-#define BUILD "V125"
+#define BUILD "V310"
 
 static void process_object(const char * object);
 static void process_timetable(const char * string, const jsmntok_t * tokens);
@@ -66,6 +66,9 @@ static dword count_schedule_create, count_schedule_delete_hit, count_schedule_de
 static dword count_schedule_loc_create, count_schedule_loc_delete;
 static dword count_assoc_create, count_assoc_delete_hit, count_assoc_delete_miss;
 static dword count_fetches;
+#define HUYTON_REPORT_SIZE 16
+static unsigned long huyton_report_id[HUYTON_REPORT_SIZE];
+static word huyton_report_index;
 
 // Buffer for reading file
 #define MAX_BUF 8192
@@ -186,8 +189,7 @@ static const char * const create_table_cif_schedule_locations =
 "engineering_allowance         CHAR(2) NOT NULL, "
 "pathing_allowance             CHAR(2) NOT NULL, "
 "performance_allowance         CHAR(2) NOT NULL, "
-"id                            INT UNSIGNED NOT NULL AUTO_INCREMENT, "
-"PRIMARY KEY (id), INDEX(cif_schedule_id), INDEX(tiploc_code) "
+"INDEX(cif_schedule_id), INDEX(tiploc_code) "
 ") ENGINE = InnoDB";
 
 int main(int argc, char **argv)
@@ -327,6 +329,7 @@ int main(int argc, char **argv)
    count_assoc_delete_hit     = 0;
    count_assoc_delete_miss    = 0;
    count_fetches              = 0;
+   huyton_report_index = 0;
 
    struct tm * broken = localtime(&start_time);
    word date = broken->tm_mday;
@@ -460,6 +463,20 @@ int main(int argc, char **argv)
    sprintf(zs, "Association delete miss  : %s", commas(count_assoc_delete_miss));
    _log(GENERAL, zs);
    strcat(report, zs); strcat(report, "\n");
+
+   if(huyton_report_index)
+   {
+      sprintf(zs, "Schedules created passing Huyton : %s", commas(huyton_report_index));
+      _log(GENERAL, zs);
+      strcat(report, "\n"); strcat(report, zs); strcat(report, "\n");
+      word i;
+      for(i=0; i < huyton_report_index; i++)
+      {
+         sprintf(zs, "%ld", huyton_report_id[i]);
+         _log(GENERAL, zs);
+         strcat(report, zs); strcat(report, "\n");
+      }
+   }
 
    email_alert(NAME, BUILD, "Timetable Update Report", report);
 
@@ -862,7 +879,7 @@ static word process_schedule_location(const char * string, const jsmntok_t * tok
    word sort_arrive, sort_depart, sort_pass, sort_time;
    static word origin_sort_time;
 
-   byte type_LO;
+   byte type_LO, huyton;
 
    sprintf(zs, "process_schedule_location(%d, %ld)", index, schedule_id);
    _log(PROC, zs);
@@ -874,6 +891,7 @@ static word process_schedule_location(const char * string, const jsmntok_t * tok
    EXTRACT_APPEND_SQL_OBJECT("record_identity");
    type_LO = (zs[0] == 'L' && zs[1] == 'O');
    EXTRACT_APPEND_SQL_OBJECT("tiploc_code");
+   huyton = (!strcasecmp(zs, "HUYTON") || !strcasecmp(zs, "HUYTJUN"));
    EXTRACT_APPEND_SQL_OBJECT("tiploc_instance");
    EXTRACT_APPEND_SQL_OBJECT("arrival");
    sort_arrive = get_sort_time(zs);
@@ -898,11 +916,28 @@ static word process_schedule_location(const char * string, const jsmntok_t * tok
    EXTRACT_APPEND_SQL_OBJECT("engineering_allowance");
    EXTRACT_APPEND_SQL_OBJECT("pathing_allowance");
    EXTRACT_APPEND_SQL_OBJECT("performance_allowance");
-   strcat(query, ", 0)");
+   strcat(query, ")");
 
    (void) db_query(query); 
       
    count_schedule_loc_create++;
+
+   if(huyton)
+   {
+      if(huyton_report_index < HUYTON_REPORT_SIZE)
+      {
+         word i;
+         for(i = 0; i < huyton_report_index && huyton_report_id[i] != schedule_id; i++);
+         if(i == huyton_report_index)
+         {
+            huyton_report_id[huyton_report_index++] = schedule_id;
+         }
+      }
+      else
+      {
+         huyton_report_index++;
+      }
+   }
 
    return (index + tokens[index].size + 1);
 }

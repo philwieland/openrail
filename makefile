@@ -1,6 +1,6 @@
 CC=gcc -c -g -O2 -Wall -I/usr/include/mysql -DBIG_JOINS=1 -D_GNU_SOURCE -D_FILE_OFFSET_BITS=64 -fno-strict-aliasing -DUNIV_LINUX -I./include
 
-all:            cifdb corpusdb vstpdb trustdb liverail.cgi service-report 
+all:            cifdb archdb corpusdb vstpdb trustdb liverail.cgi service-report 
 
 jsmn.o:		jsmn.c jsmn.h misc.h
 
@@ -14,6 +14,11 @@ cifdb:          cifdb.o jsmn.o misc.o db.o
 		gcc -g -O2 -I./include -L./lib cifdb.o jsmn.o misc.o db.o -lmysqlclient -lcurl -o cifdb
 
 cifdb.o:	cifdb.c jsmn.h misc.h db.h
+
+archdb:         archdb.o jsmn.o misc.o db.o 
+		gcc -g -O2 -I./include -L./lib archdb.o jsmn.o misc.o db.o -lmysqlclient -lcurl -o archdb
+
+archdb.o:	archdb.c jsmn.h misc.h db.h
 
 liverail.cgi:	liverail.o misc.o db.o 
 		gcc -g -O2 -I./include -L./lib liverail.o misc.o db.o -lmysqlclient -o liverail.cgi 
@@ -43,6 +48,7 @@ service-report.o: service-report.c misc.h db.h
 install:
 		mkdir -p $(DESTDIR)$(prefix)/lib/cgi-bin
 		install -m 0755 cifdb $(DESTDIR)$(prefix)/sbin
+		install -m 0755 archdb $(DESTDIR)$(prefix)/sbin
 		install -m 0755 trustdb $(DESTDIR)$(prefix)/sbin
 		install -m 0755 vstpdb $(DESTDIR)$(prefix)/sbin
 		install -m 0755 corpusdb $(DESTDIR)$(prefix)/sbin
@@ -53,6 +59,6 @@ install:
 .PHONY: install
 
 clean:
-		rm -f cifdb liverail.cgi corpusdb vstpdb trustdb service-report *.o 
+		rm -f cifdb archdb liverail.cgi corpusdb vstpdb trustdb service-report *.o 
 
 
