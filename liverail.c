@@ -50,7 +50,7 @@ static char * show_expected_time(const char * const scheduled, const word deviat
 
 
 #define NAME "Live Rail"
-#define BUILD "V316"
+#define BUILD "V317"
 
 #define COLUMNS 6
 #define URL_BASE "/rail/liverail/"
@@ -1407,12 +1407,12 @@ static void report_train_summary(const word index, const time_t when, const word
       // Last column of outer table - Key
       if(mode == UPDATE)
       {
-         printf("tr49|summ-table-idle|<td>%d trains.</td>\n", trains - nbus);
-         printf("tr410|summ-table-idle|<td%s>%d not on time.</td>\n", nlate?" class=\"summ-table-minor\"":"", nlate);
-         printf("tr411|summ-table-idle|<td%s>%d cancelled.</td>\n", ncape?" class=\"summ-table-cape\"":"", ncape);
-         printf("tr412|summ-table-idle|<td>%d buses.</td>\n", nbus);
-         printf("tr413|summ-table-idle|<td>%d activation deduced.</td>\n", ndeduced);
-         printf("tr414|summ-table-idle|<td>%d departure not reported.</td>\n", narrival);
+         printf("tr%d9|summ-table-idle|<td>%d trains.</td>\n", COLUMNS, trains - nbus);
+         printf("tr%d10|summ-table-idle|<td%s>%d not on time.</td>\n", COLUMNS, nlate?" class=\"summ-table-minor\"":"", nlate);
+         printf("tr%d11|summ-table-idle|<td%s>%d cancelled.</td>\n", COLUMNS, ncape?" class=\"summ-table-cape\"":"", ncape);
+         printf("tr%d12|summ-table-idle|<td>%d buses.</td>\n", COLUMNS, nbus);
+         printf("tr%d13|summ-table-idle|<td>%d activation deduced.</td>\n", COLUMNS, ndeduced);
+         printf("tr%d14|summ-table-idle|<td>%d departure not reported.</td>\n", COLUMNS, narrival);
       }
       else if(mode == SUMMARY)
       {
@@ -1426,12 +1426,12 @@ static void report_train_summary(const word index, const time_t when, const word
          printf("<tr class=\"summ-table-idle\"><td>&nbsp;</td></tr>");
          printf("<tr class=\"summ-table-idle\"><td>&nbsp;</td></tr>");
          printf("<tr class=\"summ-table-head\"><th>Statistics</th></tr>\n");
-         printf("<tr id=\"tr49\" class=\"summ-table-idle\"><td>%d trains.</td></tr>", trains - nbus);
-         printf("<tr id=\"tr410\" class=\"summ-table-idle\"><td%s>%d not on time.</td></tr>", nlate?" class=\"summ-table-minor\"":"", nlate);
-         printf("<tr id=\"tr411\" class=\"summ-table-idle\"><td%s>%d cancelled.</td></tr>", ncape?" class=\"summ-table-cape\"":"", ncape);
-         printf("<tr id=\"tr412\" class=\"summ-table-idle\"><td>%d buses.</td></tr>", nbus);
-         printf("<tr id=\"tr413\" class=\"summ-table-idle\"><td>%d activation deduced.</td></tr>", ndeduced);
-         printf("<tr id=\"tr414\" class=\"summ-table-idle\"><td>%d departure not reported.</td></tr>", narrival);
+         printf("<tr id=\"tr%d9\" class=\"summ-table-idle\"><td>%d trains.</td></tr>", COLUMNS, trains - nbus);
+         printf("<tr id=\"tr%d10\" class=\"summ-table-idle\"><td%s>%d not on time.</td></tr>", COLUMNS, nlate?" class=\"summ-table-minor\"":"", nlate);
+         printf("<tr id=\"tr%d11\" class=\"summ-table-idle\"><td%s>%d cancelled.</td></tr>", COLUMNS, ncape?" class=\"summ-table-cape\"":"", ncape);
+         printf("<tr id=\"tr%d12\" class=\"summ-table-idle\"><td>%d buses.</td></tr>", COLUMNS, nbus);
+         printf("<tr id=\"tr%d13\" class=\"summ-table-idle\"><td>%d activation deduced.</td></tr>", COLUMNS, ndeduced);
+         printf("<tr id=\"tr%d14\" class=\"summ-table-idle\"><td>%d departure not reported.</td></tr>", COLUMNS, narrival);
          row = 14;
          while((row++) % rows)
          {
@@ -2126,7 +2126,7 @@ static void train_text(void)
          {
             zs[0] = '\0';
          }
-         printf("                  Deleted: %s\n", zs);
+         printf("                  Deleted %s\n", zs);
 
          printf("     Bank holiday running: %s ", row0[1]);
          switch(row0[1][0])
@@ -2280,8 +2280,8 @@ static void train_text(void)
          printf("\n");
          printf("\n");
 
-         //                      0              1                2            3                4        5          6      7               8                9        10    11    12                       13                 14                   15  16
-         sprintf(query, "SELECT location_type, record_identity, tiploc_code, tiploc_instance, arrival, departure, pass, public_arrival, public_departure, platform, line, path, engineering_allowance, pathing_allowance, performance_allowance, id, location_type FROM cif_schedule_locations WHERE cif_schedule_id = %ld ORDER BY next_day,sort_time", schedule_id);
+         //                      0              1                2            3                4        5          6      7               8                9        10    11    12                       13                 14                   15  
+         sprintf(query, "SELECT location_type, record_identity, tiploc_code, tiploc_instance, arrival, departure, pass, public_arrival, public_departure, platform, line, path, engineering_allowance, pathing_allowance, performance_allowance, location_type FROM cif_schedule_locations WHERE cif_schedule_id = %ld ORDER BY next_day,sort_time", schedule_id);
 
          if(!db_query(query))
          {
@@ -2308,7 +2308,7 @@ static void train_text(void)
                if(row0[12][0]) printf("Eng: %s ",  show_time_text(row0[12]));
                if(row0[13][0]) printf("Path: %s ", show_time_text(row0[13]));
                if(row0[14][0]) printf("Perf: %s ", show_time_text(row0[14]));
-               printf("%s", show_act(row0[16]));
+               printf("%s", show_act(row0[15]));
 
                printf("\n");
             }
