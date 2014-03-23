@@ -50,7 +50,7 @@ static char * show_expected_time(const char * const scheduled, const word deviat
 
 
 #define NAME "Live Rail"
-#define BUILD "V317"
+#define BUILD "V323"
 
 #define COLUMNS 6
 #define URL_BASE "/rail/liverail/"
@@ -588,7 +588,7 @@ static void depsheet(void)
          strcat(query, " WHERE (cif_stp_indicator = 'C' OR cif_stp_indicator = 'O')");
          sprintf(zs, " AND (CIF_train_uid = '%s')", calls[index].cif_train_uid);
          strcat(query, zs);
-         sprintf(zs, " AND (deleted >= %ld) AND (created <= %ld", when, when);
+         sprintf(zs, " AND (deleted >= %ld) AND (created <= %ld)", when, when);
          strcat(query, zs);
 
          if(calls[index].next_day && calls[index].sort_time >= DAY_START)
@@ -886,8 +886,10 @@ static void report_train(const word index, const time_t when, const word huyton_
 
    // Calculate start_date from when, deducting 24h if next_day and/or adding 24h if after 00:00.
    time_t start_date = when - (calls[index].next_day?(24*60*60):0);
-   if(calls[index].sort_time < DAY_START) start_date += (24*60*60);
+   // N.B. sort_time has been munged by now so that ones before DAY_START have had 10000 added
+   if(calls[index].sort_time >= 10000) start_date += (24*60*60);
 
+   _log(DEBUG, "calls[index].sort_time = %d, DAY_START = %d, start_date = %s", calls[index].sort_time, DAY_START, show_date(start_date, false));
    //                     0             1                    2                  3              4              5                  6           
    sprintf(query, "SELECT train_status, schedule_start_date, schedule_end_date, signalling_id, CIF_train_uid, CIF_stp_indicator, update_id FROM cif_schedules WHERE id = %ld", calls[index].cif_schedule_id);
 
@@ -950,7 +952,7 @@ static void report_train(const word index, const time_t when, const word huyton_
             MYSQL_ROW row2;
             report[0] = class[0] = '\0';
             struct tm * broken = gmtime(&start_date);
-            byte dom = broken->tm_mday;
+            byte dom = broken->tm_mday; 
 
             // Then, only accept activations where dom matches, and are +- 4 days (To eliminate last month's activation.)  YUK
             sprintf(query, "SELECT created, trust_id, deduced FROM trust_activation WHERE cif_schedule_id = %ld AND substring(trust_id FROM 9) = '%02d' AND created > %ld AND created < %ld order by created", calls[index].cif_schedule_id, dom, when - 4*24*60*60, when + 4*24*60*60);
@@ -1080,6 +1082,10 @@ static void report_train_summary(const word index, const time_t when, const word
    char train_details[256], destination[128], analysis[64], mobile_analysis[32];
    struct tm * broken;
 
+   // Calculate start_date from when, deducting 24h if next_day and/or adding 24h if after 00:00.
+   time_t start_date = when - (calls[index].next_day?(24*60*60):0);
+   if(calls[index].sort_time >= 10000) start_date += (24*60*60);
+
    deviation = late = status = bus = deduced = 0;
 
    _log(PROC, "report_train_summary(%d, %ld, %d)", index, when, ntrains);
@@ -1116,10 +1122,6 @@ static void report_train_summary(const word index, const time_t when, const word
       if(mode == SUMMARY) printf("<td><table><tr class=\"summ-table-head\"><th>Train</th><th>Report</th></tr>\n");
    }
  
-   // Calculate start_date from when, deducting 24h if next_day and/or adding 24h if after 00:00.
-   time_t start_date = when - (calls[index].next_day?(24*60*60):0);
-   if(calls[index].sort_time < DAY_START) start_date += (24*60*60);
-
    //                     0             1                    2                  3              4              5                  6           
    sprintf(query, "SELECT train_status, schedule_start_date, schedule_end_date, signalling_id, CIF_train_uid, CIF_stp_indicator, update_id FROM cif_schedules WHERE id = %ld", calls[index].cif_schedule_id);
 
@@ -1963,7 +1965,7 @@ static void train(void)
          printf(" <button id=\"search\" class=\"cp-button\" onclick=\"train_date_onclick();\">Show</button> </td>\n");
          printf("</tr></table>\n");
          printf("<table>");
-         printf("<tr class=\"small-table\"><th>Received</th><th>Event</th><th>Source</th><th>Location</th><th>P</th><th>Event Type</th><th>Planned Type</th><th>WTT</th><th>GBTT</th><th>Actual</th><th>Var</th><th>Next Report (Run Time)</th><th>Flags</th></tr>\n");
+         printf("<tr class=\"small-table\"><th>&nbsp;&nbsp;Received&nbsp;&nbsp;</th><th>Event</th><th>&nbsp;&nbsp;&nbsp;&nbsp;Source&nbsp;&nbsp;&nbsp;&nbsp;</th><th>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Location&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</th><th>P</th><th>Event Type</th><th>Planned Type</th><th>WTT</th><th>GBTT</th><th>Actual</th><th>&nbsp;&nbsp;Var&nbsp;&nbsp;</th><th>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Next Report (Run Time)&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</th><th>Flags</th></tr>\n");
          char query[512];
          MYSQL_RES * result2;
          MYSQL_ROW row2;
@@ -1971,8 +1973,9 @@ static void train(void)
          // Calculate dom from when, deducting 24h if next_day and/or adding 24h if after 00:00.
          // time_t start_date = when - (next_day?(24*60*60):0);
          // if(sort_time < DAY_START) start_date += (24*60*60);
-         // TO BE DONE
+         // 
          // NO NO NO.  The link to get here MUST have the start date of the train, NOT the date at the point clicked.
+         // So we DON'T need to fiddle here.
          time_t start_date = when;
 
          byte dom = broken->tm_mday;

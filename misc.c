@@ -445,3 +445,4 @@ qword time_ms(void)
 
    return result;
 }
+

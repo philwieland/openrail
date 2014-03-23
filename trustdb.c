@@ -39,7 +39,7 @@
 #include "db.h"
 
 #define NAME  "trustdb"
-#define BUILD "V225"
+#define BUILD "V317"
 
 static void perform(void);
 static void process_message(const char * const body);
@@ -68,7 +68,7 @@ static char headers[1024], body[65536];
 static jsmntok_t tokens[NUM_TOKENS];
 
 // Time in ms after last idle period before we commence task shedding.
-#define LAST_IDLE_LIMIT 64000
+#define LAST_IDLE_LIMIT 32000
 // Time in seconds between statistical reports.
 #define REPORT_INTERVAL (24*60*60)
 

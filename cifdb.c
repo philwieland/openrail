@@ -33,7 +33,7 @@
 #include "db.h"
 
 #define NAME  "cifdb"
-#define BUILD "V310"
+#define BUILD "V318"
 
 static void process_object(const char * object);
 static void process_timetable(const char * string, const jsmntok_t * tokens);
@@ -51,6 +51,7 @@ static void jsmn_dump_tokens(const char * string, const jsmntok_t * tokens, cons
 static word fetch_file(void);
 static size_t cif_write_data(void *buffer, size_t size, size_t nmemb, void *userp);
 void extract_match(const char * source, const regmatch_t * matches, const unsigned int match, char * result, const size_t max_length);
+static char * tiploc_name(const char * const tiploc);
 
 static word debug, reset_db, fetch_all, run, tiploc_ignored, test_mode;
 static char * opt_filename;
@@ -66,9 +67,9 @@ static dword count_schedule_create, count_schedule_delete_hit, count_schedule_de
 static dword count_schedule_loc_create, count_schedule_loc_delete;
 static dword count_assoc_create, count_assoc_delete_hit, count_assoc_delete_miss;
 static dword count_fetches;
-#define HUYTON_REPORT_SIZE 16
-static unsigned long huyton_report_id[HUYTON_REPORT_SIZE];
-static word huyton_report_index;
+#define HOME_REPORT_SIZE 64
+static unsigned long home_report_id[HOME_REPORT_SIZE];
+static word home_report_index;
 
 // Buffer for reading file
 #define MAX_BUF 8192
@@ -329,7 +330,7 @@ int main(int argc, char **argv)
    count_assoc_delete_hit     = 0;
    count_assoc_delete_miss    = 0;
    count_fetches              = 0;
-   huyton_report_index = 0;
+   home_report_index = 0;
 
    struct tm * broken = localtime(&start_time);
    word date = broken->tm_mday;
@@ -362,7 +363,7 @@ int main(int argc, char **argv)
    size_t iobj = 0;
    size_t buf_end;
 
-   if(broken->tm_mday != date)
+   if(broken->tm_mday != date && !(opt_url || opt_filename))
    {
       _log(CRITICAL, "Abandoned file fetch.");
    }
@@ -464,17 +465,81 @@ int main(int argc, char **argv)
    _log(GENERAL, zs);
    strcat(report, zs); strcat(report, "\n");
 
-   if(huyton_report_index)
+   sprintf(zs, "Schedules created passing Huyton : %s", commas(home_report_index));
+   _log(GENERAL, zs);
+   strcat(report, "\n"); strcat(report, zs); strcat(report, "\n");
+
    {
-      sprintf(zs, "Schedules created passing Huyton : %s", commas(huyton_report_index));
-      _log(GENERAL, zs);
-      strcat(report, "\n"); strcat(report, zs); strcat(report, "\n");
+      // Report details of home trains
       word i;
-      for(i=0; i < huyton_report_index; i++)
+      char train[256], q[1024];
+      MYSQL_RES * result0, * result1;
+      MYSQL_ROW row0, row1;
+
+      for(i=0; i < home_report_index && i < HOME_REPORT_SIZE; i++)
       {
-         sprintf(zs, "%ld", huyton_report_id[i]);
+         row0 = NULL;
+         result0 = NULL;
+         sprintf(zs, "%ld ", home_report_id[i]);
+         
+         sprintf(q, "select CIF_train_UID, signalling_id, schedule_start_date, schedule_end_date FROM cif_schedules WHERE id = %ld", home_report_id[i]);
+         if(!db_query(q))
+         {
+            result0 = db_store_result();
+            if((row0 = mysql_fetch_row(result0)))
+            {
+               sprintf(train, "(%s) %4s ", row0[0], row0[1]);
+               strcat(zs, train);
+            }
+         }
+         sprintf(q, "SELECT tiploc_code, departure FROM cif_schedule_locations WHERE record_identity = 'LO' AND cif_schedule_id = %ld", home_report_id[i]);
+         if(!db_query(q))
+         {
+            result1 = db_store_result();
+            if((row1 = mysql_fetch_row(result1)))
+            {
+               sprintf(train, " %s %s to ", show_time_text(row1[1]), tiploc_name(row1[0]));
+               strcat(zs, train);
+            }
+            mysql_free_result(result1);
+         }
+         sprintf(q, "SELECT tiploc_code FROM cif_schedule_locations WHERE record_identity = 'LT' AND cif_schedule_id = %ld", home_report_id[i]);
+         if(!db_query(q))
+         {
+            result1 = db_store_result();
+            if((row1 = mysql_fetch_row(result1)))
+            {
+               strcat (zs, tiploc_name(row1[0]));
+            }
+            mysql_free_result(result1);
+         }
+
+         if(row0)
+         {
+            dword from = atol(row0[2]);
+            dword to   = atol(row0[3]);
+            if(from == to)
+            {
+               strcat(zs, "  Runs on ");
+               strcat(zs, date_text(from, true));
+            }
+            else
+            {
+               strcat(zs, "  Runs from ");
+               strcat(zs, date_text(from, true));
+               strcat(zs, " to ");
+               strcat(zs, date_text(to,   true));
+            }
+         }
+         if(result0) mysql_free_result(result0);
+         
          _log(GENERAL, zs);
          strcat(report, zs); strcat(report, "\n");
+      }
+      if(home_report_index >= HOME_REPORT_SIZE)
+      {
+         _log(GENERAL, "[Further schedules omitted]");
+         strcat(report, "[Further schedules omitted]"); strcat(report, "\n");
       }
    }
 
@@ -924,18 +989,18 @@ static word process_schedule_location(const char * string, const jsmntok_t * tok
 
    if(huyton)
    {
-      if(huyton_report_index < HUYTON_REPORT_SIZE)
+      if(home_report_index < HOME_REPORT_SIZE)
       {
          word i;
-         for(i = 0; i < huyton_report_index && huyton_report_id[i] != schedule_id; i++);
-         if(i == huyton_report_index)
+         for(i = 0; i < home_report_index && home_report_id[i] != schedule_id; i++);
+         if(i == home_report_index)
          {
-            huyton_report_id[huyton_report_index++] = schedule_id;
+            home_report_id[home_report_index++] = schedule_id;
          }
       }
       else
       {
-         huyton_report_index++;
+         home_report_index++;
       }
    }
 
@@ -1279,5 +1344,28 @@ void extract_match(const char * source, const regmatch_t * matches, const unsign
 
    strncpy(result, source + matches[match].rm_so, size);
    result[size] = '\0';
+}
+
+static char * tiploc_name(const char * const tiploc)
+{
+   // Not re-entrant
+   char query[256];
+   MYSQL_RES * result0;
+   MYSQL_ROW row0;
+   static char result[128];
+
+   sprintf(query, "select fn from corpus where tiploc = '%s'", tiploc);
+   db_query(query);
+   result0 = db_store_result();
+   if((row0 = mysql_fetch_row(result0)) && row0[0][0]) 
+   {
+      strncpy(result, row0[0], 127);
+      result[127] = '\0';
+   }
+   else
+   {
+      strcpy(result, tiploc);
+   }
+   return result;
 }
 

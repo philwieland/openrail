@@ -790,7 +790,6 @@ static void process_create_schedule(const char * string, const jsmntok_t * token
       }
 
       strcat(message, zs);
-      strcat(message, "\n\n");
 
       sprintf(query, "SELECT schedule_start_date, schedule_end_date FROM cif_schedules WHERE id = %ld", id);
       if(!db_query(query))
@@ -802,12 +801,12 @@ static void process_create_schedule(const char * string, const jsmntok_t * token
             dword to   = atol(row0[1]);
             if(from == to)
             {
-               strcat(message, "Service runs on ");
+               strcat(message, "  Runs on ");
                strcat(message, date_text(from, true));
             }
             else
             {
-               strcat(message, "Service runs from ");
+               strcat(message, "  Runs from ");
                strcat(message, date_text(from, true));
                strcat(message, " to ");
                strcat(message, date_text(to,   true));
@@ -1120,6 +1119,7 @@ static void log_message(const char * message)
       fclose(fp);
    }
 }
+
 static char * tiploc_name(const char * const tiploc)
 {
    // Not re-entrant

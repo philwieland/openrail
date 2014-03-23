@@ -33,11 +33,13 @@
 #include "db.h"
 
 #define NAME  "archdb"
-#define BUILD "V309"
+#define BUILD "V322"
 
 static int smart_loop(const word initial_quantity, int (*f)(word));
 static void create_database(void);
 static void perform(void);
+static int cif_associations(const word quantity);
+static int cif_schedules(const word quantity);
 static int trust_activation(const word quantity);
 static int trust_cancellation(const word quantity);
 static int trust_movement(const word quantity);
@@ -50,11 +52,16 @@ static time_t start_time, last_reported_time;
 
 #define NONE_FOUND -98
 
+#define DAY_ROTATION 4
+
 // Stats
-enum stats_categories {TrustActivation, TrustCancellation, TrustMovement, TrustChangeOrigin, TrustChangeID, MAXstats};
+enum stats_categories {CIFAssociation, CIFSchedule, CIFScheduleLocation, TrustActivation, TrustCancellation, TrustMovement, TrustChangeOrigin, TrustChangeID, MAXstats};
 qword stats[MAXstats];
 const char * stats_category[MAXstats] = 
    {
+      "CIF association records archived",
+      "CIF schedule records archived",
+      "CIF schedule location records archived",
       "Trust activation records archived", 
       "Trust cancellation records archived", 
       "Trust movement records archived", 
@@ -104,12 +111,12 @@ int main(int argc, char **argv)
       break;
       }
 
-   if(age == 0 || usage) 
+   if(usage) 
    {
       printf(
              "Usage:\n"
              "-c <file>  Path to config file.\n"
-             "-a <days>  Number of days to retain.\n"
+             "-a <days>  Number of days to retain.  Omit this to skip the archiving.\n"
              );
       exit(1);
    }
@@ -226,18 +233,30 @@ static int smart_loop(const word initial_quantity, int (*f)(word))
    {
       elapsed = time_ms();
       reply = f(quantity);
-      if(reply) return reply;
+      if(reply) 
+      {
+         _log(GENERAL, "smart_loop():  Final quantity was %d.", quantity);
+         return reply;
+      }
       elapsed = time_ms() - elapsed;
-      if(elapsed < THRESHOLD_VL) quantity = quantity * 6 / 5;
-      else if(elapsed < THRESHOLD_L) quantity = quantity * 21 / 20;
+      if(elapsed < THRESHOLD_VL) quantity = (quantity * 6 / 5) + 1;
+      else if(elapsed < THRESHOLD_L) quantity = (quantity * 21 / 20) + 1;
       else if(elapsed < THRESHOLD_H);
-      else if(elapsed < THRESHOLD_VH) quantity = quantity * 19 / 20;
+      else if(elapsed < THRESHOLD_VH) quantity = (quantity * 19 / 20) - 1;
       else                            quantity = quantity / 2;
       if(quantity > MAX_QUANTITY) quantity = MAX_QUANTITY;
       if(quantity < MIN_QUANTITY) quantity = MIN_QUANTITY;
       _log(DEBUG, "smart_loop():  %lld ms elapsed.  New quantity is %d", elapsed, quantity);
       if(run) sleep(1);
+      if(run && debug) sleep(1);
+      if(run && debug) sleep(1);
+      if(run && debug) sleep(1);
+      if(run && debug) sleep(1);
+      if(run && debug) sleep(1);
+      if(run && debug) sleep(1);
+      if(run && debug) sleep(1);
    }
+   _log(GENERAL, "smart_loop():  Final quantity was %d.", quantity);
    return 0;
 }
 
@@ -247,11 +266,13 @@ static void create_database(void)
    MYSQL_ROW row0;
    word create_trust_activation, create_trust_cancellation, create_trust_movement;
    word create_trust_changeorigin, create_trust_changeid;
+   word create_cif_associations, create_cif_schedules, create_cif_schedule_locations;
 
    _log(PROC, "create_database()");
 
    create_trust_activation = create_trust_cancellation = create_trust_movement = true;
    create_trust_changeorigin = create_trust_changeid = true;
+   create_cif_associations = create_cif_schedules = create_cif_schedule_locations = true;
 
    if(db_query("show tables")) return;
    
@@ -263,6 +284,9 @@ static void create_database(void)
       if(!strcasecmp(row0[0], "trust_movement_arch")) create_trust_movement = false;
       if(!strcasecmp(row0[0], "trust_changeorigin_arch")) create_trust_changeorigin = false;
       if(!strcasecmp(row0[0], "trust_changeid_arch")) create_trust_changeid = false;
+      if(!strcasecmp(row0[0], "cif_associations_arch")) create_cif_associations = false;
+      if(!strcasecmp(row0[0], "cif_schedules_arch")) create_cif_schedules = false;
+      if(!strcasecmp(row0[0], "cif_schedule_locations_arch")) create_cif_schedule_locations = false;
    }
    mysql_free_result(result0);
 
@@ -344,72 +368,193 @@ static void create_database(void)
                );
       _log(GENERAL, "Created database table trust_changeid_arch.");
    }
+   if(create_cif_associations)
+   {
+      db_query(
+"CREATE TABLE cif_associations_arch              "
+"(                                               "
+"update_id               SMALLINT UNSIGNED NOT NULL,        "
+"created                 INT UNSIGNED NOT NULL,       "
+"deleted                 INT UNSIGNED NOT NULL,       "
+"main_train_uid          CHAR(6) NOT NULL,       "
+"assoc_train_uid         CHAR(6) NOT NULL,       "
+"assoc_start_date        INT UNSIGNED NOT NULL,       "
+"assoc_end_date          INT UNSIGNED NOT NULL,       "
+"assoc_days              CHAR(7) NOT NULL,       "
+"category                CHAR(2) NOT NULL,       "
+"date_indicator          CHAR(1) NOT NULL,       "
+"location                CHAR(7) NOT NULL,       "
+"base_location_suffix    CHAR(1) NOT NULL,       "
+"assoc_location_suffix   CHAR(1) NOT NULL,       "
+"diagram_type            CHAR(1) NOT NULL,       "
+"CIF_stp_indicator       CHAR(1) NOT NULL        "
+") ENGINE = InnoDB"
+               );
+      _log(GENERAL, "Created database table cif_associations_arch.");
+   }
+   if(create_cif_schedules)
+   {
+      db_query(
+"CREATE TABLE cif_schedules_arch                 "
+"(                                               "
+"update_id                     SMALLINT UNSIGNED NOT NULL,  "
+"created                       INT UNSIGNED NOT NULL, "
+"deleted                       INT UNSIGNED NOT NULL, "
+"CIF_bank_holiday_running      CHAR(1) NOT NULL, "
+"CIF_stp_indicator             CHAR(1) NOT NULL, "
+"CIF_train_uid                 CHAR(6) NOT NULL, "
+"applicable_timetable          char(1) NOT NULL, "
+"atoc_code                     CHAR(2) NOT NULL, "
+   //"traction_class                CHAR(8) NOT NULL, " // "Not used" in CIF spec so omitted here.
+"uic_code                      CHAR(5) NOT NULL, "
+"runs_mo                       BOOLEAN NOT NULL, "
+"runs_tu                       BOOLEAN NOT NULL, "
+"runs_we                       BOOLEAN NOT NULL, "
+"runs_th                       BOOLEAN NOT NULL, "
+"runs_fr                       BOOLEAN NOT NULL, "
+"runs_sa                       BOOLEAN NOT NULL, "
+"runs_su                       BOOLEAN NOT NULL, "
+"schedule_end_date             INT UNSIGNED NOT NULL, "
+"signalling_id                 CHAR(4) NOT NULL, "
+"CIF_train_category            CHAR(2) NOT NULL, "
+"CIF_headcode                  CHAR(4) NOT NULL, "
+   //"CIF_course_indicator          CHAR(8) NOT NULL, " // "Not used" in CIF spec, so omitted here.
+"CIF_train_service_code        CHAR(8) NOT NULL, "
+"CIF_business_sector           CHAR(1) NOT NULL, "
+"CIF_power_type                CHAR(3) NOT NULL, "
+"CIF_timing_load               CHAR(4) NOT NULL, "
+"CIF_speed                     CHAR(3) NOT NULL, "
+"CIF_operating_characteristics CHAR(6) NOT NULL, "
+"CIF_train_class               CHAR(1) NOT NULL, "
+"CIF_sleepers                  CHAR(1) NOT NULL, "
+"CIF_reservations              CHAR(1) NOT NULL, "
+"CIF_connection_indicator      CHAR(1) NOT NULL, "
+"CIF_catering_code             CHAR(4) NOT NULL, "
+"CIF_service_branding          CHAR(4) NOT NULL, "
+"schedule_start_date           INT UNSIGNED NOT NULL, "
+"train_status                  CHAR(1) NOT NULL, "
+"id                            INT UNSIGNED NOT NULL, "
+"INDEX(schedule_end_date), INDEX(schedule_start_date), INDEX(CIF_train_uid), INDEX(CIF_stp_indicator) "
+") ENGINE = InnoDB"
+               );
+      _log(GENERAL, "Created database table cif_schedules_arch.");
+   }
+   if(create_cif_schedule_locations)
+   {
+      db_query(
+"CREATE TABLE cif_schedule_locations_arch        "
+"(                                               "
+"update_id                     SMALLINT UNSIGNED NOT NULL, "
+"cif_schedule_id               INT UNSIGNED NOT NULL, "
+"location_type                 CHAR(12) NOT NULL, " // Expected to become activity ?????
+"record_identity               CHAR(2) NOT NULL, " // LO, LI, LT, etc
+"tiploc_code                   CHAR(7) NOT NULL, "
+"tiploc_instance               CHAR(1) NOT NULL, "
+"arrival                       CHAR(5) NOT NULL, "
+"departure                     CHAR(5) NOT NULL, "
+"pass                          CHAR(5) NOT NULL, "
+"public_arrival                CHAR(4) NOT NULL, "
+"public_departure              CHAR(4) NOT NULL, "
+"sort_time                     SMALLINT UNSIGNED NOT NULL, "
+"next_day                      BOOLEAN NOT NULL, "
+"platform                      CHAR(3) NOT NULL, "
+"line                          CHAR(3) NOT NULL, "
+"path                          CHAR(3) NOT NULL, "
+"engineering_allowance         CHAR(2) NOT NULL, "
+"pathing_allowance             CHAR(2) NOT NULL, "
+"performance_allowance         CHAR(2) NOT NULL, "
+"INDEX(cif_schedule_id), INDEX(tiploc_code) "
+") ENGINE = InnoDB"
+               );
+      _log(GENERAL, "Created database table cif_schedule_locations_arch.");
+   }
 }
 
 static void perform(void)
 {
-   // Move threshold to 02:00
-
-   threshold = time(NULL) - 60*60*24*age;
-   struct tm * broken = localtime(&threshold);
-   broken->tm_hour = 2; broken->tm_min = 0; broken->tm_sec = 0;
-   threshold = timelocal(broken);
-
-   _log(GENERAL, "Removing all records more than %d days old.  Cut-off threshold is %s.", age, time_text(threshold, true));
-
-   int result;
-
-   _log(GENERAL, "Processing table trust_activation...");
-   result = smart_loop(10, &trust_activation);
-   if(run && result != NONE_FOUND)
+   struct tm * broken;
+   if(age)
    {
-      _log(CRITICAL, "Processing trust_activation failed, error %d.", result);
-      return;
-   }
-   if(!run) return;
+      // Move threshold to 02:00
+      threshold = time(NULL) - 60*60*24*age;
+      broken = localtime(&threshold);
+      broken->tm_hour = 2; broken->tm_min = 0; broken->tm_sec = 0;
+      threshold = timelocal(broken);
 
-   _log(GENERAL, "Processing table trust_cancellation...");
-   result = smart_loop(10, &trust_cancellation);
-   if(run && result != NONE_FOUND)
-   {
-      _log(CRITICAL, "Processing trust_cancellation failed, error %d.", result);
-      return;
-   }
-   if(!run) return;
+      _log(GENERAL, "Removing all records more than %d days old.  (Cut-off threshold is %s.)", age, time_text(threshold, true));
 
-   _log(GENERAL, "Processing table trust_movement...");
-   result = smart_loop(10, &trust_movement);
-   if(run && result != NONE_FOUND)
-   {
-      _log(CRITICAL, "Processing trust_movement failed, error %d.", result);
-      return;
-   }
-   if(!run) return;
+      int result;
 
-   _log(GENERAL, "Processing table trust_changeorigin...");
-   result = smart_loop(10, &trust_changeorigin);
-   if(run && result != NONE_FOUND)
-   {
-      _log(CRITICAL, "Processing trust_changeorigin failed, error %d.", result);
-      return;
-   }
-   if(!run) return;
+      _log(GENERAL, "Processing table cif_associations...");
+      result = smart_loop(1, &cif_associations);
+      if(run && result != NONE_FOUND)
+      {
+         _log(CRITICAL, "Processing cif_associations failed, error %d.", result);
+         return;
+      }
+      if(!run) return;
 
-   _log(GENERAL, "Processing table trust_changeid...");
-   result = smart_loop(10, &trust_changeid);
-   if(run && result != NONE_FOUND)
-   {
-      _log(CRITICAL, "Processing trust_changeid failed, error %d.", result);
-      return;
+      _log(GENERAL, "Processing tables cif_schedules and cif_schedule_locations...");
+      result = smart_loop(10, &cif_schedules);
+      if(run && result != NONE_FOUND)
+      {
+         _log(CRITICAL, "Processing cif_schedules and cif_schedule_locations failed, error %d.", result);
+         return;
+      }
+      if(!run) return;
+
+      _log(GENERAL, "Processing table trust_activation...");
+      result = smart_loop(10, &trust_activation);
+      if(run && result != NONE_FOUND)
+      {
+         _log(CRITICAL, "Processing trust_activation failed, error %d.", result);
+         return;
+      }
+      if(!run) return;
+      
+      _log(GENERAL, "Processing table trust_cancellation...");
+      result = smart_loop(10, &trust_cancellation);
+      if(run && result != NONE_FOUND)
+      {
+         _log(CRITICAL, "Processing trust_cancellation failed, error %d.", result);
+         return;
+      }
+      if(!run) return;
+
+      _log(GENERAL, "Processing table trust_movement...");
+      result = smart_loop(10, &trust_movement);
+      if(run && result != NONE_FOUND)
+      {
+         _log(CRITICAL, "Processing trust_movement failed, error %d.", result);
+         return;
+      }
+      if(!run) return;
+
+      _log(GENERAL, "Processing table trust_changeorigin...");
+      result = smart_loop(10, &trust_changeorigin);
+      if(run && result != NONE_FOUND)
+      {
+         _log(CRITICAL, "Processing trust_changeorigin failed, error %d.", result);
+         return;
+      }
+      if(!run) return;
+
+      _log(GENERAL, "Processing table trust_changeid...");
+      result = smart_loop(10, &trust_changeid);
+      if(run && result != NONE_FOUND)
+      {
+         _log(CRITICAL, "Processing trust_changeid failed, error %d.", result);
+         return;
+      }
+      if(!run) return;
    }
-   if(!run) return;
 
    _log(GENERAL, "Dumping database...");
 
    time_t now = time(NULL);
    time_t day_number = now / 3600;  // Warning
    day_number /= 24;                // We will get the wrong day number if running between 00:00 and 00:59
-   day_number %= 4;                 // when summner time is active
+   day_number %= DAY_ROTATION;                 // when summner time is active
    broken = localtime(&now);
    char day_filepath[256], mon_filepath[256];
    sprintf(day_filepath, "/var/backup/%s-database-day-%ld.sql.gz", conf.db_name, day_number);
@@ -419,8 +564,123 @@ static void perform(void)
    sprintf(c, "/usr/bin/nice /usr/bin/mysqldump --single-transaction --quick -h %s -u %s -p%s %s | /usr/bin/nice gzip --best > %s",
            conf.db_server, conf.db_user, conf.db_pass, conf.db_name, day_filepath);
    int i = system(c);
-   sprintf(c, "cp %s %s", day_filepath, mon_filepath);
+   sprintf(c, "/bin/cp %s %s", day_filepath, mon_filepath);
    i = system(c);
+}
+
+static int cif_associations(const word quantity)
+{
+   // ARSE.  There is nothing to order these by!
+   char q[1024];
+   int r;
+   int count = 0;
+   MYSQL_RES * result;
+   MYSQL_ROW row;
+
+   sprintf(q, "SELECT DISTINCT(concat(created, main_train_uid)), created, main_train_uid FROM cif_associations WHERE deleted < %ld OR assoc_end_date < %ld LIMIT %d", threshold, threshold, quantity);
+   r = db_query(q);
+   if(r) return r;
+
+   result = db_store_result();
+   while(run && (row = mysql_fetch_row(result)))
+   {
+
+      sprintf(q, "INSERT INTO cif_associations_arch SELECT * FROM cif_associations WHERE created = %s AND main_train_uid = '%s'", row[1], row[2]);
+
+      r = db_query(q);
+      if(r) 
+      {
+         mysql_free_result(result);
+         return r;
+      }
+
+      sprintf(q, "DELETE FROM cif_associations WHERE created = %s AND main_train_uid = '%s'", row[1], row[2]);
+      r = db_query(q);
+      if(r) 
+      {
+         mysql_free_result(result);
+         return r;
+      }
+
+      word deleted = db_row_count();
+      stats[CIFAssociation] += deleted;
+      count += deleted;
+      _log(DEBUG, "Deleted %d records.", deleted);
+   }
+
+   _log(DEBUG, "cif_associations(%d) has archived %d records.", quantity, count);
+
+   if(count) return 0;
+
+
+   return NONE_FOUND;
+}
+
+static int cif_schedules(const word quantity)
+{
+   char q[1024];
+   int r;
+   int count = 0;
+   int countl = 0;
+   MYSQL_RES * result;
+   MYSQL_ROW row;
+
+   sprintf(q, "SELECT id FROM cif_schedules WHERE deleted < %ld OR schedule_end_date < %ld LIMIT %d", threshold, threshold, quantity);
+   r = db_query(q);
+   if(r) return r;
+
+   result = db_store_result();
+   while(run && (row = mysql_fetch_row(result)))
+   {
+
+      sprintf(q, "INSERT INTO cif_schedules_arch SELECT * FROM cif_schedules WHERE id = %s", row[0]);
+
+      r = db_query(q);
+      if(r) 
+      {
+         mysql_free_result(result);
+         return r;
+      }
+
+      sprintf(q, "DELETE FROM cif_schedules WHERE id = %s", row[0]);
+      r = db_query(q);
+      if(r) 
+      {
+         mysql_free_result(result);
+         return r;
+      }
+
+      word deleted = db_row_count();
+      stats[CIFSchedule] += deleted;
+      count += deleted;
+
+      sprintf(q, "INSERT INTO cif_schedule_locations_arch SELECT * FROM cif_schedule_locations WHERE cif_schedule_id = %s", row[0]);
+
+      r = db_query(q);
+      if(r) 
+      {
+         mysql_free_result(result);
+         return r;
+      }
+
+      sprintf(q, "DELETE FROM cif_schedule_locations WHERE cif_schedule_id = %s", row[0]);
+      r = db_query(q);
+      if(r) 
+      {
+         mysql_free_result(result);
+         return r;
+      }
+
+      deleted = db_row_count();
+      stats[CIFScheduleLocation] += deleted;
+      countl += deleted;
+   }
+
+   _log(DEBUG, "cif_schedules(%d) has archived %d and %d records.", quantity, count, countl);
+
+   if(count) return 0;
+
+   return NONE_FOUND;
 }
 
 static int trust_activation(const word quantity)
