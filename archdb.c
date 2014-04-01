@@ -570,7 +570,7 @@ static void perform(void)
 
 static int cif_associations(const word quantity)
 {
-   // ARSE.  There is nothing to order these by!
+   // There is nothing to order these by, so use created and main_train_uid as the 'key'
    char q[1024];
    int r;
    int count = 0;

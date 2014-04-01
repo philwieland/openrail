@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2013 Phil Wieland
+    Copyright (C) 2013, 2014 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -64,17 +64,8 @@ word db_query(const char * const query)
    
    if(mysql_query(mysql_object, query))
    {
-      sprintf(zs, "db_query():  mysql_query() Error %u: %s    Query:", mysql_errno(mysql_object), mysql_error(mysql_object));
-      _log(CRITICAL, zs);
-      char report[128];
-      strncpy(report, query, 96);
-      report[96] = 0;
-      if(strlen(query) > 96)
-      {
-         strcat(report, "...");
-      }
-      sprintf(zs,"\"%s\"", report);
-      _log(CRITICAL, zs);
+      _log(CRITICAL, "db_query():  mysql_query() Error %u: %s    Query:", mysql_errno(mysql_object), mysql_error(mysql_object));
+      _log(CRITICAL, query);
 
       db_disconnect();
       return 3;

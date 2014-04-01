@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2013 Phil Wieland
+    Copyright (C) 2013, 2014 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -33,7 +33,7 @@
 #include "db.h"
 
 #define NAME  "cifdb"
-#define BUILD "V318"
+#define BUILD "V401"
 
 static void process_object(const char * object);
 static void process_timetable(const char * string, const jsmntok_t * tokens);
@@ -50,7 +50,7 @@ static void reset_database(void);
 static void jsmn_dump_tokens(const char * string, const jsmntok_t * tokens, const word object_index);
 static word fetch_file(void);
 static size_t cif_write_data(void *buffer, size_t size, size_t nmemb, void *userp);
-void extract_match(const char * source, const regmatch_t * matches, const unsigned int match, char * result, const size_t max_length);
+static void extract_match(const char * source, const regmatch_t * matches, const unsigned int match, char * result, const size_t max_length);
 static char * tiploc_name(const char * const tiploc);
 
 static word debug, reset_db, fetch_all, run, tiploc_ignored, test_mode;
@@ -363,7 +363,14 @@ int main(int argc, char **argv)
    size_t iobj = 0;
    size_t buf_end;
 
-   if(broken->tm_mday != date && !(opt_url || opt_filename))
+   {
+      time_t now = time(NULL);
+      broken = localtime(&now);
+   }
+
+   // This tests if we have been retrying past midnight.  It DOES NOT check whether the recovered timestamp
+   // is what we want.
+   if(broken->tm_mday != date)
    {
       _log(CRITICAL, "Abandoned file fetch.");
    }
@@ -825,14 +832,15 @@ static void process_delete_schedule(const char * string, const jsmntok_t * token
 
    if(num_rows > 1)
    {
-      char zs[256];
-      sprintf(zs, "Delete schedule found %d matches.", num_rows);
-      _log(MAJOR, zs);
-      jsmn_dump_tokens(string, tokens, 0);
+      _log(MAJOR, "Delete schedule CIF_train_uid = \"%s\", schedule_start_date = %s (%ld), CIF_stp_indicator = %s found %d matches.", CIF_train_uid, schedule_start_date, schedule_start_date_stamp, CIF_stp_indicator, num_rows);
+      if(debug)
+      {
+         jsmn_dump_tokens(string, tokens, 0);
 
-      // Bodge!
-      query[7] = '*'; query[8] = ' ';
-      dump_mysql_result_query(query);
+         // Bodge!
+         query[7] = '*'; query[8] = ' ';
+         dump_mysql_result_query(query);
+      }
    }
  
    while((row0 = mysql_fetch_row(result0)) && row0[0]) 
@@ -1329,7 +1337,7 @@ static size_t cif_write_data(void *buffer, size_t size, size_t nmemb, void *user
    return bytes;
 }
 
-void extract_match(const char * source, const regmatch_t * matches, const unsigned int match, char * result, const size_t max_length)
+static void extract_match(const char * source, const regmatch_t * matches, const unsigned int match, char * result, const size_t max_length)
 {
    size_t size;
 
