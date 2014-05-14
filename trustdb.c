@@ -32,14 +32,16 @@
 #include <sys/resource.h>
 #include <mysql.h>
 #include <sys/sysinfo.h>
+#include <netinet/in.h>
+#include <errno.h>
+#include <netdb.h>
 
-#include "stomp.h"
 #include "jsmn.h"
 #include "misc.h"
 #include "db.h"
 
 #define NAME  "trustdb"
-#define BUILD "V317"
+#define BUILD "V509"
 
 static void perform(void);
 static void process_message(const char * const body);
@@ -52,39 +54,40 @@ static void process_trust_0007(const char * const string, const jsmntok_t * cons
 static void create_database(void);
 
 static void jsmn_dump_tokens(const char * const string, const jsmntok_t * const tokens, const word object_index);
-static void dump_headers(void);
-static char * report_error(const int error);
 static void report_stats(void);
 #define INVALID_SORT_TIME 9999
 static void log_message(const char * const message);
 static time_t correct_trust_timestamp(const time_t in);
 
-static qword last_idle;
-static word debug, run, interrupt, holdoff, high_load;
+static word debug, run, interrupt, holdoff;
 static char zs[4096];
 
-static char headers[1024], body[65536];
+#define FRAME_SIZE 64000
+static char body[FRAME_SIZE];
+
 #define NUM_TOKENS 8192
 static jsmntok_t tokens[NUM_TOKENS];
 
-// Time in ms after last idle period before we commence task shedding.
-#define LAST_IDLE_LIMIT 32000
-// Time in seconds between statistical reports.
-#define REPORT_INTERVAL (24*60*60)
+// stompy port for trust stream
+#define STOMPY_PORT 55841
+
+// Time in hours (local) when daily statistical report is produced.
+// (Set > 23 to disable daily report.)
+#define REPORT_HOUR 4
 
 static time_t start_time;
 
 // Stats
-enum stats_categories {Bytes, ConnectAttempt, GoodMessage, // Don't insert any here
+enum stats_categories {ConnectAttempt, GoodMessage, // Don't insert any here
                        Mess1, Mess2, Mess3, Mess4, Mess5, Mess6, Mess7, Mess8,
-                       NotMessage, NotRecog, Mess1Miss, MovtNoAct, DeducedAct, MAXstats};
-qword stats[MAXstats];
+                       NotMessage, NotRecog, Mess1Miss, Mess1MissHit, MovtNoAct, DeducedAct, MAXstats};
+static qword stats[MAXstats];
 qword grand_stats[MAXstats];
-const char * stats_category[MAXstats] = 
+static const char * stats_category[MAXstats] = 
    {
-      "Bytes", "Connect Attempt", "Good Message", 
+      "Stompy connect attempt", "Good message", 
       "Message type 1","Message type 2","Message type 3","Message type 4","Message type 5","Message type 6","Message type 7","Message type 8",
-      "Not a message", "Invalid or Not Recognised", "Mess 1 schedule not found", "Movement without act.", "Deduced activation",
+      "Not a message", "Invalid or not recognised", "Activation no schedule", "Found by second search", "Movement without act.", "Deduced activation",
    };
 
 // Signal handling
@@ -99,7 +102,6 @@ void termination_handler(int signum)
 
 int main(int argc, char *argv[])
 {
-
    int c;
    word usage = true;
    while ((c = getopt (argc, argv, "c:")) != -1)
@@ -262,12 +264,22 @@ int main(int argc, char *argv[])
 
    run = true;
    interrupt = false;
-   high_load = true;
-   last_idle = 0;
 
-   if(signal(SIGTERM, termination_handler) == SIG_IGN) signal(SIGTERM, SIG_IGN);
-   if(signal(SIGINT,  termination_handler) == SIG_IGN) signal(SIGINT,  SIG_IGN);
-   if(signal(SIGHUP,  termination_handler) == SIG_IGN) signal(SIGHUP,  SIG_IGN);
+   {
+      // Sort out the signal handlers
+      struct sigaction act;
+      sigset_t block_mask;
+     
+      sigemptyset(&block_mask);
+      act.sa_handler = termination_handler;
+      act.sa_mask = block_mask;
+      act.sa_flags = 0;
+      if(sigaction(SIGTERM, &act, NULL) || sigaction(SIGINT, &act, NULL))
+      {
+         _log(CRITICAL, "Failed to set up signal handler.");
+         exit(1);
+      }
+   }
    if(!debug) signal(SIGCHLD,SIG_IGN); /* ignore child */
    if(!debug) signal(SIGTSTP,SIG_IGN); /* ignore tty signals */
    if(!debug) signal(SIGTTOU,SIG_IGN);
@@ -282,14 +294,9 @@ int main(int argc, char *argv[])
    // Startup delay
    if(!debug)
    {
-      struct sysinfo info;
-      // If uptime query fails OR uptime is small, wait for system to stabilise.
-      if(sysinfo(&info) || info.uptime < 64)
-      {
-         _log(GENERAL, "Startup delay ...");
-         word i;
-         for(i = 0; i < 64 && run; i++) sleep(1);
-      }
+      _log(GENERAL, "Startup delay ...");
+      word i;
+      for(i = 0; i < 256 && run; i++) sleep(1);
    }
 
    perform();
@@ -301,10 +308,10 @@ int main(int argc, char *argv[])
 
 static void perform(void)
 {
-   int rc;
-   time_t last_report;
-
-   last_report = time(NULL) / REPORT_INTERVAL;
+   struct sockaddr_in serv_addr;
+   struct hostent *server;
+   int rc, stompy_socket;
+   word last_report_day = 9;
 
    // Initialise database
    while(db_init(conf.db_server, conf.db_user, conf.db_pass, conf.db_name) && run) 
@@ -320,206 +327,114 @@ static void perform(void)
 
    create_database();
 
+   {
+      time_t now = time(NULL);
+      struct tm * broken = localtime(&now);
+      if(broken->tm_hour >= REPORT_HOUR)
+      {
+         last_report_day = broken->tm_wday;
+      }
+   }
    while(run)
    {   
       stats[ConnectAttempt]++;
-      _log(GENERAL, "Connecting socket ...");
-      rc=stomp_connect("datafeeds.networkrail.co.uk", 61618);
+      _log(GENERAL, "Connecting socket to stompy...");
+      stompy_socket = socket(AF_INET, SOCK_STREAM, 0);
+      if (stompy_socket < 0) 
+      {
+         _log(CRITICAL, "Failed to create client socket.  Error %d %s", errno, strerror(errno));
+      }
+      server = gethostbyname("localhost");
+      if (server == NULL) 
+      {
+         _log(CRITICAL, "Failed to resolve localhost\".");
+         return;
+      }
+
+      bzero((char *) &serv_addr, sizeof(serv_addr));
+      serv_addr.sin_family = AF_INET;
+      bcopy((char *)server->h_addr, 
+            (char *)&serv_addr.sin_addr.s_addr,
+            server->h_length);
+      serv_addr.sin_port = htons(STOMPY_PORT);
+
+      /* Now connect to the server */
+      rc=connect(stompy_socket, &serv_addr, sizeof(serv_addr));
       if(rc)
       {
-         _log(CRITICAL, "Failed to connect.  Error %d %s", rc, report_error(rc));
+         sprintf(zs,"Failed to connect.  Error %d %s", errno, strerror(errno));
+         _log(CRITICAL, zs);
       }
       else
       {
-         _log(GENERAL, "Connected.");
+         _log(GENERAL, "Connected.  Waiting for messages ...");
          holdoff = 0;
+
+         int run_receive = true;
+         while(run && run_receive)
          {
-            strcpy(headers, "CONNECT\n");
-            strcat(headers, "login:");
-            strcat(headers, conf.nr_user);  
-            strcat(headers, "\npasscode:");
-            strcat(headers, conf.nr_pass);
-            strcat(headers, "\n");          
-            if(debug)
             {
-               sprintf(zs, "client-id:%s-trustdb-debug\n", conf.nr_user);
-               strcat(headers, zs);
-            }
-            else
-            {
-               sprintf(zs, "client-id:%s-trustdb-%s\n", conf.nr_user, abbreviated_host_id());
-               strcat(headers, zs);
-            }          
-            strcat(headers, "heart-beat:0,20000\n");          
-            strcat(headers, "\n");
-     
-            rc = stomp_tx(headers);
-         }
-         if(rc)
-         {
-            _log(CRITICAL, "Failed to transmit CONNECT message.  Error %d %s", rc, report_error(rc));
-         }
-         else
-         {
-            _log(GENERAL, "Sent CONNECT message.  Reading response.");
-            rc = stomp_rx(headers, sizeof(headers), body, sizeof(body));
-            if(rc)
-            {
-               _log(CRITICAL, "Failed to receive.  Error %d %s", rc, report_error(rc));
-            }
-            else
-            {
-               _log(GENERAL, "Response: Body=\"%s\", Headers:", body);
-               dump_headers();
+               time_t now = time(NULL);
+               struct tm * broken = localtime(&now);
+               if(broken->tm_hour >= REPORT_HOUR && broken->tm_wday != last_report_day)
                {
-                  strcpy(headers, "SUBSCRIBE\n");
-
-                  // Headers
-                  strcat(headers, "destination:/topic/TRAIN_MVT_ALL_TOC\n");      
-                  if(debug)
-                  {
-                     sprintf(zs, "activemq.subscriptionName:%s-trustdb-debug\n", conf.nr_user);
-                     strcat(headers, zs);
-                  }
-                  else
-                  {
-                     sprintf(zs, "activemq.subscriptionName:%s-trustdb-%s\n", conf.nr_user, abbreviated_host_id());
-                     strcat(headers, zs);
-                  }
-                  strcat(headers, "id:1\n");      
-                  strcat(headers, "ack:client\n");   
-                  strcat(headers, "\n");
-
-                  rc = stomp_tx(headers);
-               }
-               if(rc)
-               {
-                  _log(CRITICAL, "Failed to transmit SUBSCRIBE message.  Error %d %s", rc, report_error(rc));
-               }
-               else
-               {
-                  _log(GENERAL, "Sent SUBSCRIBE message.  Waiting for messages ...");
-
-                  int run_receive = 1;
-                  while(run && run_receive)
-                  {
-                     {
-                        time_t now = time(NULL);
-                        if( now / REPORT_INTERVAL != last_report)
-                        {
-                           report_stats();
-                           last_report = now / REPORT_INTERVAL;
-                        }
-                     }
-                     qword elapsed = time_ms();
-                     rc = stomp_rx(headers, sizeof(headers), body, sizeof(body));
-                     run_receive = (rc == 0);
-                     if(rc && run)
-                     {
-                        // Don't report if the error is due to an interrupt
-                        _log(MAJOR, "Error receiving frame: %d %s", rc, report_error(rc));
-                     }
-                     
-                     if(run_receive)
-                     {
-                        qword now = time_ms();
-                        elapsed = now - elapsed;
-                        if(elapsed > 1000) 
-                        {
-                           // Deemed idle.  Drop out of task shedding
-                           last_idle = now;
-                           if(high_load) _log(MINOR, "Ceasing task shedding.");
-                           high_load = false;
-                        }
-                        else
-                        {
-                           if(!high_load && now - last_idle > LAST_IDLE_LIMIT)
-                           {
-                              // Enter high load
-                              high_load = true;
-                              _log(MINOR, "High load detected.  Shedding tasks.");
-                           }
-                        }
-                              
-                        if(debug || elapsed < 1500)
-                        {
-                           _log(MINOR, "Message receive wait time was %s ms.", commas_q(elapsed));
-                        }
-                        char message_id[256];
-                        message_id[0] = '\0';
-
-                        stats[Bytes] += strlen(headers);
-                        stats[Bytes] += strlen(body);
-
-                        if(!strstr(headers, "MESSAGE"))
-                        {
-                           _log(MAJOR, "Frame received is not a MESSAGE:");
-                           dump_headers();
-                           run_receive = false;
-                           stats[NotMessage]++;
-                        }
-                     
-                        // Find message ID
-                        char * message_id_header = strstr(headers, "message-id:");
-                        if(run_receive)
-                        {
-                           if(message_id_header)
-                           {
-                              size_t i = 0;
-                              message_id_header += 11;
-                              while(*message_id_header != '\n') message_id[i++] = *message_id_header++;
-                              message_id[i++] = '\0';
-                           }
-                           else
-                           {
-                              _log(MAJOR, "No message ID found:");
-                              dump_headers();
-                           }
-                        }
-
-                        // Process the message
-                        if(run_receive) process_message(body);
-
-                        // Send ACK
-                        if(run_receive && message_id[0])
-                        {
-                           strcpy(headers, "ACK\n");
-                           strcat(headers, "subscription:1\n");
-                           strcat(headers, "message-id:");
-                           strcat(headers, message_id);
-                           strcat(headers, "\n\n");
-                           rc = stomp_tx(headers);
-                           if(rc)
-                           {
-                              _log(CRITICAL, "Failed to transmit ACK message.  Error %d %s", rc, report_error(rc));
-                              run_receive = false;
-                           }
-                        }
-                     }
-                  } // while(run && run_receive)
+                  last_report_day = broken->tm_wday;
+                  report_stats();
                }
             }
-         }
+            size_t  length = 0;
+            ssize_t l = read_all(stompy_socket, &length, sizeof(size_t));
+            if(l < sizeof(size_t))
+            {
+               if(l) _log(CRITICAL, "Failed to read message size.  Error %d %s.", errno, strerror(errno));
+               else  _log(CRITICAL, "Failed to read message size.  End of file.");
+               run_receive = false;
+            }
+            if(run && run_receive && (length < 10 || length > FRAME_SIZE))
+            {
+               _log(MAJOR, "Received invalid frame size 0x%08lx.", length);
+               run_receive = false;
+            }
+            if(run && run_receive)
+            {
+               _log(DEBUG, "RX frame size = %ld", length);
+               l = read_all(stompy_socket, body, length);
+               if(l < 1)
+               {
+                  if(l) _log(CRITICAL, "Failed to read message body.  Error %d %s.", errno, strerror(errno));
+                  else  _log(CRITICAL, "Failed to read message body.  End of file.");
+                  run_receive = false;
+               }
+               else if(l < length)
+               {
+                  // Impossible?
+                  _log(CRITICAL, "Only received %ld of %ld bytes of message body.", l, length);
+                  run_receive = false;
+               }
+            }
+
+            // Process the message
+            if(run && run_receive)
+            {
+               process_message(body);
+
+               // Send ACK
+               l = write(stompy_socket, "A", 1);
+               if(l < 0)
+               {
+                  _log(CRITICAL, "Failed to write message ack.  Error %d %s", errno, strerror(errno));
+                  run_receive = false;
+               }
+            }
+         } // while(run && run_receive)
       }
-      strcpy(headers, "DISCONNECT\n\n");
-      rc = stomp_tx(headers);
-      if(rc)
-      {
-         _log(GENERAL, "Failed to send DISCONNECT:  Error %d %s", rc, report_error(rc));
-      }
-      else _log(GENERAL, "Sent DISCONNECT.");
-      
+
       _log(GENERAL, "Disconnecting socket ...");
-      rc = stomp_disconnect(); 
-      if(rc)
-      {
-         _log(GENERAL, "Failed to disconnect:  Error %d %s", rc, report_error(rc));
-      }
-      else _log(GENERAL, "Disconnected.");
-
+      close(stompy_socket);
+      stompy_socket = -1;
       {      
          word i;
-         if(holdoff < 128) holdoff += 16;
+         if(holdoff < 128) holdoff += 15;
          else holdoff = 128;
          for(i = 0; i < holdoff && run; i++) sleep(1);
       }
@@ -603,18 +518,12 @@ static void process_message(const char * const body)
          do  index++; 
          while ( tokens[index].start < message_ends && tokens[index].start >= 0 && index < NUM_TOKENS);
 
-         if(!high_load && time_ms() - last_idle > LAST_IDLE_LIMIT)
-         {
-            // Enter high load
-            high_load = true;
-            _log(MINOR, "High load detected.  Shedding tasks.");
-         }
       }
    }
    elapsed = time_ms() - elapsed;
-   if(debug || elapsed > 1000)
+   if(debug || elapsed > 2500)
    {
-      _log(MINOR, "Transaction took %s ms.", commas_q(elapsed));
+      _log(MINOR, "Frame took %s ms to process.", commas_q(elapsed));
    }
 }
 
@@ -656,22 +565,47 @@ static void process_trust_0001(const char * const string, const jsmntok_t * cons
    strcat(report, zs1);
 
    // Bodge.  The ORDER BY here will *usually* get the correct one out first!
-   // Idea:  If we store and index on cif_train_uid, we can guarantee to get the right one.
    sprintf(query, "select id from cif_schedules where cif_train_uid = '%s' AND schedule_start_date = %ld AND schedule_end_date = %ld AND deleted > %ld ORDER BY LOCATE(CIF_stp_indicator, 'OCPN')", train_uid, schedule_start_date_stamp, schedule_end_date_stamp, time(NULL));
    if(!db_query(query))
    {
       result0 = db_store_result();
       word num_rows = mysql_num_rows(result0);
-      sprintf(zs, "  Schedule hit count %d.  Message contents:", num_rows);
+      sprintf(zs, "  Schedule hit count %d.", num_rows);
       strcat(report, zs);
       if(num_rows < 1) 
       {
          stats[Mess1Miss]++;
          _log(MINOR, report);
-         time_t now = time(NULL);
-         sprintf(query, "INSERT INTO trust_activation VALUES(%ld, '%s', %ld, 0)", now, train_id, 0L);
-         db_query(query);
-         jsmn_dump_tokens(string, tokens, index);
+         // Wait and see!
+         // There is a race condition where a VSTP schedule is published and activated simultaneously.  Hopefully two seconds later the 
+         // schedule will be in the database.
+         // TODO We need a smarter way of doing this, with a queue of deferred transactions, rather than freezing for two seconds.
+         if(run) sleep(1);
+         if(run) sleep(1);
+         if(!db_query(query))
+         {
+            mysql_free_result(result0);
+            result0 = db_store_result();
+            num_rows = mysql_num_rows(result0);
+            if(num_rows < 1)
+            {
+               _log(MINOR, "   Second attempt also missed.");
+               time_t now = time(NULL);
+               sprintf(query, "INSERT INTO trust_activation VALUES(%ld, '%s', %ld, 0)", now, train_id, 0L);
+               db_query(query);
+               if(debug) jsmn_dump_tokens(string, tokens, index);
+            }
+            else
+            {
+               stats[Mess1MissHit]++;
+               row0 = mysql_fetch_row(result0);
+               cif_schedule_id = atol(row0[0]);
+               _log(MINOR, "   Second attempt found schedule %ld.", cif_schedule_id);
+               time_t now = time(NULL);
+               sprintf(query, "INSERT INTO trust_activation VALUES(%ld, '%s', %ld, 0)", now, train_id, cif_schedule_id);
+               db_query(query);
+            }
+         }
       }
       else
       {
@@ -774,6 +708,9 @@ static void process_trust_0003(const char * string, const jsmntok_t * tokens, co
    {
       _log(MINOR, "Late movement message received, actual timestamp %s.", time_text(actual_timestamp, true));
    }
+   // NB Don't accept cif_schedule_id==0 ones here as the schedule may have arrived after the activation!
+   // This can happen due to a VSTP race, hopefully fixed V505
+   // OR due to the service being activated before the daily timetable download.
    sprintf(query, "SELECT * from trust_activation where trust_id = '%s' and created > %ld and cif_schedule_id > 0", train_id, now - (4*24*60*60));
    if(!db_query(query))
    {
@@ -789,6 +726,7 @@ static void process_trust_0003(const char * string, const jsmntok_t * tokens, co
       }
       else if(num_rows < 1)
       {
+         // Movement no activation.  Attempt to create the missing activation.
          MYSQL_ROW row0;
          char tiploc[128], reason[128];
          word sort_time;
@@ -805,7 +743,6 @@ static void process_trust_0003(const char * string, const jsmntok_t * tokens, co
          {
             strcpy(reason, "No planned timestamp");
          }
-         if(high_load) strcpy(reason, "Message load too high");
 
          if(!reason[0])
          {
@@ -840,13 +777,14 @@ static void process_trust_0003(const char * string, const jsmntok_t * tokens, co
             broken->tm_min = 0;
             broken->tm_sec = 0;
             time_t when = timegm(broken);
+
+            // TODO It is this query which takes ages.  Can we accelerate it?
             sprintf(query, "SELECT cif_schedules.id, cif_schedules.CIF_train_uid, signalling_id, CIF_stp_indicator FROM cif_schedules INNER JOIN cif_schedule_locations ON cif_schedules.id = cif_schedule_locations.cif_schedule_id WHERE cif_schedule_locations.tiploc_code = '%s'",
                     tiploc);
             sprintf(query1, " AND cif_schedule_locations.sort_time > %d AND cif_schedule_locations.sort_time < %d",
                     sort_time - 1, sort_time + 4);
             strcat(query, query1);
             strcat(query, " AND (cif_schedules.CIF_stp_indicator = 'N' OR cif_schedules.CIF_stp_indicator = 'P' OR cif_schedules.CIF_stp_indicator = 'O')");
-
 
             static const char * days_runs[8] = {"runs_su", "runs_mo", "runs_tu", "runs_we", "runs_th", "runs_fr", "runs_sa", "runs_su"};
 
@@ -856,12 +794,15 @@ static void process_trust_0003(const char * string, const jsmntok_t * tokens, co
             sprintf(query1, " OR   ((%s) AND (schedule_start_date <= %ld) AND (schedule_end_date >= %ld) AND (    next_day)))",  days_runs[yest], when - 12*60*60, when - 36*60*60);
             strcat(query, query1);
 
-            sprintf(query1, " AND deleted > %ld ORDER BY LOCATE(CIF_stp_indicator, 'NPO')", planned_timestamp);
+            //                                      Exclude buses . . . . . . . . . . . . . . .
+            sprintf(query1, " AND deleted > %ld AND train_status != 'B' AND train_status != '5' ORDER BY LOCATE(CIF_stp_indicator, 'NPO')", planned_timestamp);
             strcat(query, query1);
-
             if(!db_query(query))
             {
-               char save_uid[16], save_stp;
+#define ROWS 8
+               MYSQL_ROW rows[ROWS];
+               word row_count, row, headcode_match;
+               char save_uid[16], target_head[16], save_stp;
                save_uid[0] = save_stp = '\0';
                dword cif_schedule_id = 0;
                result0 = db_store_result();
@@ -870,24 +811,45 @@ static void process_trust_0003(const char * string, const jsmntok_t * tokens, co
                {
                   strcpy(reason, "No schedules found");
                }
-
-               while((row0 = mysql_fetch_row(result0)))
+               headcode_match = false;
+               strcpy(target_head, train_id + 2);
+               target_head[4] = '\0';
+               for(row_count = 0; row_count < ROWS && (rows[row_count] = mysql_fetch_row(result0)); row_count++)
                {
-                  _log(MINOR, "   Found potential match:%8s (%s) %4s STP=%s", row0[0], row0[1], row0[2], row0[3]);
-                  if (!reason[0])
+                  _log(MINOR, "   Potential match:%8s (%s) %4s STP:%s", rows[row_count][0], rows[row_count][1], rows[row_count][2], rows[row_count][3]);
+                  if(!strcmp(rows[row_count][2], target_head))
                   {
-                     if(save_uid[0] && strcmp(save_uid, row0[1]))  strcpy(reason, "Multiple matching schedule UIDs");
-                     else if (save_stp == 'O' && row0[3][0] =='O') strcpy(reason, "Multiple matching overlay schedules");
+                     headcode_match = true;
+                     _log(DEBUG,"   Headcode match \"%s\".", target_head);
+                  }
+               }
+               for(row = 0; row < row_count && !reason[0]; row++)
+               {
+                  // If we have a headcode match, only consider matching rows.  (If none match, consider all rows.)
+                  if((!headcode_match) || (!strcmp(rows[row][2], target_head)))
+                  {
+                     if(save_uid[0] && strcmp(save_uid, rows[row][1]))  strcpy(reason, "Multiple matching schedule UIDs");
+                     else if (save_stp == 'O' && rows[row][3][0] =='O') strcpy(reason, "Multiple matching overlay schedules");
                      else
                      {
-                        cif_schedule_id = atol(row0[0]);
-                        strcpy(save_uid, row0[1]);
-                        save_stp = row0[3][0];
+                        cif_schedule_id = atol(rows[row][0]);
+                        strcpy(save_uid, rows[row][1]);
+                        save_stp = rows[row][3][0];
                      }
                   }
                }
                mysql_free_result(result0);
 
+               if(!reason[0])
+               {
+                  sprintf(query, "SELECT * from trust_activation where created > %ld and cif_schedule_id = %ld", now - (8*60*60), cif_schedule_id);
+                  db_query(query);
+                  result0 = db_store_result();
+                  num_rows = mysql_num_rows(result0);
+                  if(num_rows > 0)
+                     sprintf(reason, "Deduced schedule %ld already has an activation recorded", cif_schedule_id);
+                  mysql_free_result(result0);
+               }
                if(!reason[0])
                {
                   sprintf(query, "INSERT INTO trust_activation VALUES(%ld, '%s', %ld, 1)", now, train_id, cif_schedule_id);
@@ -1100,47 +1062,6 @@ static void jsmn_dump_tokens(const char * const string, const jsmntok_t * const 
    return;
 }
 
-static void dump_headers(void)
-{
-   char zs[256];
-   size_t i,j;
-
-   i=0;
-   j=3;
-   zs[0]=zs[1]=zs[2]=' ';
-   while(headers[i])
-   {
-      if(headers[i] == '\n')
-      {
-         zs[j] = '\0';
-         _log(GENERAL, zs);
-         j = 3;
-         i++;
-      }
-      else
-      {
-         zs[j++] = headers[i++];
-      }
-   }
-}
-
-static char * report_error(const int error)
-{
-   static char stomp_error[256];
-   if(error < 0)
-   {
-      switch(error)
-      {
-      case -2: sprintf(stomp_error, "Stomp error:  Unknown host.");      break;
-      case -6: sprintf(stomp_error, "Stomp error:  Failed setsockopt."); break;
-      case -7: sprintf(stomp_error, "Stomp error:  End of file.");       break;
-      default: sprintf(stomp_error, "Stomp error %d", error);            break;
-      }
-      return stomp_error;
-   }
-   return strerror(error);
-}
-
 static void report_stats(void)
 {
    char zs[128];
@@ -1153,7 +1074,7 @@ static void report_stats(void)
    strcpy(report, zs);
    strcat(report, "\n");
 
-   sprintf(zs, "%25s: %-12s %ld days", "Run time", "", (time(NULL)-start_time)/(24*60*60));
+   sprintf(zs, "%25s: %-12s %ld days", "Run time", "", (time(NULL) - start_time)/(24*60*60));
    _log(GENERAL, zs);
    strcat(report, zs);
    strcat(report, "\n");

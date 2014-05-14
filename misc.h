@@ -56,5 +56,7 @@ extern char * show_time(const char * const input);
 extern char * show_time_text(const char * const input);
 extern int load_config(const char * const filepath);
 extern qword time_ms(void);
+extern qword time_us(void);
+extern ssize_t read_all(const int socket, void * buffer, const size_t size);
 
 #endif

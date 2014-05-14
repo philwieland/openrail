@@ -1,10 +1,8 @@
-CC=gcc -c -g -O2 -Wall -I/usr/include/mysql -DBIG_JOINS=1 -D_GNU_SOURCE -D_FILE_OFFSET_BITS=64 -fno-strict-aliasing -DUNIV_LINUX -I./include
+CC=gcc -c -g -O2 -Wall -I/usr/include/mysql -DBIG_JOINS=1 -D_GNU_SOURCE -D_FILE_OFFSET_BITS=64 -fno-strict-aliasing -DUNIV_LINUX
 
-all:            cifdb archdb corpusdb vstpdb trustdb liverail.cgi service-report 
+all:            cifdb archdb corpusdb vstpdb trustdb stompy liverail.cgi service-report 
 
 jsmn.o:		jsmn.c jsmn.h misc.h
-
-stomp.o:        stomp.c stomp.h
 
 db.o:           db.c misc.h db.h
 
@@ -30,15 +28,20 @@ corpusdb:       corpusdb.o jsmn.o misc.o db.o
 
 corpusdb.o:     corpusdb.c misc.h db.h
 
-vstpdb:         vstpdb.o jsmn.o stomp.o misc.o db.o 
-		gcc -g -O2 -L./lib -I./include vstpdb.o jsmn.o stomp.o misc.o db.o -lmysqlclient -o vstpdb 
+vstpdb:         vstpdb.o jsmn.o misc.o db.o 
+		gcc -g -O2 -L./lib -I./include vstpdb.o jsmn.o misc.o db.o -lmysqlclient -o vstpdb 
 
-vstpdb.o:       vstpdb.c jsmn.h stomp.h misc.h db.h
+vstpdb.o:       vstpdb.c jsmn.h misc.h db.h
 
-trustdb:        trustdb.o jsmn.o stomp.o misc.o db.o 
-		gcc -g -O2 -L./lib -I./include trustdb.o jsmn.o stomp.o misc.o db.o -lmysqlclient -o trustdb 
+trustdb:        trustdb.o jsmn.o misc.o db.o 
+		gcc -g -O2 -L./lib -I./include trustdb.o jsmn.o misc.o db.o -lmysqlclient -o trustdb 
 
-trustdb.o:      trustdb.c jsmn.h stomp.h misc.h db.h
+trustdb.o:      trustdb.c jsmn.h misc.h db.h
+
+stompy:         stompy.o misc.o 
+		gcc -g -O2 -L./lib -I./include stompy.o misc.o -o stompy 
+
+stompy.o:      stompy.c misc.h
 
 service-report: service-report.o misc.o db.o 
 		gcc -g -O2 -L./lib -I./include service-report.o misc.o db.o -lmysqlclient -o service-report
@@ -52,6 +55,7 @@ install:
 		install -m 0755 trustdb $(DESTDIR)$(prefix)/sbin
 		install -m 0755 vstpdb $(DESTDIR)$(prefix)/sbin
 		install -m 0755 corpusdb $(DESTDIR)$(prefix)/sbin
+		install -m 0755 stompy $(DESTDIR)$(prefix)/sbin
 		install -m 0755 liverail.cgi $(DESTDIR)$(prefix)/lib/cgi-bin
 		install -m 0644 liverail.css $(DESTDIR)/var/www
 		install -m 0644 liverail.js $(DESTDIR)/var/www
@@ -59,6 +63,6 @@ install:
 .PHONY: install
 
 clean:
-		rm -f cifdb archdb liverail.cgi corpusdb vstpdb trustdb service-report *.o 
+		rm -f cifdb archdb liverail.cgi corpusdb vstpdb trustdb service-report stompy *.o 
 
 

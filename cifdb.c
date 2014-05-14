@@ -33,7 +33,7 @@
 #include "db.h"
 
 #define NAME  "cifdb"
-#define BUILD "V401"
+#define BUILD "V510"
 
 static void process_object(const char * object);
 static void process_timetable(const char * string, const jsmntok_t * tokens);
@@ -63,11 +63,20 @@ static time_t start_time, last_reported_time;
 #define NOT_DELETED 0xffffffffL
 
 // Stats
-static dword count_schedule_create, count_schedule_delete_hit, count_schedule_delete_miss;
-static dword count_schedule_loc_create, count_schedule_loc_delete;
-static dword count_assoc_create, count_assoc_delete_hit, count_assoc_delete_miss;
-static dword count_fetches;
-#define HOME_REPORT_SIZE 64
+enum stats_categories {Fetches, DBError, 
+                       ScheduleCreate, ScheduleDeleteHit, ScheduleDeleteMiss,
+                       ScheduleLocCreate, ScheduleLocDelete,
+                       AssocCreate, AssocDeleteHit, AssocDeleteMiss,
+                       MAXStats };
+static qword stats[MAXStats];
+static const char * stats_category[MAXStats] = 
+   {
+      "File Fetch", "Database Error", 
+      "Schedule Create", "Schedule Delete Hit", "Schedule Delete Miss",
+      "Schedule Location Create", "Schedule Location Delete", 
+      "Association Create", "Association Delete Hit", "Association Delete Miss",
+   };
+#define HOME_REPORT_SIZE 512
 static unsigned long home_report_id[HOME_REPORT_SIZE];
 static word home_report_index;
 
@@ -243,8 +252,8 @@ int main(int argc, char **argv)
 
    if(usage) 
    {
+      printf("%s %s  Usage:\n", NAME, BUILD);
       printf(
-             "Usage:\n"
              "-c <file>  Path to config file.\n"
              "Data source:\n"
              "default    Fetch latest update.\n"
@@ -262,7 +271,6 @@ int main(int argc, char **argv)
    char zs[1024];
 
    start_time = time(NULL);
-   last_reported_time = start_time;
 
    /* Determine debug mode
      
@@ -321,15 +329,11 @@ int main(int argc, char **argv)
 
    run = 1;
    tiploc_ignored = false;
-   count_schedule_create      = 0;
-   count_schedule_delete_hit  = 0;
-   count_schedule_delete_miss = 0;
-   count_schedule_loc_create  = 0;
-   count_schedule_loc_delete  = 0;
-   count_assoc_create         = 0;
-   count_assoc_delete_hit     = 0;
-   count_assoc_delete_miss    = 0;
-   count_fetches              = 0;
+   // Zero the stats
+   {
+      word i;
+      for(i=0; i < MAXStats; i++) { stats[i] = 0; }
+   }
    home_report_index = 0;
 
    struct tm * broken = localtime(&start_time);
@@ -343,11 +347,11 @@ int main(int argc, char **argv)
       }
       {
          char report[256];
-         sprintf(report, "Attempt %ld failed to fetch file.  Pausing before retry...", count_fetches);
+         sprintf(report, "Attempt %lld failed to fetch file.  Pausing before retry...", stats[Fetches]);
          _log(GENERAL, report);
-         if(count_fetches == 4)
+         if(stats[Fetches] == 4)
          {
-            sprintf(report, "Failed to collect timetable update after %ld attempts.\n\nContinuing to retry.", count_fetches);
+            sprintf(report, "Failed to collect timetable update after %lld attempts.\n\nContinuing to retry.", stats[Fetches]);
             email_alert(NAME, BUILD, "Timetable Update Failure Report", report);
          }
       }
@@ -366,6 +370,7 @@ int main(int argc, char **argv)
    {
       time_t now = time(NULL);
       broken = localtime(&now);
+      last_reported_time = now;
    }
 
    // This tests if we have been retrying past midnight.  It DOES NOT check whether the recovered timestamp
@@ -389,13 +394,13 @@ int main(int argc, char **argv)
          if(now - last_reported_time > 10*60)
          {
             char zs[128], zs1[128];
-            sprintf(zs, "Progress: Created %s associations, ", commas(count_assoc_create));
-            sprintf(zs1, "%s schedules and ", commas(count_schedule_create));
+            sprintf(zs, "Progress: Created %s associations, ", commas(stats[AssocCreate]));
+            sprintf(zs1, "%s schedules and ", commas(stats[ScheduleCreate]));
             strcat(zs, zs1);
-            sprintf(zs1, "%s schedule locations.  Working...", commas(count_schedule_loc_create));
+            sprintf(zs1, "%s schedule locations.  Working...", commas(stats[ScheduleLocCreate]));
             strcat(zs, zs1);
             _log(GENERAL, zs);
-            last_reported_time += 10*60;
+            last_reported_time += (10*60);
          }
          
          for(ibuf = 0; ibuf < buf_end && run; ibuf++)
@@ -427,52 +432,25 @@ int main(int argc, char **argv)
 
    db_disconnect();
 
-   char report[8192];
+#define REPORT_SIZE 4096
+   char report[REPORT_SIZE];
    report[0] = '\0';
 
    _log(GENERAL, "");
    _log(GENERAL, "End of run:");
-   sprintf(zs, "Elapsed time             : %ld minutes", (time(NULL) - start_time + 30) / 60);
+   sprintf(zs, "             Elapsed time: %ld minutes", (time(NULL) - start_time + 30) / 60);
    _log(GENERAL, zs);
    strcat(report, zs); strcat(report, "\n");
 
-   sprintf(zs, "File download attempts   : %s", commas(count_fetches));
-   _log(GENERAL, zs);
-   strcat(report, zs); strcat(report, "\n");
+   for(i=0; i<MAXStats; i++)
+   {
+      sprintf(zs, "%25s: %s", stats_category[i], commas_q(stats[i]));
+      _log(GENERAL, zs);
+      strcat(report, zs);
+      strcat(report, "\n");
+   }
 
-   sprintf(zs, "Schedule create          : %s", commas(count_schedule_create));
-   _log(GENERAL, zs);
-   strcat(report, zs); strcat(report, "\n");
-
-   sprintf(zs, "Schedule delete hit      : %s", commas(count_schedule_delete_hit));
-   _log(GENERAL, zs);
-   strcat(report, zs); strcat(report, "\n");
-
-   sprintf(zs, "Schedule delete miss     : %s", commas(count_schedule_delete_miss));
-   _log(GENERAL, zs);
-   strcat(report, zs); strcat(report, "\n");
-
-   sprintf(zs, "Schedule location create : %s", commas(count_schedule_loc_create));
-   _log(GENERAL, zs);
-   strcat(report, zs); strcat(report, "\n");
-
-   sprintf(zs, "Schedule location delete : %s", commas(count_schedule_loc_delete));
-   _log(GENERAL, zs);
-   strcat(report, zs); strcat(report, "\n");
-
-   sprintf(zs, "Association create       : %s", commas(count_assoc_create));
-   _log(GENERAL, zs);
-   strcat(report, zs); strcat(report, "\n");
-
-   sprintf(zs, "Association delete hit   : %s", commas(count_assoc_delete_hit));
-   _log(GENERAL, zs);
-   strcat(report, zs); strcat(report, "\n");
-
-   sprintf(zs, "Association delete miss  : %s", commas(count_assoc_delete_miss));
-   _log(GENERAL, zs);
-   strcat(report, zs); strcat(report, "\n");
-
-   sprintf(zs, "Schedules created passing Huyton : %s", commas(home_report_index));
+   sprintf(zs, "Schedules created passing Huyton: %s", commas(home_report_index));
    _log(GENERAL, zs);
    strcat(report, "\n"); strcat(report, zs); strcat(report, "\n");
 
@@ -499,6 +477,7 @@ int main(int argc, char **argv)
                strcat(zs, train);
             }
          }
+         else stats[DBError]++;
          sprintf(q, "SELECT tiploc_code, departure FROM cif_schedule_locations WHERE record_identity = 'LO' AND cif_schedule_id = %ld", home_report_id[i]);
          if(!db_query(q))
          {
@@ -510,6 +489,7 @@ int main(int argc, char **argv)
             }
             mysql_free_result(result1);
          }
+         else stats[DBError]++;
          sprintf(q, "SELECT tiploc_code FROM cif_schedule_locations WHERE record_identity = 'LT' AND cif_schedule_id = %ld", home_report_id[i]);
          if(!db_query(q))
          {
@@ -520,6 +500,7 @@ int main(int argc, char **argv)
             }
             mysql_free_result(result1);
          }
+         else stats[DBError]++;
 
          if(row0)
          {
@@ -541,12 +522,19 @@ int main(int argc, char **argv)
          if(result0) mysql_free_result(result0);
          
          _log(GENERAL, zs);
-         strcat(report, zs); strcat(report, "\n");
+         if(strlen(report) < REPORT_SIZE - 256)
+         {
+            strcat(report, zs); strcat(report, "\n");
+         }
       }
       if(home_report_index >= HOME_REPORT_SIZE)
       {
-         _log(GENERAL, "[Further schedules omitted]");
-         strcat(report, "[Further schedules omitted]"); strcat(report, "\n");
+         _log(GENERAL, "[Further schedules omitted.]");
+         strcat(report, "[Further schedules omitted.]"); strcat(report, "\n");
+      }
+      else if(strlen(report) >= REPORT_SIZE - 256)
+      {
+         strcat(report, "[Further schedules omitted.  See log file for details.]"); strcat(report, "\n");
       }
    }
 
@@ -725,7 +713,7 @@ static void process_delete_association(const char * string, const jsmntok_t * to
       word found = mysql_num_rows(result);
       if(found) 
       {
-         count_assoc_delete_hit++;
+         stats[AssocDeleteHit]++;
          if(found > 1)
          {
             char zs[256];
@@ -741,11 +729,12 @@ static void process_delete_association(const char * string, const jsmntok_t * to
       }
       else
       {
-         count_assoc_delete_miss++;
+         stats[AssocDeleteMiss]++;
          _log(MAJOR, "Delete association miss.");
          jsmn_dump_tokens(string, tokens, 0);
       }
    }
+   else stats[DBError]++;
 }
 
 static void process_create_association(const char * string, const jsmntok_t * tokens)
@@ -773,8 +762,8 @@ static void process_create_association(const char * string, const jsmntok_t * to
    sprintf(query, "INSERT INTO cif_associations VALUES(%ld, %ld, %lu, '%s', '%s', %ld, %ld, '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s')",
            update_id, now, NOT_DELETED, main_train_uid, assoc_train_uid, start_stamp, end_stamp, assoc_days,category, date_indicator, location, base_location_suffix, assoc_location_suffix, diagram_type, cif_stp_indicator);
 
-   (void) db_query(query); 
-   count_assoc_create++;
+   if(db_query(query)) stats[DBError]++;
+   stats[AssocCreate]++;
 }
 
 static void process_schedule(const char * string, const jsmntok_t * tokens)
@@ -823,6 +812,7 @@ static void process_delete_schedule(const char * string, const jsmntok_t * token
    
    if (db_query(query))
    {
+      stats[DBError]++;
       db_disconnect();
       return;
    }
@@ -852,16 +842,17 @@ static void process_delete_schedule(const char * string, const jsmntok_t * token
       {
          deleted++;
       }
+      else stats[DBError]++;
    }
    mysql_free_result(result0);
 
    if(deleted) 
    {
-      count_schedule_delete_hit += deleted;
+      stats[ScheduleDeleteHit] += deleted;
    }
    else
    {
-      count_schedule_delete_miss++;
+      stats[ScheduleDeleteMiss]++;
       _log(MAJOR, "Delete schedule miss.");
       jsmn_dump_tokens(string, tokens, 0);         
    }
@@ -927,9 +918,9 @@ static void process_create_schedule(const char * string, const jsmntok_t * token
 
    strcat(query, ", 0)");
 
-   (void) db_query(query); 
+   if(db_query(query)) stats[DBError]++;
       
-   count_schedule_create++;
+   stats[ScheduleCreate]++;
 
    dword id = db_insert_id();
 
@@ -991,9 +982,9 @@ static word process_schedule_location(const char * string, const jsmntok_t * tok
    EXTRACT_APPEND_SQL_OBJECT("performance_allowance");
    strcat(query, ")");
 
-   (void) db_query(query); 
+   if(db_query(query)) stats[DBError]++;
       
-   count_schedule_loc_create++;
+   stats[ScheduleLocCreate]++;
 
    if(huyton)
    {
@@ -1059,46 +1050,6 @@ static void reset_database(void)
    db_disconnect();
 }
 
-#if 0
-static void purge_database(void)
-{
-   char query[256];
-   MYSQL_RES * result0;
-   MYSQL_ROW row0;
-   dword id;
-   time_t threshold = time(NULL) - 64*24*60*60;
-
-   _log(GENERAL, "Comencing database purge.");
-   sprintf(query, "DELETE FROM cif_associations WHERE assoc_end_date < %ld", threshold);
-   if(!db_query(query))
-   {
-      count_purge_assoc += db_row_count();
-   }
-
-   sprintf(query, "SELECT id FROM cif_schedules WHERE schedule_end_date < %ld", threshold);
-   if(!db_query(query))
-   {
-      result0 = db_store_result();
-      while((row0 = mysql_fetch_row(result0)))
-      {
-         id = atol(row0[0]);
-         sprintf(query, "DELETE FROM cif_schedule_locations WHERE cif_schedule_id = %ld", id);
-         if(!db_query(query))
-         {
-            count_purge_sched_loc += db_row_count();
-         }
-         sprintf(query, "DELETE FROM cif_schedules WHERE id = %ld", id);
-         if(!db_query(query))
-         {
-            count_purge_sched++;
-         }
-      }
-      mysql_free_result(result0);
-   }
-   _log(GENERAL, "Database purge completed.");
-}
-#endif
-
 static void jsmn_dump_tokens(const char * string, const jsmntok_t * tokens, const word object_index)
 {
    char zs[256], zs1[256];
@@ -1129,7 +1080,7 @@ static void jsmn_dump_tokens(const char * string, const jsmntok_t * tokens, cons
          strcat(zs, zs1);
          strcat(zs, "\"");
       }
-      _log(MINOR, zs);
+      _log(GENERAL, "   %s", zs);
    }
 
    return;
@@ -1145,7 +1096,7 @@ static word fetch_file(void)
    struct tm * broken;
    static char * weekdays[] = { "sun", "mon", "tue", "wed", "thu", "fri", "sat" };
 
-   count_fetches++;
+   stats[Fetches]++;
 
    if(!opt_filename)
    {

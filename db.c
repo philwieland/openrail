@@ -23,7 +23,6 @@
 #include <stdlib.h>
 #include "misc.h"
 #include "db.h"
-#include "stomp.h"
 #include "jsmn.h"
 
 static MYSQL * mysql_object;

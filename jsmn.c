@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2013 Phil Wieland
+    Copyright (C) 2013, 2014 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -104,6 +104,7 @@ static jsmnerr_t jsmn_parse_primitive(jsmn_parser *parser, const char *js,
       }
       if (js[parser->pos] < 32 || js[parser->pos] >= 127) {
          parser->pos = start;
+         _log(MINOR, "jsmn_parse_primitive():  Invalid character 0x%02x at %d\n", js[parser->pos], parser->pos);
          return JSMN_ERROR_INVAL;
       }
    }
@@ -174,6 +175,7 @@ static jsmnerr_t jsmn_parse_string(jsmn_parser *parser, const char *js,
             /* Unexpected symbol */
          default:
             parser->pos = start;
+            _log(MINOR, "jsmn_parse_string():  Invalid character 0x%02x at %d\n", js[parser->pos], parser->pos);
             return JSMN_ERROR_INVAL;
          }
       }
@@ -218,6 +220,7 @@ jsmnerr_t jsmn_parse(jsmn_parser *parser, const char *js, jsmntok_t *tokens,
             token = &tokens[i];
             if (token->start != -1 && token->end == -1) {
                if (token->type != type) {
+                  _log(MINOR, "jsmn_parse():  Invalid character was wrong type 0x%02x %d\n", js[parser->pos], parser->pos);
                   return JSMN_ERROR_INVAL;
                }
                parser->toksuper = -1;
@@ -226,7 +229,11 @@ jsmnerr_t jsmn_parse(jsmn_parser *parser, const char *js, jsmntok_t *tokens,
             }
          }
          /* Error if unmatched closing bracket */
-         if (i == -1) return JSMN_ERROR_INVAL;
+         if (i == -1)
+         {
+            _log(MINOR, "jsmn_parse():  Invalid character was unmatched closing bracket 0x%02x %d\n", js[parser->pos], parser->pos);
+            return JSMN_ERROR_INVAL;
+         }
          for (; i >= 0; i--) {
             token = &tokens[i];
             if (token->start != -1 && token->end == -1) {
@@ -297,9 +304,6 @@ word jsmn_find_name_token(const char * string, const jsmntok_t * tokens, const w
          }
       }
    }
-
-   //sprintf(zs, "jsmn_find_name_token(\"%s\") Miss.", search);
-   //_log(MAJOR, zs);
 
    return 0;
 }

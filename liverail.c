@@ -50,7 +50,7 @@ static char * show_expected_time(const char * const scheduled, const word deviat
 
 
 #define NAME "Live Rail"
-#define BUILD "V323"
+#define BUILD "V504"
 
 #define COLUMNS 6
 #define URL_BASE "/rail/liverail/"
@@ -632,7 +632,7 @@ static void depsheet(void)
                   // In either case we invalidate this schedule.  If the overlay comes here it will already be in the list, somewhere.
                   _log(DEBUG, "Examining overlay.");
                   dword overlay_id = atol(row0[0]);
-                  if(overlay_id > calls[index].cif_schedule_id || calls[index].cif_stp_indicator == 'N' || calls[index].cif_stp_indicator == 'P')
+                  if(overlay_id != calls[index].cif_schedule_id || calls[index].cif_stp_indicator == 'N' || calls[index].cif_stp_indicator == 'P')
                   {
                      // Supercede
                      calls[index].valid = false;
@@ -1163,7 +1163,7 @@ static void report_train_summary(const word index, const time_t when, const word
          }
          status = 0;
          // TRUST
-         if(!bus)
+         // if(!bus)
          {
             char query[512], trust_id[16];
             MYSQL_RES * result2;
@@ -1172,7 +1172,8 @@ static void report_train_summary(const word index, const time_t when, const word
             byte dom = broken->tm_mday;
 
             // Only accept activations where dom matches, and are +- 4 days (To eliminate last month's activation.)  YUK
-            sprintf(query, "SELECT created, trust_id, deduced FROM trust_activation WHERE cif_schedule_id = %ld AND substring(trust_id FROM 9) = '%02d' AND created > %ld AND created < %ld order by created", calls[index].cif_schedule_id, dom, when - 4*24*60*60, when + 4*24*60*60);
+            // ORDER BY created DESC means we get the last created one
+            sprintf(query, "SELECT created, trust_id, deduced FROM trust_activation WHERE cif_schedule_id = %ld AND substring(trust_id FROM 9) = '%02d' AND created > %ld AND created < %ld ORDER BY created DESC", calls[index].cif_schedule_id, dom, when - 4*24*60*60, when + 4*24*60*60);
             if(!db_query(query))
             {
                result1 = db_store_result();

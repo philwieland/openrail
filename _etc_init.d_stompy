@@ -1,22 +1,24 @@
 #! /bin/sh
 ### BEGIN INIT INFO
-# Provides:          trustdb
-# Required-Start:    $remote_fs $syslog stompy
-# Required-Stop:     $remote_fs $syslog stompy
+# Provides:          stompy
+# Required-Start:    $remote_fs $syslog
+# Required-Stop:     $remote_fs $syslog
 # Default-Start:     2 3 4 5
 # Default-Stop:      0 1 6
-# Short-Description: Process TRUST live running data
-# Description:       Receive trust STOMP frames from STOMPY and update the database accordingly.
+# Short-Description: stompy - STOMP store and forward
+# Description:       Receive STOMP frames from nationa rail and make them available 
+#                    for clients
 ### END INIT INFO
 
 # Author: Phil Wieland
+#
 
 # Do NOT "set -e"
 
 # PATH should only include /usr/* if it runs after the mountnfs.sh script
 PATH=/sbin:/usr/sbin:/bin:/usr/bin
-DESC="trustdb"
-NAME=trustdb
+DESC="stompy"
+NAME=stompy
 DAEMON=/usr/sbin/$NAME
 DAEMON_ARGS="-c /etc/openrail.conf"
 PIDFILE=/var/run/$NAME.pid
@@ -40,8 +42,6 @@ SCRIPTNAME=/etc/init.d/$NAME
 #
 do_start()
 {
-        echo T >> /tmp/stompy.cmd
-        pkill -SIGUSR1 stompy
 	# Return
 	#   0 if daemon has been started
 	#   1 if daemon was already running
@@ -61,15 +61,16 @@ do_start()
 #
 do_stop()
 {
-        echo t >> /tmp/stompy.cmd
-        pkill -SIGUSR1 stompy
-        sleep 2
+        echo s > /tmp/stompy.cmd
 	# Return
 	#   0 if daemon has been stopped
 	#   1 if daemon was already stopped
 	#   2 if daemon could not be stopped
 	#   other if a failure occurred
-	start-stop-daemon --stop --quiet --retry=TERM/30/KILL/5 --pidfile $PIDFILE --name $NAME
+	#start-stop-daemon --stop --quiet --retry=TERM/30/KILL/5 --pidfile $PIDFILE --name $NAME
+        # Note special version of STOP which trys a SIGUSR1 first.  With the s we put in /tmp/stompy.cmd
+        # this should achieve a controlled shutdown
+	start-stop-daemon --stop --quiet --retry=USR1/32/TERM/8/KILL/5 --pidfile $PIDFILE --name $NAME
 	RETVAL="$?"
 	[ "$RETVAL" = 2 ] && return 2
 	# Wait for children to finish too if this is a daemon that forks

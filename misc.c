@@ -256,10 +256,7 @@ word email_alert(const char * const name, const char * const build, const char *
 
    _log(PROC, "email_alert()");
 
-   struct ntptimeval ha_clock;
-   ntp_gettime(&ha_clock);
-
-   sprintf(tmp_file, "/tmp/email-%ld.%09ld", ha_clock.time.tv_sec, ha_clock.time.tv_usec);
+   sprintf(tmp_file, "/tmp/email-%lld", time_us());
 
    if(gethostname(host, sizeof(host))) strcpy(host, "(unknown host)");
 
@@ -297,11 +294,7 @@ char * abbreviated_host_id(void)
    for(i=0; hostname[i] && hostname[i] != '.'; i++);
    hostname[i] = '\0';
 
-   {
-      char zs[512];
-      sprintf(zs, "abbreviated_host_id() return value \"%s\".", hostname);
-      _log(DEBUG, zs);
-   }
+   _log(DEBUG, "abbreviated_host_id() return value \"%s\".", hostname);
 
    return hostname;
 }
@@ -446,3 +439,30 @@ qword time_ms(void)
    return result;
 }
 
+qword time_us(void)
+{
+   static struct timeval ha_clock;
+   gettimeofday(&ha_clock, NULL);
+   qword result = ha_clock.tv_sec;
+   result = result * 1000000L + ha_clock.tv_usec;
+
+   return result;
+}
+
+ssize_t read_all(const int socket, void * buffer, const size_t size)
+{
+   // TODO Needs a timeout of some sort, for error recovery.
+
+   // Just the same as read() except it blocks until size bytes have been read, or an end-of-file or error occurs.
+   // Return -1 = error, 0 = EOF, or size = success
+   // Suitable for blocking sockets only.
+   ssize_t l;
+   size_t got = 0;
+   while(got < size)
+   {
+      l = read(socket, buffer + got, size - got);
+      if(l < 1) return l;
+      got += l;
+   }
+   return size;
+}

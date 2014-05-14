@@ -34,6 +34,15 @@ if [ "$1" = "all" -o "$1" = "liverail" ]; then
     DONE="liverail"
 fi
 
+if [ "$1" = "all" -o "$1" = "stompy" ]; then
+    echo "Releasing stompy"
+    sudo /etc/init.d/stompy stop
+    sleep 4 
+    sudo cp stompy /usr/sbin/stompy 
+    sudo /etc/init.d/stompy start
+    DONE="vstpdb"
+fi
+
 if [ "$1" = "all" -o "$1" = "vstpdb" ]; then
     echo "Releasing vstpdb"
     sudo /etc/init.d/vstpdb stop
@@ -70,6 +79,6 @@ if [ "$1" = "all" -o "$1" = "dump-rail" ]; then
 fi
 
 if [ "$DONE" = "" ]; then
-    echo "Usage:  $0 cifdb|archdb|corpusdb|vstpdb|trustdb|liverail|sendreport|all    -    Release specified unit or all."
+    echo "Usage:  $0 cifdb|archdb|corpusdb|vstpdb|trustdb|liverail|sendreport|stompy|all    -    Release specified unit or all."
 fi
 

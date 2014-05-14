@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2013 Phil Wieland
+    Copyright (C) 2013, 2014 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -32,14 +32,17 @@
 #include <sys/resource.h>
 #include <mysql.h>
 #include <sys/sysinfo.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <errno.h>
+#include <netdb.h>
 
-#include "stomp.h"
 #include "jsmn.h"
 #include "misc.h"
 #include "db.h"
 
 #define NAME  "vstpdb"
-#define BUILD "V312"
+#define BUILD "V508"
 
 static void perform(void);
 static void process_message(const char * body);
@@ -50,8 +53,6 @@ static word process_create_schedule_location(const char * string, const jsmntok_
 static void process_update_schedule(const char * string, const jsmntok_t * tokens);
 
 static void jsmn_dump_tokens(const char const * string, const jsmntok_t const * tokens, const word object_index);
-static void dump_headers(void);
-static char * report_error(int error);
 static void report_stats(void);
 #define INVALID_SORT_TIME 9999
 static word get_sort_time_vstp(const char const * buffer);
@@ -62,24 +63,31 @@ static char * tiploc_name(const char * const tiploc);
 static word debug, run, interrupt, holdoff, huyton_flag;
 static char zs[4096];
 
-static char headers[1024], body[65536];
+#define FRAME_SIZE 64000
+static char body[FRAME_SIZE];
+
 #define NUM_TOKENS 8192
 static jsmntok_t tokens[NUM_TOKENS];
 
 #define NOT_DELETED 0xffffffffL
 
-#define REPORT_INTERVAL (24*60*60)
+// stompy port for vstp stream
+#define STOMPY_PORT 55840
+
+// Time in hours (local) when daily statistical report is produced.
+// (Set > 23 to disable daily report.)
+#define REPORT_HOUR 4
 
 // Stats
 time_t start_time;
-enum stats_categories {Bytes, ConnectAttempt, GoodMessage, DeleteHit, DeleteMiss, DeleteMulti, Create, 
+enum stats_categories {ConnectAttempt, GoodMessage, DeleteHit, DeleteMiss, DeleteMulti, Create, 
                        UpdateCreate, UpdateDeleteMiss, UpdateDeleteMulti,
                        NotMessage, NotVSTP, NotTransaction, MAXstats};
 qword stats[MAXstats];
 qword grand_stats[MAXstats];
 const char * stats_category[MAXstats] = 
    {
-      "Bytes", "Connect Attempt", "Good Message", "Delete Hit", "Delete Miss", "Delete Multiple Hit", "Create",
+      "Stompy Connect Attempt", "Good Message", "Delete Hit", "Delete Miss", "Delete Multiple Hit", "Create",
       "Update", "Update Delete Miss", "Update Delete Mult. Hit",
       "Not a message", "Invalid or Not VSTP", "Unknown Transaction",
    };
@@ -145,8 +153,6 @@ int main(int argc, char *argv[])
       debug = 0;
    }
    
-   start_time = time(NULL);
-
    // Set up log
    _log_init(debug?"/tmp/vstpdb.log":"/var/log/garner/vstpdb.log", debug?1:0);
 
@@ -157,6 +163,8 @@ int main(int argc, char *argv[])
       limit.rlim_cur = RLIM_INFINITY;
       setrlimit(RLIMIT_CORE, &limit);
    }
+
+   start_time = time(NULL);
 
    // DAEMONISE
    if(debug != 1)
@@ -248,9 +256,22 @@ int main(int argc, char *argv[])
    run = true;
    interrupt = false;
 
-   if(signal(SIGTERM, termination_handler) == SIG_IGN) signal(SIGTERM, SIG_IGN);
-   if(signal(SIGINT,  termination_handler) == SIG_IGN) signal(SIGINT,  SIG_IGN);
-   if(signal(SIGHUP,  termination_handler) == SIG_IGN) signal(SIGHUP,  SIG_IGN);
+   {
+      // Sort out the signal handlers
+      struct sigaction act;
+      sigset_t block_mask;
+     
+      sigemptyset(&block_mask);
+      act.sa_handler = termination_handler;
+      act.sa_mask = block_mask;
+      act.sa_flags = 0;
+      if(sigaction(SIGTERM, &act, NULL) || sigaction(SIGINT, &act, NULL))
+      {
+         _log(CRITICAL, "Failed to set up signal handler.");
+         exit(1);
+      }
+   }
+
    if(!debug) signal(SIGCHLD,SIG_IGN); /* ignore child */
    if(!debug) signal(SIGTSTP,SIG_IGN); /* ignore tty signals */
    if(!debug) signal(SIGTTOU,SIG_IGN);
@@ -269,14 +290,9 @@ int main(int argc, char *argv[])
    // Startup delay
    if(!debug)
    {
-      struct sysinfo info;
-      // If uptime query fails OR uptime is small, wait for system to stabilise.
-      if(sysinfo(&info) || info.uptime < 64)
-      {
-         _log(GENERAL, "Startup delay ...");
-         word i;
-         for(i = 0; i < 64 && run; i++) sleep(1);
-      }
+      _log(GENERAL, "Startup delay ...");
+      word i;
+      for(i = 0; i < 256 && run; i++) sleep(1);
    }
 
    perform();
@@ -288,10 +304,10 @@ int main(int argc, char *argv[])
 
 static void perform(void)
 {
-   int rc;
-   time_t last_report;
-
-   last_report = time(NULL) / REPORT_INTERVAL;
+   struct sockaddr_in serv_addr;
+   struct hostent *server;
+   int rc, stompy_socket;
+   word last_report_day = 9;
 
    // Initialise database
    db_init(conf.db_server, conf.db_user, conf.db_pass, conf.db_name);
@@ -299,200 +315,114 @@ static void perform(void)
    log_message("");
    log_message("");
    log_message("vstpdb started.");
+   {
+      time_t now = time(NULL);
+      struct tm * broken = localtime(&now);
+      if(broken->tm_hour >= REPORT_HOUR)
+      {
+         last_report_day = broken->tm_wday;
+      }
+   }
    while(run)
    {   
       stats[ConnectAttempt]++;
-      _log(GENERAL, "Connecting socket ...");
-      rc=stomp_connect("datafeeds.networkrail.co.uk", 61618);
+      _log(GENERAL, "Connecting socket to stompy...");
+      stompy_socket = socket(AF_INET, SOCK_STREAM, 0);
+      if (stompy_socket < 0) 
+      {
+         _log(CRITICAL, "Failed to create client socket.  Error %d %s", errno, strerror(errno));
+      }
+      server = gethostbyname("localhost");
+      if (server == NULL) 
+      {
+         _log(CRITICAL, "Failed to resolve localhost\".");
+         return;
+      }
+
+      bzero((char *) &serv_addr, sizeof(serv_addr));
+      serv_addr.sin_family = AF_INET;
+      bcopy((char *)server->h_addr, 
+            (char *)&serv_addr.sin_addr.s_addr,
+            server->h_length);
+      serv_addr.sin_port = htons(STOMPY_PORT);
+
+      /* Now connect to the server */
+      rc=connect(stompy_socket, &serv_addr, sizeof(serv_addr));
       if(rc)
       {
-         sprintf(zs,"Failed to connect.  Error %d %s", rc, report_error(rc));
+         sprintf(zs,"Failed to connect.  Error %d %s", errno, strerror(errno));
          _log(CRITICAL, zs);
       }
       else
       {
-         _log(GENERAL, "Connected.");
+         _log(GENERAL, "Connected.  Waiting for messages ...");
          holdoff = 0;
+
+         int run_receive = true;
+         while(run && run_receive)
          {
-            strcpy(headers, "CONNECT\n");
-            strcat(headers, "login:");
-            strcat(headers, conf.nr_user);  
-            strcat(headers, "\npasscode:");
-            strcat(headers, conf.nr_pass);
-            strcat(headers, "\n");          
-            if(debug)
             {
-               sprintf(zs, "client-id:%s-vstpdb-debug\n", conf.nr_user);
-               strcat(headers, zs);
-            }
-            else
-            {
-               sprintf(zs, "client-id:%s-vstpdb-%s\n", conf.nr_user, abbreviated_host_id());
-               strcat(headers, zs);
-            }          
-            strcat(headers, "heart-beat:0,20000\n");          
-            strcat(headers, "\n");
-     
-            rc = stomp_tx(headers);
-         }
-         if(rc)
-         {
-            sprintf(zs,"Failed to transmit CONNECT message.  Error %d %s", rc, report_error(rc));
-            _log(CRITICAL, zs);
-         }
-         else
-         {
-            _log(GENERAL, "Sent CONNECT message.  Reading response.");
-            rc = stomp_rx(headers, sizeof(headers), body, sizeof(body));
-            if(rc)
-            {
-               sprintf(zs,"Failed to receive.  Error %d %s", rc, report_error(rc));
-               _log(CRITICAL, zs);
-            }
-            else
-            {
-               sprintf(zs, "Response: Body=\"%s\", Headers:", body);
-               _log(GENERAL, zs);
-               dump_headers();
+               time_t now = time(NULL);
+               struct tm * broken = localtime(&now);
+               if(broken->tm_hour >= REPORT_HOUR && broken->tm_wday != last_report_day)
                {
-                  strcpy(headers, "SUBSCRIBE\n");
-
-                  // Headers
-                  strcat(headers, "destination:/topic/VSTP_ALL\n");      
-                  if(debug)
-                  {
-                     sprintf(zs, "activemq.subscriptionName:%s-vstpdb-debug\n", conf.nr_user);
-                     strcat(headers, zs);
-                  }
-                  else
-                  {
-                     sprintf(zs, "activemq.subscriptionName:%s-vstpdb-%s\n", conf.nr_user, abbreviated_host_id());
-                     strcat(headers, zs);
-                  }
-                  strcat(headers, "id:1\n");      
-                  strcat(headers, "ack:client\n");   
-                  strcat(headers, "\n");
-
-                  rc = stomp_tx(headers);
-               }
-               if(rc)
-               {
-                  sprintf(zs,"Failed to transmit SUBSCRIBE message.  Error %d %s", rc, report_error(rc));
-                  _log(CRITICAL, zs);
-               }
-               else
-               {
-                  _log(GENERAL, "Sent SUBSCRIBE message.  Waiting for messages ...");
-
-                  int run_receive = 1;
-                  while(run && run_receive)
-                  {
-                     if( time(NULL) / REPORT_INTERVAL != last_report)
-                     {
-                        report_stats();
-                        last_report = time(NULL) / REPORT_INTERVAL;
-                     }
-                     rc = stomp_rx(headers, sizeof(headers), body, sizeof(body));
-                     run_receive = (rc == 0);
-                     if(rc && run)
-                     {
-                        // Don't report if the error is due to an interrupt
-                        sprintf(zs, "Error receiving frame: %d %s", rc, report_error(rc));
-                        _log(MAJOR, zs);
-                     }
-                     
-                     if(run_receive)
-                     {
-                        char message_id[256];
-                        message_id[0] = '\0';
-
-                        stats[Bytes] += strlen(headers);
-                        stats[Bytes] += strlen(body);
-
-                        if(!strstr(headers, "MESSAGE"))
-                        {
-                           _log(MAJOR, "Frame received is not a MESSAGE:");
-                           dump_headers();
-                           run_receive = false;
-                           stats[NotMessage]++;
-                        }
-                     
-                        // Find message ID
-                        char * message_id_header = strstr(headers, "message-id:");
-                        if(run_receive)
-                        {
-                           if(message_id_header)
-                           {
-                              size_t i = 0;
-                              message_id_header += 11;
-                              while(*message_id_header != '\n') message_id[i++] = *message_id_header++;
-                              message_id[i++] = '\0';
-                           }
-                           else
-                           {
-                              _log(MAJOR, "No message ID found:");
-                              dump_headers();
-                           }
-                        }
-
-                        //sprintf(zs, "Message id = \"%s\"", message_id);
-                        //_log(GENERAL, zs);
-                        
-                        // Process the message
-                        if(run_receive) process_message(body);
-
-                        // Send ACK
-                        if(run_receive && message_id[0])
-                        {
-                           strcpy(headers, "ACK\n");
-                           strcat(headers, "subscription:1\n");
-                           strcat(headers, "message-id:");
-                           strcat(headers, message_id);
-                           strcat(headers, "\n\n");
-                           rc = stomp_tx(headers);
-                           if(rc)
-                           {
-                              sprintf(zs,"Failed to transmit ACK message.  Error %d %s", rc, report_error(rc));
-                              _log(CRITICAL, zs);
-                              run_receive = false;
-                           }
-                           else
-                           {
-                              //_log(GENERAL, "Ack sent OK.");
-                           }
-                           //sprintf(zs, "%d messages, total size %ld bytes.", count, size);
-                           //_log(GENERAL, zs);
-                        }
-                     }
-                  } // while(run && run_receive)
+                  last_report_day = broken->tm_wday;
+                  report_stats();
                }
             }
-         }
+            size_t  length = 0;
+            ssize_t l = read_all(stompy_socket, &length, sizeof(size_t));
+            if(l < sizeof(size_t))
+            {
+               if(l) _log(CRITICAL, "Failed to read message size.  Error %d %s.", errno, strerror(errno));
+               else  _log(CRITICAL, "Failed to read message size.  End of file.");
+               run_receive = false;
+            }
+            if(run && run_receive && (length < 10 || length > FRAME_SIZE))
+            {
+               _log(MAJOR, "Received invalid frame size 0x%08lx.", length);
+               run_receive = false;
+            }
+            if(run && run_receive)
+            {
+               _log(DEBUG, "RX frame size = %ld", length);
+               l = read_all(stompy_socket, body, length);
+               if(l < 1)
+               {
+                  if(l) _log(CRITICAL, "Failed to read message body.  Error %d %s.", errno, strerror(errno));
+                  else  _log(CRITICAL, "Failed to read message body.  End of file.");
+                  run_receive = false;
+               }
+               else if(l < length)
+               {
+                  // Impossible?
+                  _log(CRITICAL, "Only received %ld of %ld bytes of message body.", l, length);
+                  run_receive = false;
+               }
+            }
+
+            if(run && run_receive)
+            {
+               process_message(body);
+
+               // Send ACK
+               l = write(stompy_socket, "A", 1);
+               if(l < 0)
+               {
+                  _log(CRITICAL, "Failed to write message ack.  Error %d %s", errno, strerror(errno));
+                  run_receive = false;
+               }
+            }
+         } // while(run && run_receive)
       }
-      strcpy(headers, "DISCONNECT\n\n");
-      rc = stomp_tx(headers);
-      if(rc)
-      {
-         sprintf(zs, "Failed to send DISCONNECT:  Error %d %s", rc, report_error(rc));
-         _log(GENERAL, zs);
-      }
-      else _log(GENERAL, "Sent DISCONNECT.");
-      
+
       _log(GENERAL, "Disconnecting socket ...");
-      rc = stomp_disconnect(); 
-      if(rc)
-      {
-         sprintf(zs, "Failed to disconnect:  Error %d %s", rc, report_error(rc));
-         _log(GENERAL, zs);
-      }
-      else _log(GENERAL, "Disconnected.");
-
+      close(stompy_socket);
+      stompy_socket = -1;
       {      
          word i;
-         if(holdoff < 128) holdoff += 32;
+         if(holdoff < 128) holdoff += 16;
          else holdoff = 128;
-         sprintf(zs, "Retry holdoff %d seconds.", holdoff);
-         if(run) _log(GENERAL, zs);
          for(i = 0; i < holdoff && run; i++) sleep(1);
       }
    }  // while(run)
@@ -517,8 +447,7 @@ static void process_message(const char * body)
    int r = jsmn_parse(&parser, body, tokens, NUM_TOKENS);
    if(r != 0) 
    {
-   sprintf(zs, "Parser result %d.  Message discarded.", r);
-      _log(MAJOR, zs);
+      _log(MAJOR, "Parser result %d.  Message discarded.", r);
       stats[NotVSTP]++;
    }
    else
@@ -532,8 +461,7 @@ static void process_message(const char * body)
       }
       else
       {
-         sprintf(zs, "Unrecognised message name \"%s\".", message_name);
-         _log(MINOR, zs);
+         _log(MINOR, "Unrecognised message name \"%s\".", message_name);
          jsmn_dump_tokens(body, tokens, 0);
          stats[NotVSTP]++;
       }
@@ -541,9 +469,7 @@ static void process_message(const char * body)
    elapsed = time(NULL) - elapsed;
    if(elapsed > 1 || debug)
    {
-      char zs[128];
-      sprintf(zs, "Transaction took %ld seconds.", elapsed);
-      _log(MINOR, zs);
+      _log(MINOR, "Transaction took %ld seconds.", elapsed);
    }
 }
 
@@ -981,47 +907,6 @@ static void jsmn_dump_tokens(const char const * string, const jsmntok_t const * 
    }
 
    return;
-}
-
-static void dump_headers(void)
-{
-   char zs[256];
-   size_t i,j;
-
-   i=0;
-   j=0;
-   while(headers[i])
-   {
-      if(headers[i] == '\n')
-      {
-         zs[j] = '\0';
-         _log(MINOR, zs);
-         j = 0;
-         i++;
-      }
-      else
-      {
-         zs[j++] = headers[i++];
-      }
-   }
-}
-
-static char * report_error(int error)
-{
-   static char stomp_error[256];
-   if(error < 0)
-   {
-      switch(error)
-      {
-      case  -2: sprintf(stomp_error, "Stomp error:  Unknown host.");         break;
-      case  -6: sprintf(stomp_error, "Stomp error:  Failed setsockopt.");    break;
-      case  -7: sprintf(stomp_error, "Stomp error:  End of file.");          break;
-      case -11: sprintf(stomp_error, "Stomp error:  No socket connection."); break;
-      default:  sprintf(stomp_error, "Stomp error %d", error);               break;
-      }
-      return stomp_error;
-   }
-   return strerror(error);
 }
 
 static void report_stats(void)

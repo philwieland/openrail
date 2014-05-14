@@ -1,19 +1,17 @@
 #! /bin/sh
 ### BEGIN INIT INFO
 # Provides:          vstpdb
-# Required-Start:    $remote_fs $syslog
-# Required-Stop:     $remote_fs $syslog
+# Required-Start:    $remote_fs $syslog stompy
+# Required-Stop:     $remote_fs $syslog stompy
 # Default-Start:     2 3 4 5
 # Default-Stop:      0 1 6
-# Short-Description: Example initscript
-# Description:       This file should be used to construct scripts to be
-#                    placed in /etc/init.d.
+# Short-Description: vstpdb Process VSTP timetable data 
+# Description:       Receive VSTP STOMP frames from stompy and update the timetable
+#                    database accordingly
 ### END INIT INFO
 
-# Author: Foo Bar <foobar@baz.org>
+# Author: Phil Wieland
 #
-# Please remove the "Author" lines above and replace them
-# with your own name if you copy and modify this script.
 
 # Do NOT "set -e"
 
@@ -44,6 +42,8 @@ SCRIPTNAME=/etc/init.d/$NAME
 #
 do_start()
 {
+        echo V >> /tmp/stompy.cmd
+        pkill -SIGUSR1 stompy
 	# Return
 	#   0 if daemon has been started
 	#   1 if daemon was already running
@@ -63,6 +63,9 @@ do_start()
 #
 do_stop()
 {
+        echo v >> /tmp/stompy.cmd
+        pkill -SIGUSR1 stompy
+        sleep 2
 	# Return
 	#   0 if daemon has been stopped
 	#   1 if daemon was already stopped
