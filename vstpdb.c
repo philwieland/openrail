@@ -42,7 +42,7 @@
 #include "db.h"
 
 #define NAME  "vstpdb"
-#define BUILD "V508"
+#define BUILD "V520"
 
 static void perform(void);
 static void process_message(const char * body);
@@ -216,15 +216,13 @@ int main(int argc, char *argv[])
       i = write(lfp, str, strlen(str)); /* record pid to lockfile */
       
       _log(GENERAL, "");
-      sprintf(zs, "%s %s", NAME, BUILD);
-      _log(GENERAL, zs);
+      _log(GENERAL, "%s %s", NAME, BUILD);
       _log(GENERAL, "Running as daemon.");
    }
    else
    {
       _log(GENERAL, "");
-      sprintf(zs, "%s %s", NAME, BUILD);
-      _log(GENERAL, zs);
+      _log(GENERAL, "%s %s", NAME, BUILD);
       _log(GENERAL, "Running in local mode.");
    }
      
@@ -475,7 +473,7 @@ static void process_message(const char * body)
 
 static void process_vstp(const char * string, const jsmntok_t * tokens)
 {
-   char zs[128], zs1[1024];
+   char zs[128];
 
    stats[GoodMessage]++;
 
@@ -488,8 +486,7 @@ static void process_vstp(const char * string, const jsmntok_t * tokens)
       else if(!strcasecmp(zs, "Update")) process_update_schedule(string, tokens);
       else 
       {
-         sprintf(zs1, "process_schedule():  Unrecognised transaction type \"%s\".", zs);
-         _log(MAJOR, zs1);
+         _log(MAJOR, "process_schedule():  Unrecognised transaction type \"%s\".", zs);
          jsmn_dump_tokens(body, tokens, 0);
          stats[NotTransaction]++;
       }
@@ -567,18 +564,15 @@ static void process_delete_schedule(const char * string, const jsmntok_t * token
    
       if(!db_query(query))
       {
-         char zs[256];
          deleted++;
          if(update_id)
          {
             // Can never happen!
-            sprintf(zs, "Deleted non-VSTP schedule %ld.", id);
-            _log(MINOR, zs);
+            _log(MAJOR, "Deleted non-VSTP schedule %ld.", id);
          }
          else
          {
-            sprintf(zs, "Deleted VSTP schedule %ld \"%s\".", id, CIF_train_uid);
-            _log(GENERAL, zs);
+            _log(DEBUG, "Deleted VSTP schedule %ld \"%s\".", id, CIF_train_uid);
          }
       }
    }
@@ -676,8 +670,7 @@ static void process_create_schedule(const char * string, const jsmntok_t * token
 
    if(huyton_flag) 
    {
-      sprintf(zs, "Created schedule %ld%s.  +++ Passes Huyton +++", id, update?" as a result of an Update transaction":"");
-      _log(GENERAL, zs);
+      _log(DEBUG, "Created schedule %ld%s.  +++ Passes Huyton +++", id, update?" as a result of an Update transaction":"");
    }
 
    if(huyton_flag)
@@ -848,8 +841,7 @@ static void process_update_schedule(const char * string, const jsmntok_t * token
       word num_rows = mysql_num_rows(result0);
       if(num_rows != 1)
       {
-         sprintf(zs, "Update for schedule \"%s\" found %d existing records.  Delete phase skipped.", CIF_train_uid, num_rows);
-         _log(MAJOR, zs);
+         _log(MAJOR, "Update for schedule \"%s\" found %d existing records.  Delete phase skipped.", CIF_train_uid, num_rows);
          jsmn_dump_tokens(string, tokens, 0);
          if(num_rows) stats[UpdateDeleteMulti]++; else stats[UpdateDeleteMiss]++;
       }
@@ -868,9 +860,7 @@ static void process_update_schedule(const char * string, const jsmntok_t * token
    // Create phase.
    process_create_schedule(string, tokens, true);
 
-   sprintf(zs, "Updated schedule \"%s\".", CIF_train_uid);
-   _log(GENERAL, zs);
-
+   _log(DEBUG, "Updated schedule \"%s\".", CIF_train_uid);
 }
 
 static void jsmn_dump_tokens(const char const * string, const jsmntok_t const * tokens, const word object_index)
@@ -903,7 +893,7 @@ static void jsmn_dump_tokens(const char const * string, const jsmntok_t const * 
          strcat(zs, zs1);
          strcat(zs, "\"");
       }
-      _log(MINOR, zs);
+      _log(GENERAL, zs);
    }
 
    return;
@@ -979,11 +969,7 @@ static char * vstp_to_CIF_time(const char * buffer)
       }
    }
 
-   {
-      char zs[256];
-      sprintf(zs, "vstp_to_CIF_time(\"%s\") returns \"%s\"", buffer, cif);
-      _log(PROC, zs);
-   }
+   _log(PROC, "vstp_to_CIF_time(\"%s\") returns \"%s\"", buffer, cif);
 
    return cif;
 }

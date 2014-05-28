@@ -50,7 +50,7 @@ static char * show_expected_time(const char * const scheduled, const word deviat
 
 
 #define NAME "Live Rail"
-#define BUILD "V504"
+#define BUILD "V524"
 
 #define COLUMNS 6
 #define URL_BASE "/rail/liverail/"
@@ -176,7 +176,7 @@ int main()
       char logfile[128];
 
       sprintf(logfile, "/tmp/liverail-%04d-%02d-%02d.log", broken->tm_year + 1900, broken->tm_mon + 1, broken->tm_mday);
-      _log_init(logfile, debug?2:0);
+      _log_init(logfile, debug?2:3);
    }
 
    if(parms)
@@ -489,7 +489,7 @@ static void depsheet(void)
    
    strcat(query, " AND (cif_schedules.CIF_stp_indicator = 'N' OR cif_schedules.CIF_stp_indicator = 'P' OR cif_schedules.CIF_stp_indicator = 'O')");
    
-   sprintf(zs, " AND deleted >= %ld AND created <= %ld", when, when);
+   sprintf(zs, " AND deleted >= %ld AND created <= %ld", when - (24*60*60), when + (24*60*60));
    strcat(query, zs);
    
    // Select the day
@@ -588,7 +588,7 @@ static void depsheet(void)
          strcat(query, " WHERE (cif_stp_indicator = 'C' OR cif_stp_indicator = 'O')");
          sprintf(zs, " AND (CIF_train_uid = '%s')", calls[index].cif_train_uid);
          strcat(query, zs);
-         sprintf(zs, " AND (deleted >= %ld) AND (created <= %ld)", when, when);
+         sprintf(zs, " AND (deleted >= %ld) AND (created <= %ld)", when - (24*60*60), when + (24*60*60));
          strcat(query, zs);
 
          if(calls[index].next_day && calls[index].sort_time >= DAY_START)
@@ -1962,8 +1962,8 @@ static void train(void)
          printf("<td>Real Time Data For %s %02d/%02d/%02d</td>\n", days[broken->tm_wday % 7], broken->tm_mday, broken->tm_mon + 1, broken->tm_year % 100);
          printf("<td width = \"10%%\">&nbsp;</td>\n");
          printf("<td class=\"control-panel-row\"> Show real time data for date ");
-         printf("<input type=\"text\" id=\"train_date\" size=\"8\" maxlength=\"8\" value=\"\" onkeydown=\"if(event.keyCode == 13) train_date_onclick(); else ar_off();\">\n");
-         printf(" <button id=\"search\" class=\"cp-button\" onclick=\"train_date_onclick();\">Show</button> </td>\n");
+         printf("<input type=\"text\" id=\"train_date\" size=\"8\" maxlength=\"8\" value=\"\" onkeydown=\"if(event.keyCode == 13) train_date_onclick(%ld); else ar_off();\">\n", schedule_id);
+         printf(" <button id=\"search\" class=\"cp-button\" onclick=\"train_date_onclick(%ld);\">Show</button> </td>\n", schedule_id);
          printf("</tr></table>\n");
          printf("<table>");
          printf("<tr class=\"small-table\"><th>&nbsp;&nbsp;Received&nbsp;&nbsp;</th><th>Event</th><th>&nbsp;&nbsp;&nbsp;&nbsp;Source&nbsp;&nbsp;&nbsp;&nbsp;</th><th>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Location&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</th><th>P</th><th>Event Type</th><th>Planned Type</th><th>WTT</th><th>GBTT</th><th>Actual</th><th>&nbsp;&nbsp;Var&nbsp;&nbsp;</th><th>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Next Report (Run Time)&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</th><th>Flags</th></tr>\n");
@@ -2037,8 +2037,8 @@ static void train(void)
       {
          printf("<p>\n");
          printf("<table><tr><td class=\"control-panel-row\"> Show real time data for date ");
-         printf("<input type=\"text\" id=\"train_date\" size=\"8\" maxlength=\"8\" value=\"\" onkeydown=\"if(event.keyCode == 13) train_date_onclick(); else ar_off();\">\n");
-         printf(" <button id=\"search\" class=\"cp-button\" onclick=\"train_date_onclick();\">Show</button> \n");
+         printf("<input type=\"text\" id=\"train_date\" size=\"8\" maxlength=\"8\" value=\"\" onkeydown=\"if(event.keyCode == 13) train_date_onclick(%ld); else ar_off();\">\n", schedule_id);
+         printf(" <button id=\"search\" class=\"cp-button\" onclick=\"train_date_onclick(%ld);\">Show</button> \n", schedule_id);
          printf("</td></tr></table>\n");
          printf("</p>\n");
       }

@@ -33,7 +33,7 @@
 #include "db.h"
 
 #define NAME  "cifdb"
-#define BUILD "V510"
+#define BUILD "V520"
 
 static void process_object(const char * object);
 static void process_timetable(const char * string, const jsmntok_t * tokens);
@@ -445,6 +445,7 @@ int main(int argc, char **argv)
    for(i=0; i<MAXStats; i++)
    {
       sprintf(zs, "%25s: %s", stats_category[i], commas_q(stats[i]));
+      if(i == DBError && stats[i]) strcat(zs, " ****************");
       _log(GENERAL, zs);
       strcat(report, zs);
       strcat(report, "\n");

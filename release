@@ -61,12 +61,6 @@ if [ "$1" = "all" -o "$1" = "trustdb" ]; then
     DONE="trustdb"
 fi
 
-if [ "$1" = "all" -o "$1" = "sendreport" ]; then
-    echo "Releasing sendreport"
-    sudo cp sendreport /usr/sbin/sendreport 
-    DONE="sendreport"
-fi
-
 if [ "$1" = "all" -o "$1" = "dump-rail" ]; then
     if [ "$host" = "friedbread.liverpub.com" ]; then
         echo "Releasing dump-rail for friedbread"
@@ -79,6 +73,6 @@ if [ "$1" = "all" -o "$1" = "dump-rail" ]; then
 fi
 
 if [ "$DONE" = "" ]; then
-    echo "Usage:  $0 cifdb|archdb|corpusdb|vstpdb|trustdb|liverail|sendreport|stompy|all    -    Release specified unit or all."
+    echo "Usage:  $0 cifdb|archdb|corpusdb|vstpdb|trustdb|liverail|stompy|all    -    Release specified unit or all."
 fi
 

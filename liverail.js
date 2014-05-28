@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2013 Phil Wieland
+    Copyright (C) 2013, 2014 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -55,20 +55,22 @@ function as_rq_onclick()
    window.location = result;
 }
 
-function train_date_onclick()
+function train_date_onclick(schedule_id)
 {
    // url may already have a date, and may have /r at the end.  Both to be dropped.
-   var url_parts = document.URL.split('/');
-   var url = "/";
-   for(var i = 3; i < 7; i++) url += url_parts[i] + '/';
-   url += document.getElementById("train_date").value;
-   window.location = url;
+   // var url_parts = document.URL.split('/');
+   // var url = "/";
+   // for(var i = 3; i < 7; i++) url += url_parts[i] + '/';
+   // url += document.getElementById("train_date").value;
+   result = url_base + "train" + '/' + schedule_id + '/' + document.getElementById("train_date").value;
+   window.location = result;
 }
 
 function ar_onclick()
 {
    if(document.getElementById("ar").checked)
    {
+      refresh_count = refresh_period;
       show_progress(); 
       document.getElementById("progress").style.display='';
    }

@@ -39,7 +39,7 @@
 #include "misc.h"
 
 #define NAME  "stompy"
-#define BUILD "V512"
+#define BUILD "V518"
 
 static void perform(void);
 static void set_up_server_sockets(void);
@@ -325,7 +325,7 @@ int main(int argc, char *argv[])
         
       if((lfp = open("/var/run/stompy.pid", O_RDWR|O_CREAT, 0640)) < 0)
       {
-         _log(CRITICAL, "Unable to open pid file \"/var/run/vstpdb.pid\".  Aborting.");
+         _log(CRITICAL, "Unable to open pid file \"/var/run/stompy.pid\".  Aborting.");
          exit(1); /* can not open */
       }
            
@@ -394,6 +394,9 @@ int main(int argc, char *argv[])
       }
    }
    stats_longest = grand_stats_longest = 0;
+
+   // Remove any user commands lying around.
+   unlink(COMMAND_FILE);
 
    // Startup delay
    if(!debug)
@@ -473,8 +476,8 @@ static void perform(void)
 
       if(controlled_shutdown)
       {
-         wait_time.tv_sec  = 1;
-         wait_time.tv_usec = 0;
+         wait_time.tv_sec  = 0;
+         wait_time.tv_usec = 0x40000L;
       }
       else
       {
@@ -666,8 +669,21 @@ static void stomp_read(void)
       {
       case STOMP_IDLE: // Start
          stomp_read_h_i = stomp_read_b_i = 0;
-         stomp_read_state = STOMP_HEADER;
-         // Fall through...
+
+         // First character - could be a heartbeat
+         if(d[i] == '\n')
+         {
+            // Heartbeat
+            _log(DEBUG, "STOMP heartbeat received.");
+            stomp_read_state = STOMP_IDLE;
+            stomp_manager(SM_RX_DONE, NULL);
+         }
+         else
+         {
+            headers[stomp_read_h_i++] = d[i];
+            stomp_read_state = STOMP_HEADER;
+         }               
+         break;
 
       case STOMP_HEADER: // Header
          if(stomp_read_h_i >= MAX_HEADER)
@@ -675,7 +691,7 @@ static void stomp_read(void)
             _log(MAJOR, "Received STOMP headers too long.  Frame discarded.");
             stomp_read_state = STOMP_FAIL;
          }
-         else if(stomp_read_h_i)
+         else
          {
             if(d[i] == '\n' && headers[stomp_read_h_i - 1] == '\n')
             {
@@ -702,21 +718,6 @@ static void stomp_read(void)
                }
             }
          }
-         else
-         {
-            // First character - could be a heartbeat
-            if(d[i] == '\n')
-            {
-               // Heartbeat
-               _log(DEBUG, "STOMP heartbeat received.");
-               stomp_read_state = STOMP_IDLE;
-               stomp_manager(SM_RX_DONE, NULL);
-            }
-            else
-            {
-               headers[stomp_read_h_i++] = d[i];
-            }               
-         }
          break;
 
       case STOMP_BODY: // Body 
@@ -734,10 +735,10 @@ static void stomp_read(void)
          {
             if(stomp_read_b_i == 0 && d[i] == '\0')
             {
-               _log(MAJOR, "STOMP frame received is not a MESSAGE.  Discarded.");
+               _log(MAJOR, "STOMP frame received has an empty body.  Discarded.");
                dump_headers(headers);
                stomp_read_state = STOMP_IDLE;
-               stomp_manager(SM_RX_DONE, NULL);
+               stomp_manager(SM_RX_DONE, headers);
             }
             else if(stomp_read_b_i == 0)
             {
@@ -1200,7 +1201,7 @@ static void user_command(void)
             }
             break;
          case 's':
-            _log(GENERAL, "Command s - Commence tidy shutdown.");
+            _log(GENERAL, "Command s - Commence controlled shutdown.");
             controlled_shutdown = true;
             stomp_manager(SM_SHUTDOWN, NULL);
             handle_shutdown(false);
@@ -1286,7 +1287,7 @@ static void handle_shutdown(word report)
       if(s_number[stream][CLIENT] >= 0)
       {
          complete = false;
-         sprintf(reason, "Stream %d (%s) client socket still open", stream, stream_names[stream]);
+         sprintf(reason, "Stream %d (%s) client connection still active", stream, stream_names[stream]);
          if(client_state[stream] == CLIENT_IDLE)
          {
             dump_queue_to_disc(stream);
@@ -1301,7 +1302,7 @@ static void handle_shutdown(word report)
 
    if(complete) 
    {
-      _log(GENERAL, "Controlled shutdown completed.");
+      _log(GENERAL, "Controlled shutdown complete.");
       full_shutdown();
    }
    else if(report)
@@ -1384,6 +1385,11 @@ static void stomp_manager(const enum stomp_manager_event event, const char * con
       break;
 
    case 1: // Start a connection.  Assume all is disconnected.
+      if(controlled_shutdown)
+      {
+         SET_TIMER_NEVER;
+         return;
+      }
       if(outage_start /* && now - outage_start > 128 */ && !alarm_sent)
       {
          char report[256];
@@ -1398,85 +1404,85 @@ static void stomp_manager(const enum stomp_manager_event event, const char * con
       // DO NOT stomp_read_buffer = NULL; HERE
       stomp_tx_queue_on = stomp_tx_queue_off = 0;
 
-   s_stomp = socket(AF_INET, SOCK_STREAM, 0);
-   if (s_stomp < 0) 
-   {
-      _log(CRITICAL, "Failed to create STOMP socket.  Error %d %d.", errno, strerror(errno));
-      stomp_manager_state = SM_HOLD;
-      SET_TIMER_HOLDOFF;
-      return;
-   }
-
-   server = gethostbyname(STOMP_HOST);
-   if (server == NULL) 
-   {
-      close(s_stomp);
-      FD_CLR(s_stomp, &read_sockets);
-      FD_CLR(s_stomp, &write_sockets);
-      s_stomp = -1;
-      _log(CRITICAL, "Failed to resolve STOMP server hostname.");
-      stomp_manager_state = SM_HOLD;
-      SET_TIMER_HOLDOFF;
-      return;
-   }
-
-   bzero((char *) &serv_addr, sizeof(serv_addr));
-   serv_addr.sin_family = AF_INET;
-   bcopy((char *)server->h_addr, 
-         (char *)&serv_addr.sin_addr.s_addr,
-         server->h_length);
-   serv_addr.sin_port = htons(STOMP_PORT);
-
-   // Now connect to the server
-   if (connect(s_stomp, (const struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0) 
-   {
-      _log(MAJOR, "Unable to connect to STOMP server.  Error %d %s.", errno, strerror(errno));
-      close(s_stomp);
-      FD_CLR(s_stomp, &read_sockets);
-      FD_CLR(s_stomp, &write_sockets);
-      s_stomp = -1;
-      stomp_manager_state = SM_HOLD;
-      SET_TIMER_HOLDOFF;
-      return;
-   }	
-
-   // Make it non-blocking
-   int oldflags = fcntl(s_stomp, F_GETFL, 0);
-   oldflags |= O_NONBLOCK;
-   fcntl(s_stomp, F_SETFL, oldflags);
-
-   _log(GENERAL, "Socket connected to STOMP server.  Sending CONNECT message.");
-
-   {
-      char headers[1024];
-
-      strcpy(headers, "CONNECT\n");
-      strcat(headers, "login:");
-      strcat(headers, conf.nr_user);  
-      strcat(headers, "\npasscode:");
-      strcat(headers, conf.nr_pass);
-      strcat(headers, "\n");          
-      if(debug)
+      s_stomp = socket(AF_INET, SOCK_STREAM, 0);
+      if (s_stomp < 0) 
       {
-         sprintf(zs, "client-id:%s-stompy-debug\n", conf.nr_user);
-         strcat(headers, zs);
+         _log(CRITICAL, "Failed to create STOMP socket.  Error %d %d.", errno, strerror(errno));
+         stomp_manager_state = SM_HOLD;
+         SET_TIMER_HOLDOFF;
+         return;
       }
-      else
+
+      server = gethostbyname(STOMP_HOST);
+      if (server == NULL) 
       {
-         sprintf(zs, "client-id:%s-stompy-%s\n", conf.nr_user, abbreviated_host_id());
-         strcat(headers, zs);
-      }          
-      strcat(headers, "heart-beat:0,20000\n");          
-      strcat(headers, "\n");
+         close(s_stomp);
+         FD_CLR(s_stomp, &read_sockets);
+         FD_CLR(s_stomp, &write_sockets);
+         s_stomp = -1;
+         _log(CRITICAL, "Failed to resolve STOMP server hostname.");
+         stomp_manager_state = SM_HOLD;
+         SET_TIMER_HOLDOFF;
+         return;
+      }
 
-      stomp_queue_tx(headers, strlen(headers) + 1);
-   }
-   stomp_manager_state = SM_AWAIT_CONNECTED;
-   FD_SET(s_stomp, &read_sockets);
-   s_stream[s_stomp] = STOMP;
-   SET_TIMER_RUNNING;
-   break;
+      bzero((char *) &serv_addr, sizeof(serv_addr));
+      serv_addr.sin_family = AF_INET;
+      bcopy((char *)server->h_addr, 
+            (char *)&serv_addr.sin_addr.s_addr,
+            server->h_length);
+      serv_addr.sin_port = htons(STOMP_PORT);
 
+      // Now connect to the server
+      if (connect(s_stomp, (const struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0) 
+      {
+         _log(MAJOR, "Unable to connect to STOMP server.  Error %d %s.", errno, strerror(errno));
+         close(s_stomp);
+         FD_CLR(s_stomp, &read_sockets);
+         FD_CLR(s_stomp, &write_sockets);
+         s_stomp = -1;
+         stomp_manager_state = SM_HOLD;
+         SET_TIMER_HOLDOFF;
+         return;
+      }	
+
+      // Make it non-blocking
+      int oldflags = fcntl(s_stomp, F_GETFL, 0);
+      oldflags |= O_NONBLOCK;
+      fcntl(s_stomp, F_SETFL, oldflags);
+
+      _log(GENERAL, "Socket connected to STOMP server.  Sending CONNECT message.");
+      
+      {
+         char headers[1024];
+         
+         strcpy(headers, "CONNECT\n");
+         strcat(headers, "login:");
+         strcat(headers, conf.nr_user);  
+         strcat(headers, "\npasscode:");
+         strcat(headers, conf.nr_pass);
+         strcat(headers, "\n");          
+         if(debug)
+         {
+            sprintf(zs, "client-id:%s-stompy-debug\n", conf.nr_user);
+            strcat(headers, zs);
+         }
+         else
+         {
+            sprintf(zs, "client-id:%s-stompy-%s\n", conf.nr_user, abbreviated_host_id());
+            strcat(headers, zs);
+         }          
+         strcat(headers, "heart-beat:0,20000\n");          
+         strcat(headers, "\n");
+         
+         stomp_queue_tx(headers, strlen(headers) + 1);
+      }
+      stomp_manager_state = SM_AWAIT_CONNECTED;
+      FD_SET(s_stomp, &read_sockets);
+      s_stream[s_stomp] = STOMP;
+      SET_TIMER_RUNNING;
+      break;
+      
    case 2: // Hard close
       if(!outage_start) outage_start = now;
       if(s_stomp >= 0)
@@ -1515,35 +1521,48 @@ static void stomp_manager(const enum stomp_manager_event event, const char * con
       break;
 
    case 4: // RX_DONE while awaiting connect response
-      _log(GENERAL, "STOMP response to CONNECT received.");
-      if(param) dump_headers(param);
-      if(param && strstr(param, "CONNECTED"))
+      if(param)
       {
-         send_subscribes();
-         stomp_manager_state = SM_RUN;
-         SET_TIMER_RUNNING;
-         if(outage_start)
+         _log(GENERAL, "STOMP response to CONNECT received.");
+         dump_headers(param);
+         if(strstr(param, "CONNECTED"))
          {
-            time_t duration = now - outage_start;
-            _log(GENERAL, "STOMP outage lasted %ld seconds.", duration);
-            outage_start = 0;
-
-            if(alarm_sent)
+            send_subscribes();
+            stomp_manager_state = SM_RUN;
+            SET_TIMER_RUNNING;
+            if(outage_start)
             {
-               char report[256];
-               sprintf(report, "STOMP outage ended.  Duration was %ld seconds.", duration);
-               email_alert(NAME, BUILD, "STOMP Alarm Cleared", report);
-               alarm_sent = false;
+               time_t duration = now - outage_start;
+               _log(GENERAL, "STOMP outage lasted %ld seconds.", duration);
+               outage_start = 0;
+               
+               if(alarm_sent)
+               {
+                  char report[256];
+                  sprintf(report, "STOMP outage ended.  Duration was %ld seconds.", duration);
+                  email_alert(NAME, BUILD, "STOMP Alarm Cleared", report);
+                  alarm_sent = false;
+               }
             }
+            stomp_holdoff = 0;
          }
-         stomp_holdoff = 0;
+         else
+         {
+            _log(MAJOR, "CONNECT response incorrect.");
+            if(s_stomp >= 0)
+            {
+               FD_CLR(s_stomp, &read_sockets);
+               FD_CLR(s_stomp, &write_sockets);
+            }
+            // This will get an immediate action 2
+            stomp_manager_state = SM_SEND_DISCO;
+            SET_TIMER_IMMEDIATE;
+         }
       }
       else
       {
-         _log(MAJOR, "Connect failed.");
-         // This will get an immediate action 2
-         stomp_manager_state = SM_SEND_DISCO;
-         SET_TIMER_IMMEDIATE;
+         // Could be a spurious heartbeat.  Wait a bit longer . . .
+         _log(MINOR, "Unexpected NULL headers while awaiting CONNECTED.");
       }
       break;
 

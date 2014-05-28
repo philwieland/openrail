@@ -27,13 +27,14 @@ typedef unsigned long      dword;
 typedef unsigned short     word;
 typedef unsigned char      byte;
 typedef struct Conf {
-    char* db_server;
-    char* db_pass;
-    char* db_name;
-    char* db_user;
-    char* nr_user;
-    char* nr_pass;
-    char* debug;
+   char * db_server;
+   char * db_pass;
+   char * db_name;
+   char * db_user;
+   char * nr_user;
+   char * nr_pass;
+   char * debug;
+   char * report_email;
 } conf_t;
 extern conf_t conf;
 

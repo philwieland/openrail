@@ -41,7 +41,7 @@
 #include "db.h"
 
 #define NAME  "trustdb"
-#define BUILD "V509"
+#define BUILD "V524"
 
 static void perform(void);
 static void process_message(const char * const body);
@@ -639,7 +639,7 @@ static void process_trust_0002(const char * string, const jsmntok_t * tokens, co
 
 static void process_trust_0003(const char * string, const jsmntok_t * tokens, const int index)
 {
-   char query[1024], zs[32], zs1[32], train_id[128], loc_stanox[128];
+   char query[1024], zs[32], zs1[32], train_id[16], loc_stanox[16];
    time_t planned_timestamp, actual_timestamp, timestamp;
 
    time_t now = time(NULL);
@@ -711,7 +711,7 @@ static void process_trust_0003(const char * string, const jsmntok_t * tokens, co
    // NB Don't accept cif_schedule_id==0 ones here as the schedule may have arrived after the activation!
    // This can happen due to a VSTP race, hopefully fixed V505
    // OR due to the service being activated before the daily timetable download.
-   sprintf(query, "SELECT * from trust_activation where trust_id = '%s' and created > %ld and cif_schedule_id > 0", train_id, now - (4*24*60*60));
+   sprintf(query, "SELECT * from trust_activation where trust_id = '%s' and created > %ld and cif_schedule_id > 0", train_id, actual_timestamp - (4*24*60*60));
    if(!db_query(query))
    {
       MYSQL_RES * result0 = db_store_result();
@@ -842,7 +842,7 @@ static void process_trust_0003(const char * string, const jsmntok_t * tokens, co
 
                if(!reason[0])
                {
-                  sprintf(query, "SELECT * from trust_activation where created > %ld and cif_schedule_id = %ld", now - (8*60*60), cif_schedule_id);
+                  sprintf(query, "SELECT * from trust_activation where created > %ld and cif_schedule_id = %ld", planned_timestamp - (8*60*60), cif_schedule_id);
                   db_query(query);
                   result0 = db_store_result();
                   num_rows = mysql_num_rows(result0);
@@ -868,7 +868,8 @@ static void process_trust_0003(const char * string, const jsmntok_t * tokens, co
          {
             elapsed = time_ms() - elapsed;
             _log(MINOR, "   Failed to deduce an activation.  Reason:  %s.   Elapsed time %s ms.", reason, commas_q(elapsed));
-            _log(MINOR, "      stanox = %s, tiploc = \"%s\", planned_timestamp %s, derived sort time = %d", loc_stanox, tiploc, time_text(planned_timestamp, true), sort_time);
+            _log(MINOR, "      stanox = %s, tiploc = \"%s\", planned_timestamp %s, derived sort time = %d,", loc_stanox, tiploc, time_text(planned_timestamp, true), sort_time);
+            _log(MINOR, "      actual_timestamp %s.", time_text(actual_timestamp, true));
          }
       }
    }
