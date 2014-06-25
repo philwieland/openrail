@@ -35,7 +35,7 @@ static void report_train_day(const dword cif_schedule_id, const time_t when, con
 static char * percentage(const dword num, const dword den);
 
 #define NAME "service-report"
-#define BUILD "V504"
+#define BUILD "V609"
 
 static word debug;
 static word bus;
@@ -53,30 +53,25 @@ static const char * days[] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thurs
 int main(int argc, char **argv)
 {
    int c;
+   char config_file_path[256];
    word month, year;
-   word usage = true;
+   word usage = false;
 
+   strcpy(config_file_path, "/etc/openrail.conf");
    debug = false;
 
-   while ((c = getopt (argc, argv, "c:d")) != -1)
+   while ((c = getopt (argc, argv, ":c:d")) != -1)
    {
       switch (c)
       {
       case 'c':
-         if(load_config(optarg))
-         {
-            printf("Failed to read config file \"%s\".\n", optarg);
-            usage = true;
-         }
-         else
-         {
-            usage = false;
-         }
+         strcpy(config_file_path, optarg);
          break;
       case 'd':
          debug = true;
          break;
-
+      case ':':
+         break;
       case '?':
       default:
          usage = true;
@@ -88,16 +83,22 @@ int main(int argc, char **argv)
    {
       usage = true;
    }
-   else if(!usage)
+   if(load_config(config_file_path))
+   {
+      printf("Failed to read config file \"%s\".\n", config_file_path);
+      usage = true;
+   }
+   if(!usage)
    {
       if(strlen(argv[optind]) > 8) usage = true;
       month = atoi(argv[optind+1]);
       year  = atoi(argv[optind+2]);
       if(month < 1 || month > 12 || year < 2013 || year > 2099) usage = true;
    }
+
    if(usage)
    {
-      printf("Usage: %s -c /path/to/config/file.conf [-d] <TIPLOC> <month> <year>\n\n", argv[0] );
+      printf("\tUsage: %s [-c /path/to/config/file.conf] [-d] <TIPLOC> <month> <year>\n\n", argv[0] );
       exit(1);
    }
 
@@ -136,7 +137,6 @@ static void report(const char * const tiploc, const word year, const word month)
    
    while(broken.tm_mon == month - 1)
    {
-      // if(broken.tm_mday == 26) // TEMPO // TEMPO // TEMPO //
       report_day(tiploc, when);
 
       when += 24*60*60;
@@ -170,6 +170,7 @@ static void report_day(const char * const tiploc, time_t when)
    MYSQL_RES * result0, * result1;
    MYSQL_ROW row0, row1;
    char query[4096], zs[256];
+   // When will be 12:00:00Z on the day in question (Or 11:00 or 13:00 if the clocks have changed)
 
 #define MAX_TRAINS 2048
    struct train_details
@@ -195,7 +196,7 @@ static void report_day(const char * const tiploc, time_t when)
    
    strcat(query, " AND (cif_schedules.CIF_stp_indicator = 'N' OR cif_schedules.CIF_stp_indicator = 'P' OR cif_schedules.CIF_stp_indicator = 'O')");
    
-   sprintf(zs, " AND deleted >= %ld", when);
+   sprintf(zs, " AND deleted >= %ld", when + (12*60*60));
    strcat(query, zs);
    
    // Select the day
@@ -564,8 +565,8 @@ static void report_train_day(const dword cif_schedule_id, const time_t when, con
             broken = gmtime(&start_date);
             byte dom = broken->tm_mday;
 
-            // Only accept activations where dom matches, and are +- 4 days (To eliminate last month's activation.)  YUK
-            sprintf(query, "SELECT created, trust_id, deduced FROM trust_activation WHERE cif_schedule_id = %ld AND substring(trust_id FROM 9) = '%02d' AND created > %ld AND created < %ld order by created", cif_schedule_id, dom, when - 4*24*60*60, when + 4*24*60*60);
+            // Only accept activations where dom matches, and are +- 15 days (To eliminate last month's activation.)  YUK
+            sprintf(query, "SELECT created, trust_id, deduced FROM trust_activation WHERE cif_schedule_id = %ld AND substring(trust_id FROM 9) = '%02d' AND created > %ld AND created < %ld order by created", cif_schedule_id, dom, when - 15*24*60*60, when + 15*24*60*60);
             if(!db_query(query))
             {
                result1 = db_store_result();
@@ -579,7 +580,7 @@ static void report_train_day(const dword cif_schedule_id, const time_t when, con
 
             if(status)
             {
-               sprintf(query, "SELECT event_type, loc_stanox, actual_timestamp, timetable_variation, variation_status from trust_movement where trust_id='%s' AND created > %ld AND created < %ld order by actual_timestamp, planned_timestamp, created", trust_id, when - 4*24*60*60, when + 4*24*60*60);
+               sprintf(query, "SELECT event_type, loc_stanox, actual_timestamp, timetable_variation, variation_status from trust_movement where trust_id='%s' AND created > %ld AND created < %ld order by actual_timestamp, planned_timestamp, created", trust_id, when - 15*24*60*60, when + 15*24*60*60);
                if(!db_query(query))
                {
                   result1 = db_store_result();
@@ -627,13 +628,21 @@ static void report_train_day(const dword cif_schedule_id, const time_t when, con
             
             if(status < 4)
             {
-               sprintf(query, "SELECT created, reason, type from trust_cancellation where trust_id='%s' AND created > %ld AND created < %ld order by created ", trust_id, when - 4*24*60*60, when + 4*24*60*60);                  
+               word save_status = status;
+               sprintf(query, "SELECT created, reason, type, reinstate from trust_cancellation where trust_id='%s' AND created > %ld AND created < %ld order by created ", trust_id, when - 15*24*60*60, when + 15*24*60*60);                  
                if(!db_query(query))
                {                   
                   result2 = db_store_result();
-                  if((row2 = mysql_fetch_row(result2)))
+                  while((row2 = mysql_fetch_row(result2)))
                   {
-                     status = 3;
+                     if(atoi(row2[3]))
+                     {
+                        status = save_status;
+                     }
+                     else
+                     {
+                        status = 3;
+                     }
                   }
                   mysql_free_result(result2);
                   

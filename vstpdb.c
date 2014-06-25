@@ -42,7 +42,7 @@
 #include "db.h"
 
 #define NAME  "vstpdb"
-#define BUILD "V520"
+#define BUILD "V611"
 
 static void perform(void);
 static void process_message(const char * body);
@@ -105,21 +105,16 @@ void termination_handler(int signum)
 int main(int argc, char *argv[])
 {
    int c;
-   word usage = true;
-   while ((c = getopt (argc, argv, "c:")) != -1)
+   char config_file_path[256];
+   word usage = false;
+   while ((c = getopt (argc, argv, ":c:")) != -1)
    {
       switch (c)
       {
       case 'c':
-         if(load_config(optarg))
-         {
-            printf("Failed to read config file \"%s\".\n", optarg);
-            usage = true;
-         }
-         else
-         {
-            usage = false;
-         }
+         strcpy(config_file_path, optarg);
+         break;
+      case ':':
          break;
       case '?':
       default:
@@ -128,9 +123,15 @@ int main(int argc, char *argv[])
       }
    }
 
+   if(load_config(config_file_path))
+   {
+      printf("Failed to read config file \"%s\".\n", config_file_path);
+      usage = true;
+   }
+
    if(usage)
    {
-      printf("No config file passed.\n\n\tUsage: %s -c /path/to/config/file.conf\n\n", argv[0] );
+      printf("\tUsage: %s [-c /path/to/config/file.conf]\n\n", argv[0] );
       exit(1);
    }
 
@@ -288,7 +289,7 @@ int main(int argc, char *argv[])
    // Startup delay
    if(!debug)
    {
-      _log(GENERAL, "Startup delay ...");
+      _log(GENERAL, "Startup delay...");
       word i;
       for(i = 0; i < 256 && run; i++) sleep(1);
    }
@@ -353,7 +354,7 @@ static void perform(void)
       }
       else
       {
-         _log(GENERAL, "Connected.  Waiting for messages ...");
+         _log(GENERAL, "Connected.  Waiting for messages...");
          holdoff = 0;
 
          int run_receive = true;
@@ -668,6 +669,9 @@ static void process_create_schedule(const char * string, const jsmntok_t * token
       index = process_create_schedule_location(string, tokens, index, id);
    }
 
+   sprintf(query, "UPDATE status SET last_vstp_processed = %ld", now);
+   db_query(query);
+
    if(huyton_flag) 
    {
       _log(DEBUG, "Created schedule %ld%s.  +++ Passes Huyton +++", id, update?" as a result of an Update transaction":"");
@@ -831,10 +835,10 @@ static void process_update_schedule(const char * string, const jsmntok_t * token
    EXTRACT("schedule_end_date", schedule_end_date);
    EXTRACT("CIF_stp_indicator", CIF_stp_indicator);
 
-   // time_t schedule_start_date_stamp = parse_datestamp(schedule_start_date);
+   time_t schedule_start_date_stamp = parse_datestamp(schedule_start_date);
    // time_t schedule_end_date_stamp   = parse_datestamp(schedule_end_date);
 
-   sprintf(query, "SELECT id FROM cif_schedules WHERE update_id = 0 AND CIF_train_uid = '%s' AND CIF_stp_indicator = '%s' AND deleted > %ld", CIF_train_uid, CIF_stp_indicator, time(NULL));
+   sprintf(query, "SELECT id FROM cif_schedules WHERE update_id = 0 AND CIF_train_uid = '%s' AND CIF_stp_indicator = '%s' AND schedule_start_date = %ld AND deleted > %ld", CIF_train_uid, CIF_stp_indicator, schedule_start_date_stamp, time(NULL));
    if(!db_query(query))
    {
       result0 = db_store_result();

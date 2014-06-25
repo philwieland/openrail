@@ -276,11 +276,13 @@ word email_alert(const char * const name, const char * const build, const char *
 
    fprintf(fp, "Report from %s build %s at %s\n\n%s\n", name, build, host, message);
    fclose(fp);
-   sprintf(command, "/bin/cat %s | /usr/bin/mail -s \"[openrail-%s] %s\" %s  >%s.log 2>&1", 
-           tmp_file, name, title, conf.report_email, tmp_file);
+   sprintf(command, "/bin/cat %s | /usr/bin/mail -s \"[openrail-%s] %s\" %s >>\tmp\email_alert.log 2>&1", 
+           tmp_file, name, title, conf.report_email);
    i = system(command);
    
    _log(DEBUG, "email_alert():  system(\"%s\") returned %d", command, i);
+
+   unlink(tmp_file);
            
    // Success
    return 0;
@@ -372,24 +374,26 @@ char * show_time_text(const char * const input)
    return output;
 }
 
+#define CONFIG_SIZE 2048
 int load_config(const char * const filepath)
 {
    char *line_start, *val_start, *val_end, *line_end, *ic;
-   static char buf[1025];
+   static char buf[CONFIG_SIZE];
 
    FILE *cfg;
    if((cfg = fopen(filepath, "r")))
    {
-      size_t z = fread(buf, 1, 1024, cfg);
+      ssize_t z = fread(buf, 1, CONFIG_SIZE, cfg);
       fclose(cfg);
       if(z < 1) return 2;
    }
    else
       return 1;
 
-   buf[1024] = 0;
+   buf[CONFIG_SIZE - 1] = '\0';
 
-   conf.db_server = conf.db_name = conf.db_user = conf.db_pass = conf.nr_user = conf.nr_pass = conf.debug = conf.report_email = &buf[1024];
+   conf.db_server = conf.db_name = conf.db_user = conf.db_pass = conf.nr_user = conf.nr_pass = conf.debug = conf.report_email = &buf[CONFIG_SIZE - 1];
+   conf.stomp_topics = conf.stomp_topic_names = &buf[CONFIG_SIZE - 1];
 
    line_start=buf;
    while(1)
@@ -398,41 +402,56 @@ int load_config(const char * const filepath)
       line_end = strchr(line_start, '\n');
       
       // config is finished
-      if (line_end == NULL || ic == NULL)
+      if (line_end == NULL)
          return 0;
 
-      val_start = ic;
-      val_end = line_end;
-      while (*(--ic) == ' ');
-      *(++ic) = 0;
-      while (*(++val_start) == ' ');
-      while (*(--val_end) == ' ');
-      *(++val_end) = 0;
-
-      if(*val_start == '"' && *(val_end-1) == '"')
+      if(*line_start == '\n' || *line_start == '#')
       {
-         val_start++;
-         val_end--;
-         *val_end=0;
+         // Blank line or comment
       }
+      else
+      {
+         if(!ic || ic > line_end)
+         {
+            // Colon missing.  Error.
+            return 3;
+         }
+         val_start = ic;
+         val_end = line_end;
+         while (*(--ic) == ' ');
+         *(++ic) = 0;
+         while (*(++val_start) == ' ');
+         while (*(--val_end) == ' ');
+         *(++val_end) = 0;
 
-      if (strcmp(line_start, "db_server") == 0)
-         conf.db_server = val_start;
-      else if (strcmp(line_start, "db_name") == 0)
-         conf.db_name = val_start;
-      else if (strcmp(line_start, "db_user") == 0)
-         conf.db_user = val_start;
-      else if (strcmp(line_start, "db_password") == 0)
-         conf.db_pass = val_start;
-      else if (strcmp(line_start, "nr_user") == 0)
-         conf.nr_user = val_start;
-      else if (strcmp(line_start, "nr_password") == 0)
-         conf.nr_pass = val_start;
-      else if (strcmp(line_start, "report_email") == 0)
-         conf.report_email = val_start;
-      else if (strcmp(line_start, "debug") == 0)
-         conf.debug = val_start;
+         if(*val_start == '"' && *(val_end-1) == '"')
+         {
+            val_start++;
+            val_end--;
+            *val_end=0;
+         }
 
+         if (strcmp(line_start, "db_server") == 0)
+            conf.db_server = val_start;
+         else if (strcmp(line_start, "db_name") == 0)
+            conf.db_name = val_start;
+         else if (strcmp(line_start, "db_user") == 0)
+            conf.db_user = val_start;
+         else if (strcmp(line_start, "db_password") == 0)
+            conf.db_pass = val_start;
+         else if (strcmp(line_start, "nr_user") == 0)
+            conf.nr_user = val_start;
+         else if (strcmp(line_start, "nr_password") == 0)
+            conf.nr_pass = val_start;
+         else if (strcmp(line_start, "report_email") == 0)
+            conf.report_email = val_start;
+         else if (strcmp(line_start, "debug") == 0)
+            conf.debug = val_start;
+         else if (strcmp(line_start, "stomp_topics") == 0)
+            conf.stomp_topics = val_start;
+         else if (strcmp(line_start, "stomp_topic_names") == 0)
+            conf.stomp_topic_names = val_start;
+      }
       line_start = line_end + 1;
    }
 }

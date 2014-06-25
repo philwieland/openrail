@@ -99,42 +99,39 @@ font-size: x-small;
 background-color:#ffbbbb; /* Red */
 }
 
+.summ-table
+{
+font-size: xx-small;
+}
 .summ-table-head
 {
-font-size: x-small;
 font-weight: bold; 
 background-color:#c0e0ff;
 }
 
 .summ-table-cape
 {
-font-size: x-small; 
 background-color:#ffbbbb; /* Red */
 }
 
 .summ-table-idle
 {
-    height:15px; 
-    font-size: x-small; 
+    /* height:15px;  */
     background-color:#eeeeee; /* Grey */
 }
 
 .summ-table-act
 {
-font-family: arial,sans-serif;
-font-size: x-small; 
 background-color:#c0e0ff; /* Pale blue */
 }
 
 .summ-table-move
 {
-font-size: x-small; 
 background-color:#bbffbb; /* Pale green */
 }
 
 .summ-table-gone
 {
-font-size: x-small; 
 /*background-color:#88ff88; /* Green */
 background-color:#eeeeee; /* Grey */
 }
@@ -169,7 +166,7 @@ background-color:#ff8888; /* Red */
 {
     color: black;
     background-color: #ddeedd;
-    height: 25px;
+    height: 26px;
 } 
 
 .cp-button
@@ -199,7 +196,7 @@ font-family: "courier","monospace";
 }
 .linkbutton-summary
 {
-    height:13px;
+    height:11px; /* 13 if font is x-small */
     color: black;
     border: 0px;
     text-decoration: none;
@@ -232,4 +229,32 @@ font-family: "courier","monospace";
 float: right;
 font-weight: bold;
 text-align:right;
+}
+.status0
+{
+color: black;
+background-color: #00ff00;
+}
+.status1
+{
+color: black;
+background-color: yellow;
+}
+.status2
+{
+color: #ffffff;
+background-color: red;
+}
+.status3
+{
+color: #ffffff;
+background-color: black;
+}
+.status-text
+{
+text-align:right;
+}
+.status-head
+{
+text-align:center;
 }

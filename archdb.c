@@ -33,7 +33,7 @@
 #include "db.h"
 
 #define NAME  "archdb"
-#define BUILD "V322"
+#define BUILD "V608"
 
 static int smart_loop(const word initial_quantity, int (*f)(word));
 static void create_database(void);
@@ -83,41 +83,45 @@ void termination_handler(int signum)
 int main(int argc, char **argv)
 {
    word i;
+   char config_file_path[256];
 
    age = 0;
 
-   word usage = true;
+   word usage = false;
    int c;
-   while ((c = getopt (argc, argv, "c:a:")) != -1)
+   strcpy(config_file_path, "/etc/openrail.conf");
+   while ((c = getopt (argc, argv, ":c:a:")) != -1)
+   {
       switch (c)
       {
       case 'c':
-         if(load_config(optarg))
-         {
-            printf("Failed to read config file \"%s\".\n", optarg);
-            usage = true;
-         }
-         else
-         {
-            usage = false;
-         }
+         strcpy(config_file_path, optarg);
          break;
       case 'a':
          age = atoi(optarg);
+         break;
+      case ':':
          break;
       case '?':
       default:
          usage = true;
       break;
       }
+   }
+
+   if(load_config(config_file_path))
+   {
+      printf("Failed to read config file \"%s\".\n", config_file_path);
+      usage = true;
+   }
 
    if(usage) 
    {
       printf(
-             "Usage:\n"
-             "-c <file>  Path to config file.\n"
-             "-a <days>  Number of days to retain.  Omit this to skip the archiving.\n"
-             );
+             "Usage: %s [-c <file>] [-a <days>]\n"
+             "   -c <file>  Path to config file.\n"
+             "   -a <days>  Number of days to retain.  Omit this to skip the archiving.\n"
+             , argv[0]);
       exit(1);
    }
 

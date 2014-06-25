@@ -39,7 +39,7 @@
 #include "misc.h"
 
 #define NAME  "stompy"
-#define BUILD "V518"
+#define BUILD "V616"
 
 static void perform(void);
 static void set_up_server_sockets(void);
@@ -97,21 +97,6 @@ static word stomp_tx_queue_on, stomp_tx_queue_off;
 #define STOMP_HOST "datafeeds.networkrail.co.uk"
 #define STOMP_PORT 61618
 
-// Stats
-static time_t start_time;
-enum stats_categories {StompBytes, ConnectAttempt, StompMessage, VSTPFrameSent, TrustFrameSent,
-                       DiscWrite, DiscRead, MAXstats
-};
-static qword stats[MAXstats];
-static qword grand_stats[MAXstats];
-static const char * stats_category[MAXstats] = 
-   {
-      "STOMP Bytes", "STOMP Connect Attempt", "STOMP Message", "VSTP Frame Sent", "Trust Frame Sent",
-      "Frame Disc Write", "Frame Disc Read",
-   };
-static qword stats_longest;
-static qword grand_stats_longest;
-
 // Select timeout period in seconds
 #define SELECT_TIMEOUT 4
 
@@ -119,7 +104,8 @@ static qword grand_stats_longest;
 static fd_set read_sockets, write_sockets, active_read_sockets, active_write_sockets;
 static int s_stomp;
 static byte s_stream[FD_SETSIZE];
-enum s_streams {VSTP, TRUST, /* TD, */ STREAMS, STOMP = STREAMS};
+#define STREAMS 4
+#define STOMP STREAMS
 static byte s_type[FD_SETSIZE];
 enum s_types {CLIENT, SERVER, TYPES};
 static int s_number[STREAMS][TYPES];
@@ -127,7 +113,24 @@ static int s_number[STREAMS][TYPES];
 // Stream modes
 static enum {STREAM_DISC, STREAM_RUN, STREAM_LOCK} stream_state[STREAMS];
 
-static char * stream_names[STREAMS] = {"VSTP", "TRUST", /*"TD"*/};
+static char * stomp_topics[STREAMS];
+static char * stomp_topic_names[STREAMS];
+static char topics[1024];
+
+// Stats
+static time_t start_time;
+enum stats_categories {StompBytes, ConnectAttempt, StompMessage, BaseStreamFrameSent, 
+                       DiscWrite = BaseStreamFrameSent + STREAMS, DiscRead, MAXstats
+};
+static qword stats[MAXstats];
+static qword grand_stats[MAXstats];
+static const char * stats_category[MAXstats] = 
+   {
+      "STOMP Bytes", "STOMP Connect Attempt", "STOMP Message", "", "", "", "",
+      "Frame Disc Write", "Frame Disc Read",
+   };
+static qword stats_longest;
+static qword grand_stats_longest;
 
 // Timers
 static time_t now;
@@ -181,22 +184,18 @@ void termination_handler(int signum)
 int main(int argc, char *argv[])
 {
    int c;
+   char config_file_path[256];
+   word usage = false;
 
-   word usage = true;
-   while ((c = getopt (argc, argv, "c:")) != -1)
+   strcpy(config_file_path, "/etc/openrail.conf");
+   while ((c = getopt (argc, argv, ":c:")) != -1)
    {
       switch (c)
       {
       case 'c':
-         if(load_config(optarg))
-         {
-            printf("Failed to read config file \"%s\".\n", optarg);
-            usage = true;
-         }
-         else
-         {
-            usage = false;
-         }
+         strcpy(config_file_path, optarg);
+         break;
+      case ':':
          break;
       case '?':
       default:
@@ -205,10 +204,59 @@ int main(int argc, char *argv[])
       }
    }
 
+   if(load_config(config_file_path))
+   {
+      printf("Failed to read config file \"%s\".\n", config_file_path);
+      usage = true;
+   }
+
    if(usage)
    {
-      printf("No config file passed.\n\n\tUsage: %s -c /path/to/config/file.conf\n\n", argv[0] );
+      printf("\tUsage: %s [-c /path/to/config/file.conf]\n\n", argv[0] );
       exit(1);
+   }
+
+   {
+      // Parse subscriptions from config
+      strcpy(topics, conf.stomp_topics);
+      char * p = topics;
+      char * q;
+      char * e = p + strlen(p);
+      int i;
+      for(i = 0; i < STREAMS; i++)
+      {
+         q = strchr(p, ';');
+         if(q)
+         {
+            stomp_topics[i] = p;
+            *q = '\0';
+            p = q + 1;
+         }
+         else
+         {
+            stomp_topics[i] = p;
+            p = e;
+         }
+         if(!strcasecmp(stomp_topics[i], "void")) stomp_topics[i][0] = '\0';
+      }
+      p = e + 1;
+      strcpy(p, conf.stomp_topic_names);
+      e = p + strlen(p);
+      for(i = 0; i < STREAMS; i++)
+      {
+         q = strchr(p, ';');
+         if(q)
+         {
+            stomp_topic_names[i] = p;
+            *q = '\0';
+            p = q + 1;
+         }
+         else
+         {
+            stomp_topic_names[i] = p;
+            p = e;
+         }
+      }
    }
 
    int lfp = 0;
@@ -229,6 +277,7 @@ int main(int argc, char *argv[])
 
    _log(GENERAL, "");
    _log(GENERAL, "%s %s", NAME, BUILD);
+   _log(DEBUG, "Loaded config from \"%s\".", config_file_path);
 
    // Enable core dumps
    struct rlimit limit;
@@ -550,7 +599,7 @@ static void set_up_server_sockets(void)
 
    for(stream = 0; stream < STREAMS; stream++)
    {
-      if(s_number[stream][SERVER] < 0)
+      if(stomp_topics[stream][0] && s_number[stream][SERVER] < 0)
       {
          s = socket(AF_INET, SOCK_STREAM, 0);
          if (s < 0)
@@ -783,7 +832,7 @@ static void stomp_read(void)
                {
                   switch(*s)
                   {
-                  case '0':  case '1':
+                  case '0':  case '1': case '2': case '3':
                      stream = *s - '0';
                      // Note the following code allows one stream to hog all the buffers.  Is that a good idea?
                      if(!stomp_read_buffer) stomp_read_buffer = new_buffer();
@@ -794,7 +843,7 @@ static void stomp_read(void)
                      else
                      {
                         // Handle run out of buffers:  Dump queue to disc, switch to disc mode ask for a buffer again.
-                        _log(GENERAL, "No buffers available for stream %d (%s).  Saving to disc.", stream, stream_names[stream]);
+                        _log(GENERAL, "No buffers available for stream %d (%s).  Saving to disc.", stream, stomp_topic_names[stream]);
                         if(!dump_queue_to_disc(stream))
                         {
                            // None in our queue, find some elsewhere
@@ -805,7 +854,7 @@ static void stomp_read(void)
                               {
                                  // Found some!
                                  if(stream_state[s] == STREAM_RUN) stream_state[s] = STREAM_DISC;
-                                 _log(GENERAL, "Dumped queue to disc and switched to disc mode on stream %d (%s) to free space.", s, stream_names[s]);
+                                 _log(GENERAL, "Dumped queue to disc and switched to disc mode on stream %d (%s) to free space.", s, stomp_topic_names[s]);
                                  s = STREAMS;
                               }
                            }
@@ -823,7 +872,7 @@ static void stomp_read(void)
                      }
                      break;
                      
-                  default: _log(MAJOR, "STOMP MESSAGE received with unrecognised subscription value.");
+                  default: _log(MAJOR, "STOMP MESSAGE received with unrecognised subscription value \"%c\".", *s);
                      stomp_read_state = STOMP_FAIL;
                      body = NULL;
                      break;
@@ -953,14 +1002,14 @@ static void client_write(const int s)
             {
                // There is stuff on the disc, but we have no room to read it.
                // This is a problem.  If we just leave the stream in this state, it will hog the select.
-               _log(GENERAL, "Unable to load stream %d (%s) messages from disc.  No buffers available.", stream, stream_names[stream]);
+               _log(GENERAL, "Unable to load stream %d (%s) messages from disc.  No buffers available.", stream, stomp_topic_names[stream]);
                word st;
                for(st = 0; st < STREAMS; st++)
                {
                   if(dump_queue_to_disc(st))
                   {
                      if(stream_state[st] == STREAM_RUN) stream_state[st] = STREAM_DISC;
-                     _log(GENERAL, "Dumped queue for stream %d (%s) to disc to free space.", st, stream_names[st]);
+                     _log(GENERAL, "Dumped queue for stream %d (%s) to disc to free space.", st, stomp_topic_names[st]);
                      st = STREAMS;
                   }
                }
@@ -971,7 +1020,7 @@ static void client_write(const int s)
          else
          {
             // We have emptied the disc
-            _log(GENERAL, "Stream %d (%s) disc queue empty.", stream, stream_names[stream]);
+            _log(GENERAL, "Stream %d (%s) disc queue empty.", stream, stomp_topic_names[stream]);
             stream_state[stream] = STREAM_RUN;
             FD_CLR(s, &write_sockets);
             return;
@@ -992,7 +1041,7 @@ static void client_write(const int s)
          s_number[stream][CLIENT] = -1;
          FD_CLR(s, &write_sockets);
          FD_CLR(s, &read_sockets);
-         _log(GENERAL, "Client disconnected from stream %d (%s).", stream, stream_names[stream]);
+         _log(GENERAL, "Client disconnected from stream %d (%s).", stream, stomp_topic_names[stream]);
          // Could switch to disc mode here?  Or wait until queue fills.
       }
       else
@@ -1016,7 +1065,7 @@ static void client_write(const int s)
          s_number[stream][CLIENT] = -1;
          FD_CLR(s, &write_sockets);
          FD_CLR(s, &read_sockets);
-         _log(GENERAL, "Client disconnected from stream %d (%s).", stream, stream_names[stream]);
+         _log(GENERAL, "Client disconnected from stream %d (%s).", stream, stomp_topic_names[stream]);
          // Could switch to disc mode here?  Or wait until queue fills.
       }
       else
@@ -1053,39 +1102,39 @@ static void client_read(const int s)
    l = read(s, buffer, 16);
    if(l < 0)
    {
-      _log(MAJOR, "Error reading ACK from client on stream %d (%s).  Error %d %s.", stream, stream_names[stream], errno, strerror(errno));
+      _log(MAJOR, "Error reading ACK from client on stream %d (%s).  Error %d %s.", stream, stomp_topic_names[stream], errno, strerror(errno));
       client_state[stream] = CLIENT_IDLE;
       client_buffer[stream] = NULL;
       close(s);
       s_number[stream][CLIENT] = -1;
       FD_CLR(s, &write_sockets);
       FD_CLR(s, &read_sockets);
-      _log(GENERAL, "Client disconnected from stream %d (%s).", stream, stream_names[stream]);
+      _log(GENERAL, "Client disconnected from stream %d (%s).", stream, stomp_topic_names[stream]);
       return;
    }
    else if(!l)
    {
-      _log(MAJOR, "EOF reading ACK from client on stream %d (%s).", stream, stream_names[stream]);
+      _log(MAJOR, "EOF reading ACK from client on stream %d (%s).", stream, stomp_topic_names[stream]);
       client_state[stream] = CLIENT_IDLE;
       client_buffer[stream] = NULL;
       close(s);
       s_number[stream][CLIENT] = -1;
       FD_CLR(s, &write_sockets);
       FD_CLR(s, &read_sockets);
-      _log(GENERAL, "Client disconnected from stream %d (%s).", stream, stream_names[stream]);
+      _log(GENERAL, "Client disconnected from stream %d (%s).", stream, stomp_topic_names[stream]);
       return;
    }
    FD_CLR(s, &read_sockets);
    client_state[stream] = CLIENT_IDLE;
    if(client_buffer[stream] != dequeue(stream))
    {
-      _log(CRITICAL, "Queue end mismatch detected in client_read() on stream %d (%s).  Fatal.", stream, stream_names[stream]);
+      _log(CRITICAL, "Queue end mismatch detected in client_read() on stream %d (%s).  Fatal.", stream, stomp_topic_names[stream]);
       run = false;
       return;
    }
    free_buffer(client_buffer[stream]);
    client_buffer[stream] = NULL;
-   stats[VSTPFrameSent + stream]++;
+   stats[BaseStreamFrameSent + stream]++;
    if(controlled_shutdown)
    {
       dump_queue_to_disc(stream);
@@ -1140,7 +1189,7 @@ static void client_accept(const int s)
       s_type[new_socket] = CLIENT;
       s_number[stream][CLIENT] = new_socket;
       FD_SET(new_socket, &write_sockets);
-      _log(GENERAL, "Client connected to stream %d (%s).", stream, stream_names[stream]);
+      _log(GENERAL, "Client connected to stream %d (%s).", stream, stomp_topic_names[stream]);
    }
 }
 
@@ -1219,43 +1268,34 @@ static void user_command(void)
 static void send_subscribes(void)
 {
    char headers[1024];
+   int stream;
    _log(PROC, "send_subscribes()");
 
-   // TRUST
-   strcpy(headers, "SUBSCRIBE\n");
-   strcat(headers, "destination:/topic/TRAIN_MVT_ALL_TOC\n");      
-   if(debug)
+   for(stream = 0; stream < STREAMS; stream++)
    {
-      sprintf(zs, "activemq.subscriptionName:%s-stompy-1-debug\n", conf.nr_user);
-      strcat(headers, zs);
+      if(stomp_topics[stream][0])
+      {
+         strcpy(headers, "SUBSCRIBE\n");
+         strcat(headers, "destination:/topic/");
+         strcat(headers, stomp_topics[stream]);
+         strcat(headers, "\n");
+         if(debug)
+         {
+            sprintf(zs, "activemq.subscriptionName:%s-stompy-%d-debug\n", conf.nr_user, stream);
+            strcat(headers, zs);
+         }
+         else
+         {
+            sprintf(zs, "activemq.subscriptionName:%s-stompy-%d-%s\n", conf.nr_user, stream, abbreviated_host_id());
+            strcat(headers, zs);
+         }
+         sprintf(zs, "id:%d\n", stream);
+         strcat(headers, zs);      
+         strcat(headers, "ack:client\n");   
+         strcat(headers, "\n");
+         stomp_queue_tx(headers, strlen(headers) + 1);
+      }
    }
-   else
-   {
-      sprintf(zs, "activemq.subscriptionName:%s-stompy-1-%s\n", conf.nr_user, abbreviated_host_id());
-      strcat(headers, zs);
-   }
-   strcat(headers, "id:1\n");      
-   strcat(headers, "ack:client\n");   
-   strcat(headers, "\n");
-   stomp_queue_tx(headers, strlen(headers) + 1);
-
-   // VSTP
-   strcpy(headers, "SUBSCRIBE\n");
-   strcat(headers, "destination:/topic/VSTP_ALL\n");      
-   if(debug)
-   {
-      sprintf(zs, "activemq.subscriptionName:%s-stompy-0-debug\n", conf.nr_user);
-      strcat(headers, zs);
-   }
-   else
-   {
-      sprintf(zs, "activemq.subscriptionName:%s-stompy-0-%s\n", conf.nr_user, abbreviated_host_id());
-      strcat(headers, zs);
-   }
-   strcat(headers, "id:0\n");      
-   strcat(headers, "ack:client\n");   
-   strcat(headers, "\n");
-   stomp_queue_tx(headers, strlen(headers) + 1);
 }
 
 static void handle_shutdown(word report)
@@ -1278,7 +1318,7 @@ static void handle_shutdown(word report)
       if(s_number[stream][SERVER] >= 0)
       {
          complete = false;
-         sprintf(reason, "Stream %d (%s) server socket still open", stream, stream_names[stream]);
+         sprintf(reason, "Stream %d (%s) server socket still open", stream, stomp_topic_names[stream]);
          close(s_number[stream][SERVER]);
          FD_CLR(s_number[stream][SERVER], &read_sockets);
          FD_CLR(s_number[stream][SERVER], &write_sockets);
@@ -1287,7 +1327,7 @@ static void handle_shutdown(word report)
       if(s_number[stream][CLIENT] >= 0)
       {
          complete = false;
-         sprintf(reason, "Stream %d (%s) client connection still active", stream, stream_names[stream]);
+         sprintf(reason, "Stream %d (%s) client connection still active", stream, stomp_topic_names[stream]);
          if(client_state[stream] == CLIENT_IDLE)
          {
             dump_queue_to_disc(stream);
@@ -1591,7 +1631,7 @@ static void stomp_queue_tx(const char * const d, const ssize_t l)
 
 static void report_stats(void)
 {
-   char zs[128];
+   char zs[128], zs1[128];
    word i;
    char report[2048];
 
@@ -1608,11 +1648,26 @@ static void report_stats(void)
    for(i=0; i<MAXstats; i++)
    {
       grand_stats[i] += stats[i];
-      sprintf(zs, "%25s: %-12s ", stats_category[i], commas_q(stats[i]));
-      strcat(zs, commas_q(grand_stats[i]));
-      _log(GENERAL, zs);
-      strcat(report, zs);
-      strcat(report, "\n");
+      if(i >= BaseStreamFrameSent && i < BaseStreamFrameSent + STREAMS)
+      {
+         if(stomp_topics[i - BaseStreamFrameSent][0])
+         {
+            sprintf(zs1, "%s Frame Sent", stomp_topic_names[i - BaseStreamFrameSent]);
+            sprintf(zs, "%25s: %-12s ", zs1, commas_q(stats[i]));
+            strcat(zs, commas_q(grand_stats[i]));
+            _log(GENERAL, zs);
+            strcat(report, zs);
+            strcat(report, "\n");
+         }
+      }
+      else
+      {
+         sprintf(zs, "%25s: %-12s ", stats_category[i], commas_q(stats[i]));
+         strcat(zs, commas_q(grand_stats[i]));
+         _log(GENERAL, zs);
+         strcat(report, zs);
+         strcat(report, "\n");
+      }
       stats[i] = 0;
    }
    if(stats_longest > grand_stats_longest)grand_stats_longest = stats_longest;
@@ -1654,45 +1709,48 @@ static void report_alarms(void)
 
    for(stream = 0; stream < STREAMS; stream++)
    {
-      too_old = false;
-      if(disc_queue_length(stream)) 
+      if(stomp_topics[stream][0])
       {
-         oldest = disc_queue_oldest(stream);
-         too_old = time_us() - oldest > 0x80000000LL;  // About 36 minutes.
-      }
-      if(too_old || stream_state[stream] != STREAM_RUN || s_number[stream][CLIENT] < 0)
-      {
-         if(head)
+         too_old = false;
+         if(disc_queue_length(stream)) 
          {
-            head = false;
-            _log(GENERAL, "Alarm report:");
-            strcat(report, "\nAlarm report:\n");
+            oldest = disc_queue_oldest(stream);
+            too_old = time_us() - oldest > 0x80000000LL;  // About 36 minutes.
          }
-      }
+         if(too_old || stream_state[stream] != STREAM_RUN || s_number[stream][CLIENT] < 0)
+         {
+            if(head)
+            {
+               head = false;
+               _log(GENERAL, "Alarm report:");
+               strcat(report, "\nAlarm report:\n");
+            }
+         }
 
-      if(s_number[stream][CLIENT] < 0)
-      {
-         sprintf(zs, "Stream %d (%s) client connection is down.", stream, stream_names[stream]);
-         _log(GENERAL, zs);
-         strcat(report, zs);
-         strcat(report, "\n");
-      }
+         if(s_number[stream][CLIENT] < 0)
+         {
+            sprintf(zs, "Stream %d (%s) client connection is down.", stream, stomp_topic_names[stream]);
+            _log(GENERAL, zs);
+            strcat(report, zs);
+            strcat(report, "\n");
+         }
 
-      if(stream_state[stream] != STREAM_RUN)
-      {
-         sprintf(zs, "Stream %d (%s) is currently routing messages to disc.  %d messages on disc.", stream, stream_names[stream], disc_queue_length(stream));
-         _log(GENERAL, zs);
-         strcat(report, zs);
-         strcat(report, "\n");
-      }
-      if(too_old)
-      {
-         oldest /= 1000;
-         oldest /= 1000; // Gives seconds
-         sprintf(zs, "Stream %d (%s) oldest message in disc queue is stamped %s.", stream, stream_names[stream], time_text(oldest, true));
-         _log(GENERAL, zs);
-         strcat(report, zs);
-         strcat(report, "\n");
+         if(stream_state[stream] != STREAM_RUN)
+         {
+            sprintf(zs, "Stream %d (%s) is currently routing messages to disc.  %d messages on disc.", stream, stomp_topic_names[stream], disc_queue_length(stream));
+            _log(GENERAL, zs);
+            strcat(report, zs);
+            strcat(report, "\n");
+         }
+         if(too_old)
+         {
+            oldest /= 1000;
+            oldest /= 1000; // Gives seconds
+            sprintf(zs, "Stream %d (%s) oldest message in disc queue is stamped %s.", stream, stomp_topic_names[stream], time_text(oldest, true));
+            _log(GENERAL, zs);
+            strcat(report, zs);
+            strcat(report, "\n");
+         }
       }
    }
          
@@ -1731,15 +1789,18 @@ static void report_status(void)
    _log(GENERAL, "STOMP:  Manager state %d, read state %d, read buffer %sowned, socket %d.", stomp_manager_state, stomp_read_state, stomp_read_buffer?"":"not ", s_stomp);
    for(stream = 0; stream < STREAMS; stream++)
    {
-      dql = disc_queue_length(stream);
-      _log(GENERAL, "Stream %d (%s): Server socket %d, client socket %d, frames in queue %d, on disc %d.", stream, stream_names[stream], s_number[stream][SERVER], s_number[stream][CLIENT], queue_length(stream), dql);
-      _log(GENERAL, "   Stream state %d (%s), client state %d (%s), length %ld, index %ld.", stream_state[stream], ss[stream_state[stream]], client_state[stream], cs[client_state[stream]], client_length[stream], client_index[stream]);
-      if(dql) 
+      if(stomp_topics[stream][0])
       {
-         qword oldest = disc_queue_oldest(stream);
-         oldest /= 1000;
-         oldest /= 1000;
-         _log(GENERAL, "   Oldest message in disc queue is stamped %s.", time_text(oldest, true));
+         dql = disc_queue_length(stream);
+         _log(GENERAL, "Stream %d (%s): Server socket %d, client socket %d, frames in queue %d, on disc %d.", stream, stomp_topic_names[stream], s_number[stream][SERVER], s_number[stream][CLIENT], queue_length(stream), dql);
+         _log(GENERAL, "   Stream state %d (%s), client state %d (%s), length %ld, index %ld.", stream_state[stream], ss[stream_state[stream]], client_state[stream], cs[client_state[stream]], client_length[stream], client_index[stream]);
+         if(dql) 
+         {
+            qword oldest = disc_queue_oldest(stream);
+            oldest /= 1000;
+            oldest /= 1000;
+            _log(GENERAL, "   Oldest message in disc queue is stamped %s.", time_text(oldest, true));
+         }
       }
    }
 }

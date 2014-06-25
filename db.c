@@ -80,11 +80,14 @@ MYSQL_RES * db_store_result(void)
 
 word db_row_count(void)
 {
-   // Returns number of rows affected by preceding DELETE or UPDATE.
+   // Returns number of rows affected by immediately preceding DELETE or UPDATE.
    // Doesn't work after a SELECT.
+   // Doesn't work after COMMITting.
 
    MYSQL_RES * result;
    MYSQL_ROW row;
+   word rows;
+
    if(db_connect()) return 9;
 
    if (mysql_query(mysql_object, "SELECT row_count()"))
@@ -99,11 +102,10 @@ word db_row_count(void)
 
    result = mysql_store_result(mysql_object);
    row = mysql_fetch_row(result);
-
+   rows = atoi(row[0]);
    mysql_free_result(result);
 
-   return atoi(row[0]);
- 
+   return rows;
 }
 
 word db_connect(void)

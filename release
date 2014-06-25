@@ -1,6 +1,12 @@
 #!/bin/bash
 
 host=`hostname`
+
+if [ "$1" = "all" ]; then
+    echo tv > /tmp/stompy.cmd
+    sudo pkill -SIGUSR1 stompy
+fi
+
 if [ "$1" = "all" -o "$1" = "cifdb" ]; then
     echo "Releasing cifdb"
     sudo cp cifdb   /usr/sbin/cifdb
@@ -34,6 +40,17 @@ if [ "$1" = "all" -o "$1" = "liverail" ]; then
     DONE="liverail"
 fi
 
+if [ "$1" = "all" -o "$1" = "dump-rail" ]; then
+    if [ "$host" = "friedbread.liverpub.com" ]; then
+        echo "Releasing dump-rail for friedbread"
+        sudo cp dump-rail-fb /usr/sbin/dump-rail 
+    else
+        echo "Releasing dump-rail"
+        sudo cp dump-rail /usr/sbin/dump-rail 
+    fi
+    DONE="dump-rail"
+fi
+
 if [ "$1" = "all" -o "$1" = "stompy" ]; then
     echo "Releasing stompy"
     sudo /etc/init.d/stompy stop
@@ -59,17 +76,6 @@ if [ "$1" = "all" -o "$1" = "trustdb" ]; then
     sudo cp trustdb /usr/sbin/trustdb 
     sudo /etc/init.d/trustdb start
     DONE="trustdb"
-fi
-
-if [ "$1" = "all" -o "$1" = "dump-rail" ]; then
-    if [ "$host" = "friedbread.liverpub.com" ]; then
-        echo "Releasing dump-rail for friedbread"
-        sudo cp dump-rail-fb /usr/sbin/dump-rail 
-    else
-        echo "Releasing dump-rail"
-        sudo cp dump-rail /usr/sbin/dump-rail 
-    fi
-    DONE="dump-rail"
 fi
 
 if [ "$DONE" = "" ]; then

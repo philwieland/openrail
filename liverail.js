@@ -27,31 +27,50 @@ var updating = 0;
 
 function search_onclick()
 {
-   result = url_base + "depsheet" + '/' + document.getElementById("search_loc").value + '/' + document.getElementById("search_date").value;
+   ar_off();
+   result = url_base + "full" + '/' + document.getElementById("search_loc").value + '/' + document.getElementById("search_date").value;
    window.location = result;
 }
 
 function summary_onclick()
 {
-   result = url_base + "depsum" + '/' + document.getElementById("search_loc").value + '/' + document.getElementById("search_date").value;
+   ar_off();
+   result = url_base + "sum" + '/' + document.getElementById("search_loc").value + '/' + document.getElementById("search_date").value;
+   window.location = result;
+}
+
+function depart_onclick()
+{
+   ar_off();
+   result = url_base + "dep" + '/' + document.getElementById("search_loc").value + '/' + document.getElementById("search_date").value;
    window.location = result;
 }
 
 function as_search_onclick()
 {
+   ar_off();
    result = url_base + "as" + '/' + document.getElementById("as-uid").value + '/' + document.getElementById("as-head").value;
    window.location = result;
 }
 
 function as_go_onclick()
 {
+   ar_off();
    result = url_base + "train" + '/' + document.getElementById("as-g-id").value;
    window.location = result;
 }
 
 function as_rq_onclick()
 {
+   ar_off();
    result = url_base + "as";
+   window.location = result;
+}
+
+function status_onclick()
+{
+   ar_off();
+   result = url_base + "status";
    window.location = result;
 }
 
@@ -62,6 +81,7 @@ function train_date_onclick(schedule_id)
    // var url = "/";
    // for(var i = 3; i < 7; i++) url += url_parts[i] + '/';
    // url += document.getElementById("train_date").value;
+   ar_off();
    result = url_base + "train" + '/' + schedule_id + '/' + document.getElementById("train_date").value;
    window.location = result;
 }
@@ -82,8 +102,11 @@ function ar_onclick()
 
 function ar_off()
 {
-   document.getElementById("ar").checked = false;
-   document.getElementById("progress").style.display='none';
+   if(document.getElementById("ar"))
+   {
+      document.getElementById("ar").checked = false;
+      document.getElementById("progress").style.display='none';
+   }
 }
 
 function startup()
@@ -91,13 +114,13 @@ function startup()
    setInterval('ar()', refresh_tick);
    refresh_count = 0;
    updating = 0;
-   if(document.getElementById("ar").checked)
+   if(document.getElementById("ar") && document.getElementById("ar").checked)
    {
       // Refresh has been enabled.
  
       var url = document.URL;
       var url_parts = url.split('/');
-      if(url_parts[5] == "depsum")
+      if(url_parts[5] == "sum" || url_parts[5] == "dep")
       {
          // trigger an immediate update
          document.getElementById("progress").style.display='none';
@@ -112,13 +135,16 @@ function startup()
    }
    else
    {
-      document.getElementById("progress").style.display='none';
+      if(document.getElementById("ar") )
+      {
+         document.getElementById("progress").style.display='none';
+      }
    }
 }
 
 function ar()
 {
-   if(document.getElementById("ar").checked)
+   if(document.getElementById("ar") && document.getElementById("ar").checked)
    {
       if(++refresh_count < refresh_period)
       {
@@ -133,7 +159,7 @@ function ar()
             var url = document.URL;
             if(url.substr(-2,2) != "/r") { url += "/r"; }
             var url_parts = url.split('/');
-            if(url_parts[5] == "depsum")
+            if(url_parts[5] == "sum" || url_parts[5] == "dep")
             {
                // Smart update
                smart_update(url);
@@ -145,7 +171,7 @@ function ar()
             }
             updating = 0;
          }
-         else if(refresh_count > refresh_period * 2)
+         else if(refresh_count > refresh_period * 8)
          {
             // Update seems to have timed out.  Try a reload.
             refresh_count = refresh_period;
@@ -160,14 +186,17 @@ function ar()
 function show_progress()
 {
    var progress = '<div style="background-color:white;display:block;width:100%%;height:';
-   progress += Math.round(refresh_count * 25 / refresh_period);
+   var step = Math.round(refresh_count * 25 / refresh_period);
+   if(step > 25) step = 25;
+   progress += step;
    progress += 'px;"></div>';
    document.getElementById("progress").innerHTML = progress;
 }
 
 function smart_update(url)
 {
-   var update_url = url.replace('depsum', 'depsumu');
+   var update_url = url.replace('/sum', '/sumu');
+   update_url = update_url.replace('/dep', '/depu');
    document.getElementById("bottom-line").innerHTML += "&nbsp;&nbsp;Updating...";
 
    var req = new XMLHttpRequest();

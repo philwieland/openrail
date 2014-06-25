@@ -35,6 +35,8 @@ typedef struct Conf {
    char * nr_pass;
    char * debug;
    char * report_email;
+   char * stomp_topics;
+   char * stomp_topic_names;
 } conf_t;
 extern conf_t conf;
 

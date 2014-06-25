@@ -41,7 +41,7 @@
 #include "db.h"
 
 #define NAME  "trustdb"
-#define BUILD "V524"
+#define BUILD "V611"
 
 static void perform(void);
 static void process_message(const char * const body);
@@ -77,6 +77,9 @@ static jsmntok_t tokens[NUM_TOKENS];
 
 static time_t start_time;
 
+// Status
+static time_t status_last_trust_processed, status_last_trust_actual;
+
 // Stats
 enum stats_categories {ConnectAttempt, GoodMessage, // Don't insert any here
                        Mess1, Mess2, Mess3, Mess4, Mess5, Mess6, Mess7, Mess8,
@@ -103,21 +106,17 @@ void termination_handler(int signum)
 int main(int argc, char *argv[])
 {
    int c;
-   word usage = true;
-   while ((c = getopt (argc, argv, "c:")) != -1)
+   char config_file_path[256];
+   word usage = false;
+   strcpy(config_file_path, "/etc/openrail.conf");
+   while ((c = getopt (argc, argv, ":c:")) != -1)
    {
       switch (c)
       {
       case 'c':
-         if(load_config(optarg))
-         {
-            printf("Failed to read config file \"%s\".\n", optarg);
-            usage = true;
-         }
-         else
-         {
-            usage = false;
-         }
+         strcpy(config_file_path, optarg);
+         break;
+      case ':':
          break;
       case '?':
       default:
@@ -126,9 +125,15 @@ int main(int argc, char *argv[])
       }
    }
 
+   if(load_config(config_file_path))
+   {
+      printf("Failed to read config file \"%s\".\n", config_file_path);
+      usage = true;
+   }
+
    if(usage)
    {
-      printf("No config file passed.\n\n\tUsage: %s -c /path/to/config/file.conf\n\n", argv[0] );
+      printf("\tUsage: %s [-c /path/to/config/file.conf]\n\n", argv[0] );
       exit(1);
    }
 
@@ -294,7 +299,7 @@ int main(int argc, char *argv[])
    // Startup delay
    if(!debug)
    {
-      _log(GENERAL, "Startup delay ...");
+      _log(GENERAL, "Startup delay...");
       word i;
       for(i = 0; i < 256 && run; i++) sleep(1);
    }
@@ -335,6 +340,10 @@ static void perform(void)
          last_report_day = broken->tm_wday;
       }
    }
+
+   // Status
+   status_last_trust_processed = status_last_trust_actual = 0;
+
    while(run)
    {   
       stats[ConnectAttempt]++;
@@ -367,7 +376,7 @@ static void perform(void)
       }
       else
       {
-         _log(GENERAL, "Connected.  Waiting for messages ...");
+         _log(GENERAL, "Connected.  Waiting for messages...");
          holdoff = 0;
 
          int run_receive = true;
@@ -429,7 +438,7 @@ static void perform(void)
          } // while(run && run_receive)
       }
 
-      _log(GENERAL, "Disconnecting socket ...");
+      _log(GENERAL, "Disconnecting socket...");
       close(stompy_socket);
       stompy_socket = -1;
       {      
@@ -452,6 +461,7 @@ static void perform(void)
 static void process_message(const char * const body)
 {
    jsmn_parser parser;
+   char query[256];
    qword elapsed = time_ms();
    
    log_message(body);
@@ -525,6 +535,8 @@ static void process_message(const char * const body)
    {
       _log(MINOR, "Frame took %s ms to process.", commas_q(elapsed));
    }
+   sprintf(query, "UPDATE status SET last_trust_processed = %ld, last_trust_actual = %ld", status_last_trust_processed, status_last_trust_actual);
+   db_query(query);
 }
 
 static void process_trust_0001(const char * const string, const jsmntok_t * const tokens, const int index)
@@ -544,12 +556,12 @@ static void process_trust_0001(const char * const string, const jsmntok_t * cons
 
    jsmn_find_extract_token(string, tokens, index, "schedule_start_date", zs, sizeof(zs));
    time_t schedule_start_date_stamp = parse_datestamp(zs);
-   sprintf(zs1, " schedule_start_date=\"%s\" %ld", zs, schedule_start_date_stamp);
+   sprintf(zs1, " schedule_start_date=%s", zs);
    strcat(report, zs1);
 
    jsmn_find_extract_token(string, tokens, index, "schedule_end_date", zs, sizeof(zs));
    time_t schedule_end_date_stamp   = parse_datestamp(zs);
-   sprintf(zs1, " schedule_end_date=\"%s\" %ld", zs, schedule_end_date_stamp);
+   sprintf(zs1, " schedule_end_date=%s", zs);
    strcat(report, zs1);
 
    jsmn_find_extract_token(string, tokens, index, "train_uid", train_uid, sizeof(train_uid));
@@ -570,10 +582,9 @@ static void process_trust_0001(const char * const string, const jsmntok_t * cons
    {
       result0 = db_store_result();
       word num_rows = mysql_num_rows(result0);
-      sprintf(zs, "  Schedule hit count %d.", num_rows);
-      strcat(report, zs);
       if(num_rows < 1) 
       {
+         strcat(report, "  No schedules found.");
          stats[Mess1Miss]++;
          _log(MINOR, report);
          // Wait and see!
@@ -644,6 +655,7 @@ static void process_trust_0003(const char * string, const jsmntok_t * tokens, co
 
    time_t now = time(NULL);
    
+   status_last_trust_processed = now;
    sprintf(query, "INSERT INTO trust_movement VALUES(%ld, '", now);
    jsmn_find_extract_token(string, tokens, index, "train_id", train_id, sizeof(train_id));
    strcat(query, train_id);
@@ -666,6 +678,10 @@ static void process_trust_0003(const char * string, const jsmntok_t * tokens, co
    sprintf(zs, "%ld", actual_timestamp);
    strcat(query, zs);
    strcat(query, ", ");
+   if(actual_timestamp > status_last_trust_actual)
+   {
+      status_last_trust_actual = actual_timestamp;
+   }
    jsmn_find_extract_token(string, tokens, index, "gbtt_timestamp", zs, sizeof(zs));
    zs[10] = '\0';
    timestamp = correct_trust_timestamp(atol(zs));
@@ -927,12 +943,12 @@ static void create_database(void)
    MYSQL_RES * result0;
    MYSQL_ROW row0;
    word create_trust_activation, create_trust_cancellation, create_trust_movement;
-   word create_trust_changeorigin, create_trust_changeid;
+   word create_trust_changeorigin, create_trust_changeid, create_status;
 
    _log(PROC, "create_database()");
 
    create_trust_activation = create_trust_cancellation = create_trust_movement = true;
-   create_trust_changeorigin = create_trust_changeid = true;
+   create_trust_changeorigin = create_trust_changeid = create_status = true;
 
    if(db_query("show tables")) return;
    
@@ -944,6 +960,7 @@ static void create_database(void)
       if(!strcasecmp(row0[0], "trust_movement")) create_trust_movement = false;
       if(!strcasecmp(row0[0], "trust_changeorigin")) create_trust_changeorigin = false;
       if(!strcasecmp(row0[0], "trust_changeid")) create_trust_changeid = false;
+      if(!strcasecmp(row0[0], "status")) create_status = false;
    }
    mysql_free_result(result0);
 
@@ -1024,6 +1041,20 @@ static void create_database(void)
 ") ENGINE = InnoDB"
                );
       _log(GENERAL, "Created database table trust_changeid.");
+   }
+   if(create_status)
+   {
+      db_query(
+"CREATE TABLE status "
+"(last_trust_processed INT UNSIGNED NOT NULL, "
+"last_trust_actual INT UNSIGNED NOT NULL,     "
+"last_vstp_processed INT UNSIGNED NOT NULL      "
+") ENGINE = InnoDB"
+               );
+      db_query(
+"INSERT INTO status VALUES(0, 0, 0)"
+               );
+      _log(GENERAL, "Created database table trust_status.");
    }
 }
 

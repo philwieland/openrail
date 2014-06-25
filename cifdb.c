@@ -33,7 +33,7 @@
 #include "db.h"
 
 #define NAME  "cifdb"
-#define BUILD "V520"
+#define BUILD "V609"
 
 static void process_object(const char * object);
 static void process_timetable(const char * string, const jsmntok_t * tokens);
@@ -65,7 +65,7 @@ static time_t start_time, last_reported_time;
 // Stats
 enum stats_categories {Fetches, DBError, 
                        ScheduleCreate, ScheduleDeleteHit, ScheduleDeleteMiss,
-                       ScheduleLocCreate, ScheduleLocDelete,
+                       ScheduleLocCreate,
                        AssocCreate, AssocDeleteHit, AssocDeleteMiss,
                        MAXStats };
 static qword stats[MAXStats];
@@ -73,7 +73,7 @@ static const char * stats_category[MAXStats] =
    {
       "File Fetch", "Database Error", 
       "Schedule Create", "Schedule Delete Hit", "Schedule Delete Miss",
-      "Schedule Location Create", "Schedule Location Delete", 
+      "Schedule Location Create",
       "Association Create", "Association Delete Hit", "Association Delete Miss",
    };
 #define HOME_REPORT_SIZE 512
@@ -204,27 +204,21 @@ static const char * const create_table_cif_schedule_locations =
 
 int main(int argc, char **argv)
 {
+   char config_file_path[256];
    reset_db = false;
    opt_filename = NULL;
    opt_url = NULL;
    fetch_all = false;
    test_mode = false;
 
-   word usage = true;
+   strcpy(config_file_path, "/etc/openrail.conf");
+   word usage = false;
    int c;
-   while ((c = getopt (argc, argv, "c:u:f:atrh")) != -1)
+   while ((c = getopt (argc, argv, ":c:u:f:atrh")) != -1)
       switch (c)
       {
       case 'c':
-         if(load_config(optarg))
-         {
-            printf("Failed to read config file \"%s\".\n", optarg);
-            usage = true;
-         }
-         else
-         {
-            usage = false;
-         }
+         strcpy(config_file_path, optarg);
          break;
       case 'u':
          if(!opt_filename) opt_url = optarg;
@@ -244,15 +238,23 @@ int main(int argc, char **argv)
       case 'h':
          usage = true;
          break;
+      case ':':
+         break;
       case '?':
       default:
          usage = true;
       break;
       }
 
+   if(load_config(config_file_path))
+   {
+      printf("Failed to read config file \"%s\".\n", config_file_path);
+      usage = true;
+   }
+
    if(usage) 
    {
-      printf("%s %s  Usage:\n", NAME, BUILD);
+      printf("%s %s  Usage: %s [-c /path/to/config/file.conf] [-u <url> | -f <path> | -a] [-t | -r]\n", NAME, BUILD, argv[0]);
       printf(
              "-c <file>  Path to config file.\n"
              "Data source:\n"
@@ -289,17 +291,33 @@ int main(int argc, char **argv)
       debug = 0;
    }
    
+
    _log_init(debug?"/tmp/cifdb.log":"/var/log/garner/cifdb.log", debug?1:0);
    
    _log(GENERAL, "");
    _log(GENERAL, "%s %s", NAME, BUILD);
    
-   if(debug == 1)
+
+   if(debug)
    {
       _log(GENERAL, "Debug mode selected.  Using TEST database.");
       _log(GENERAL, "To use live database, change the debug flag in the config file to 'false'");
    }
    
+   if(debug)
+   {
+      _log(DEBUG, "        db_server = \"%s\"", conf.db_server);
+      _log(DEBUG, "          db_name = \"%s\"", conf.db_name);
+      _log(DEBUG, "          db_user = \"%s\"", conf.db_user);
+      _log(DEBUG, "          db_pass = \"%s\"", conf.db_pass);
+      _log(DEBUG, "          nr_user = \"%s\"", conf.nr_user);
+      _log(DEBUG, "          nr_pass = \"%s\"", conf.nr_pass);
+      _log(DEBUG, "            debug = \"%s\"", conf.debug);
+      _log(DEBUG, "     report_email = \"%s\"", conf.report_email);
+      _log(DEBUG, "     stomp_topics = \"%s\"", conf.stomp_topics);
+      _log(DEBUG, "stomp_topic_names = \"%s\"", conf.stomp_topic_names);
+   }
+
    // Enable core dumps
    struct rlimit limit;
    if(!getrlimit(RLIMIT_CORE, &limit))

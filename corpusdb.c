@@ -32,7 +32,7 @@
 #include "db.h"
 
 #define NAME  "corpusdb"
-#define BUILD "V125"
+#define BUILD "V608"
 
 #define FILEPATH       "/tmp/corpusdb"
 #define FILEPATH_DEBUG "/tmp/corpusdb-debug"
@@ -73,21 +73,17 @@ dword count_locations, count_fns;
 int main(int argc, char **argv)
 {
    int c;
-   word usage = true;
-   while ((c = getopt (argc, argv, "c:")) != -1)
+   char config_file_path[256];
+   word usage = false;
+   strcpy(config_file_path, "/etc/openrail.conf");
+   while ((c = getopt (argc, argv, ":c:")) != -1)
    {
       switch (c)
       {
       case 'c':
-         if(load_config(optarg))
-         {
-            printf("Failed to read config file \"%s\".\n", optarg);
-            usage = true;
-         }
-         else
-         {
-            usage = false;
-         }
+         strcpy(config_file_path, optarg);
+         break;
+      case ':':
          break;
       case '?':
       default:
@@ -96,9 +92,14 @@ int main(int argc, char **argv)
       }
    }
 
+   if(load_config(config_file_path))
+   {
+      printf("Failed to read config file \"%s\".\n", config_file_path);
+      usage = true;
+   }
    if(usage)
    {
-      printf("No config file passed.\n\n\tUsage: %s -c /path/to/config/file.conf\n\n", argv[0] );
+      printf("\tUsage: %s [-c /path/to/config/file.conf]\n\n", argv[0] );
       exit(1);
    }
 
