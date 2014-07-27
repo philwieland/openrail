@@ -35,6 +35,7 @@ a virtual host if desired.
 
 RewriteEngine   On
 RewriteRule     ^/rail/liverail(.*)$  /usr/lib/cgi-bin/liverail.cgi   [E=PARMS:$1]
+RewriteRule     ^/rail/livesig(.*)$   /usr/lib/cgi-bin/livesig.cgi    [E=PARMS:$1]
 #RewriteLog      /tmp/rewrite.log
 #RewriteLogLevel 9
 
