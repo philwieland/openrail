@@ -39,7 +39,7 @@
 #include "misc.h"
 
 #define NAME  "stompy"
-#define BUILD "V616"
+#define BUILD "V714"
 
 static void perform(void);
 static void set_up_server_sockets(void);
@@ -447,14 +447,29 @@ int main(int argc, char *argv[])
    // Remove any user commands lying around.
    unlink(COMMAND_FILE);
 
-   // Startup delay
+   // Report subscriptions
+   {
+      word stream;
+      _log(GENERAL, "Configured STOMP topics:");
+      for(stream = 0; stream < STREAMS; stream++)
+      if(stomp_topics[stream][0])
+      {
+         _log(GENERAL, "%d: \"%s\" (%s)", stream, stomp_topics[stream], stomp_topic_names[stream]);
+      }
+      else
+      {
+         _log(GENERAL, "%d: Not used.", stream);
+      }
+   }
+
+   // Startup delay.  Only applied immediately after system boot
    if(!debug)
    {
       struct sysinfo info;
-      // If uptime query fails OR uptime is small, wait for system to stabilise.
+      // If uptime query fails or uptime is small, wait for system to stabilise.
       if(sysinfo(&info) || info.uptime < 64)
       {
-         _log(GENERAL, "Startup delay ...");
+         _log(GENERAL, "System startup delay ...");
          word i;
          for(i = 0; i < 64 && run; i++) sleep(1);
       }
@@ -1319,7 +1334,8 @@ static void handle_shutdown(word report)
       {
          complete = false;
          sprintf(reason, "Stream %d (%s) server socket still open", stream, stomp_topic_names[stream]);
-         close(s_number[stream][SERVER]);
+         //close(s_number[stream][SERVER]);
+         shutdown(s_number[stream][SERVER], 2);
          FD_CLR(s_number[stream][SERVER], &read_sockets);
          FD_CLR(s_number[stream][SERVER], &write_sockets);
          s_number[stream][SERVER] = -1;

@@ -41,7 +41,7 @@
 #include "db.h"
 
 #define NAME  "trustdb"
-#define BUILD "V611"
+#define BUILD "V725"
 
 static void perform(void);
 static void process_message(const char * const body);
@@ -85,7 +85,7 @@ enum stats_categories {ConnectAttempt, GoodMessage, // Don't insert any here
                        Mess1, Mess2, Mess3, Mess4, Mess5, Mess6, Mess7, Mess8,
                        NotMessage, NotRecog, Mess1Miss, Mess1MissHit, MovtNoAct, DeducedAct, MAXstats};
 static qword stats[MAXstats];
-qword grand_stats[MAXstats];
+static qword grand_stats[MAXstats];
 static const char * stats_category[MAXstats] = 
    {
       "Stompy connect attempt", "Good message", 
@@ -304,7 +304,7 @@ int main(int argc, char *argv[])
       for(i = 0; i < 256 && run; i++) sleep(1);
    }
 
-   perform();
+   if(run) perform();
 
    if(lfp) close(lfp);
 
@@ -654,7 +654,7 @@ static void process_trust_0003(const char * string, const jsmntok_t * tokens, co
    time_t planned_timestamp, actual_timestamp, timestamp;
 
    time_t now = time(NULL);
-   
+
    status_last_trust_processed = now;
    sprintf(query, "INSERT INTO trust_movement VALUES(%ld, '", now);
    jsmn_find_extract_token(string, tokens, index, "train_id", train_id, sizeof(train_id));
@@ -752,8 +752,12 @@ static void process_trust_0003(const char * string, const jsmntok_t * tokens, co
          strcpy(reason, "");
          tiploc[0] = '\0';
 
-         sprintf(query, "Movement message received with %d matching activations, train_id = \"%s\".", num_rows, train_id);
-         _log(MINOR, query);
+         _log(MINOR, "Movement message received with %d matching activations, train_id = \"%s\".", num_rows, train_id);
+
+#ifdef NO_DEDUCE_ACT
+         return;
+#endif
+   
          stats[MovtNoAct]++;
          if(planned_timestamp == 0)
          {
@@ -863,7 +867,9 @@ static void process_trust_0003(const char * string, const jsmntok_t * tokens, co
                   result0 = db_store_result();
                   num_rows = mysql_num_rows(result0);
                   if(num_rows > 0)
+                  {
                      sprintf(reason, "Deduced schedule %ld already has an activation recorded", cif_schedule_id);
+                  }
                   mysql_free_result(result0);
                }
                if(!reason[0])
@@ -1048,11 +1054,13 @@ static void create_database(void)
 "CREATE TABLE status "
 "(last_trust_processed INT UNSIGNED NOT NULL, "
 "last_trust_actual INT UNSIGNED NOT NULL,     "
-"last_vstp_processed INT UNSIGNED NOT NULL      "
+"last_vstp_processed INT UNSIGNED NOT NULL,   "
+"last_td_processed     INT UNSIGNED NOT NULL, "
+"last_td_actual        INT UNSIGNED NOT NULL  "
 ") ENGINE = InnoDB"
                );
       db_query(
-"INSERT INTO status VALUES(0, 0, 0)"
+"INSERT INTO status VALUES(0, 0, 0, 0, 0)"
                );
       _log(GENERAL, "Created database table trust_status.");
    }

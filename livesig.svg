@@ -1,0 +1,225 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<?xml-stylesheet type="text/css" href="/livesig.css" ?>
+<svg
+   xmlns:dc="http://purl.org/dc/elements/1.1/"
+   xmlns:cc="http://creativecommons.org/ns#"
+   xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+   xmlns:svg="http://www.w3.org/2000/svg"
+   xmlns="http://www.w3.org/2000/svg"
+   version="1.1"
+   width="1350"
+   height="320"
+   id="svg_huyton">
+  <g id="layer1">
+    <!-- Background -->
+    <rect x="0" y="0" width="1350" height="320" class="back" />
+
+    <!-- Tracks -->
+    <line x1="0"   y1="120" x2="570" y2="120" class="track" /><!-- Up -->
+    <line x1="0"   y1="80"  x2="90"  y2="80"  class="track" /><!-- Wapping -->
+    <line x1="89"  y1="80"  x2="130" y2="120" class="track" />
+    <line x1="210" y1="80"  x2="300" y2="80"  class="track" /><!-- Olive -->
+    <line x1="299" y1="80"  x2="340" y2="120" class="track" />
+    <line x1="420" y1="240" x2="570" y2="240" class="track" /><!-- Down -->
+    <!-- Roby Jn - Huyton Jn -->
+    <line x1="599"  y1="200" x2="1350" y2="200" class="track" />
+    <line x1="601"  y1="200" x2="570"  y2="240" class="track" />
+    <line x1="570"  y1="240" x2="1350" y2="240" class="track" />
+    <line x1="570"  y1="120" x2="770"  y2="120" class="track" />
+    <line x1="770"  y1="120" x2="810"  y2="200" class="track" />
+    <line x1="770"  y1="120" x2="811"  y2="60"  class="track" /><!-- Up St H -->
+    <line x1="871"  y1="100" x2="830"  y2="200" class="track" /><!-- Dn St H -->
+    <line x1="869"  y1="100" x2="1350" y2="100" class="track" /><!-- Dn St H -->
+    <line x1="809"  y1="60"  x2="1270" y2="60"  class="track" /><!-- Up St H -->
+    <line x1="770"  y1="200" x2="810" y2="240"  class="track" />
+
+<!-- Tech park -->
+    <rect x="142" y="94" width="64" height="12" class="platform" />
+<!-- BG -->
+    <rect x="422" y="94" width="64" height="12" class="platform" />
+
+<!-- Huyton platforms -->
+    <rect x="692" y="56"  width="64" height="12" class="platform-closed" />
+    <rect x="692" y="135" width="64" height="12" class="platform" />
+    <rect x="700" y="112" width="48" height="16" class="describer" />
+    <rect x="692" y="174" width="64" height="12" class="platform" />
+    <rect x="700" y="192" width="48" height="16" class="describer" />
+    <rect x="692" y="255" width="64" height="12" class="platform" />
+    <rect x="700" y="232" width="48" height="16" class="describer" />
+<!-- Roby platforms -->
+    <rect x="612" y="56"  width="64" height="12" class="platform-closed" />
+    <rect x="612" y="135" width="64" height="12" class="platform" />
+    <rect x="620" y="112" width="48" height="16" class="describer" />
+    <rect x="612" y="174" width="64" height="12" class="platform" />
+    <rect x="620" y="192" width="48" height="16" class="describer" />
+    <rect x="612" y="255" width="64" height="12" class="platform" />
+    <rect x="620" y="232" width="48" height="16" class="describer" />
+ 
+    <rect x="20"  y="72"  width="48" height="16" class="describer" />
+    <rect x="20"  y="112" width="48" height="16" class="describer" />
+    <rect x="150" y="112" width="48" height="16" class="describer" /><!--E300-->
+    <rect x="230" y="72"  width="48" height="16" class="describer" /><!--E400-->
+    <rect x="360" y="112" width="48" height="16" class="describer" /><!--E298-->
+    <rect x="430" y="112" width="48" height="16" class="describer" /><!--E296-->
+    <rect x="430" y="232" width="48" height="16" class="describer" /><!--E295-->
+
+    <rect x="890" y="52"  width="48" height="16" class="describer" />
+    <rect x="925" y="92" width="48" height="16" class="describer" />
+    <rect x="850" y="192" width="48" height="16" class="describer" /><!--3584-->
+    <rect x="885" y="232" width="48" height="16" class="describer" /><!--3585-->
+
+    <rect x="500" y="232"  width="48" height="16" class="describer" /><!--3593-->
+    <rect x="500" y="112"  width="48" height="16" class="describer" /><!--3592-->
+
+    <rect x="960" y="52"  width="48" height="16" class="describer" /><!--3750-->
+
+    <rect x="1030" y="52"  width="48" height="16" class="describer" /><!--3746-->
+    <rect x="1022" y="34"  width="64" height="12" class="platform" />
+    <rect x="1030" y="92" width="48" height="16" class="describer" /><!--3749-->
+    <rect x="1022" y="115" width="64" height="12" class="platform" />
+
+    <rect x="1145" y="52"  width="48" height="16" class="describer" /><!--S101-->
+    <rect x="1137" y="34"  width="64" height="12" class="platform" />
+    <rect x="1137" y="115" width="64" height="12" class="platform" />
+
+    <rect x="1210" y="92" width="48" height="16" class="describer" /><!--3745-->
+    <rect x="1252" y="115" width="64" height="12" class="platform" />
+    <rect x="1280" y="92" width="48" height="16" class="describer" /><!--3739-->
+
+    <rect x="920" y="192" width="48" height="16" class="describer" /><!--3582-->
+    <rect x="955" y="232" width="48" height="16" class="describer" /><!--3581-->
+
+    <rect x="990"  y="192" width="48" height="16" class="describer" /><!--3580-->
+    <rect x="1052" y="174" width="64" height="12" class="platform" />
+    <rect x="1060" y="192" width="48" height="16" class="describer" /><!--3578-->
+    <rect x="1060" y="232" width="48" height="16" class="describer" /><!--3579-->
+    <rect x="1052" y="255" width="64" height="12" class="platform" />
+
+    <rect x="1150" y="192" width="48" height="16" class="describer" /><!--3576-->
+    <rect x="1150" y="232" width="48" height="16" class="describer" /><!--3577-->
+    <rect x="1220" y="192" width="48" height="16" class="describer" /><!--3574-->
+
+    <rect x="1282" y="174" width="64" height="12" class="platform" />
+    <rect x="1290" y="192" width="48" height="16" class="describer" /><!--3572-->
+    <rect x="1290" y="232" width="48" height="16" class="describer" /><!--3575-->
+    <rect x="1282" y="255" width="64" height="12" class="platform" />
+
+    <text class="describer-text">
+      <tspan x="24"  y="85"  id="bE034">E034</tspan>
+      <tspan x="24"  y="125" id="bE036">E036</tspan>
+      <tspan x="154" y="125" id="bE300">E300</tspan>
+      <tspan x="234" y="85"  id="bE400">E400</tspan>
+      <tspan x="364" y="125" id="bE298">E298</tspan>
+      <tspan x="434" y="125" id="bE296">E296</tspan>
+      <tspan x="434" y="245" id="bE295">E295</tspan>
+
+      <tspan x="704"  y="205" id="b5579">5579</tspan>
+      <tspan x="624"  y="205" id="b5583">5583</tspan>
+      <tspan x="704"  y="245" id="b3587">3587</tspan>
+      <tspan x="624"  y="245" id="b3591">3591</tspan>
+      <tspan x="704"  y="125" id="b3586">3586</tspan>
+      <tspan x="624"  y="125" id="b3590">3590</tspan>
+      <tspan x="894"  y="65"  id="b3754">3754</tspan>
+      <tspan x="929"  y="105" id="b3755">3755</tspan>
+      <tspan x="854"  y="205" id="b3584">3584</tspan>
+      <tspan x="889"  y="245" id="b3585">3585</tspan>
+      <tspan x="504"  y="245" id="b3593">3593</tspan>
+      <tspan x="504"  y="125" id="b3592">3592</tspan>
+
+      <tspan x="964"  y="65"  id="b3750">3750</tspan>
+
+      <tspan x="1034"  y="65"  id="b3746">3746</tspan>
+      <tspan x="1034"  y="105" id="b3749">3749</tspan>
+
+      <tspan x="1149"  y="65"  id="bS101">S101</tspan>
+      <tspan x="1214"  y="105" id="b3745">3745</tspan>
+      <tspan x="1284"  y="105" id="b3739">3739</tspan>
+
+      <tspan x="924"  y="205" id="b3582">3582</tspan>
+      <tspan x="959"  y="245" id="b3581">3581</tspan>
+
+      <tspan x="994"  y="205" id="b3580">3580</tspan>
+      <tspan x="1064" y="205" id="b3578">3578</tspan>
+      <tspan x="1064" y="245" id="b3579">3579</tspan>
+
+      <tspan x="1154" y="205" id="b3576">3576</tspan>
+      <tspan x="1154" y="245" id="b3577">3577</tspan>
+      <tspan x="1224" y="205" id="b3574">3574</tspan>
+
+      <tspan x="1294" y="205" id="b3572">3572</tspan>
+      <tspan x="1294" y="245" id="b3575">3575</tspan>
+    </text>
+
+    <text class="platform-text">
+      <tspan x="696" y="67" >P4</tspan>
+      <tspan x="616" y="67" >P4</tspan>
+      <tspan x="696" y="142">P3</tspan>
+      <tspan x="616" y="142">P3</tspan>
+      <tspan x="696" y="187">P2</tspan>
+      <tspan x="616" y="187">P2</tspan>
+      <tspan x="696" y="262">P1</tspan>
+      <tspan x="616" y="262">P1</tspan>
+    </text>
+    <text class="caption-text">
+      <tspan x="440"  y="312" id="caption"></tspan>
+    </text>
+    <text class="label-text">
+      <tspan x="130" y="45">Wavertree</tspan>
+      <tspan x="400" y="45">Broad Green</tspan>
+      <tspan x="615" y="45">Roby</tspan>
+      <tspan x="690" y="45">Huyton</tspan>
+      <tspan x="1020" y="25">Prescot</tspan>
+      <tspan x="1110" y="25">Eccleston Pk.</tspan>
+      <tspan x="1260" y="25">Thatto H.</tspan>
+      <tspan x="1045" y="165">Whiston</tspan>
+      <tspan x="1275" y="165">Rainhill</tspan>
+    </text>
+    <text class="label-text-small">
+      <tspan x="10"  y="65">Waterloo Sidings</tspan>
+      <tspan x="200" y="65">Olive Mount Chord</tspan>
+      <tspan x="230" y="140">Up Chat Moss</tspan>
+      <tspan x="480" y="260">Down Chat Moss</tspan>
+      <tspan x="860" y="45">Up St Helens</tspan>
+      <tspan x="930" y="120">Down St Helens</tspan>
+      <tspan x="880" y="185">Up Chat Moss</tspan>
+      <tspan x="920" y="260">Down Chat Moss</tspan>
+    </text>
+
+    <!-- Arrows -->
+    <line x1="470" y1="255" x2="440" y2="255" class="arrow" />
+    <polygon points="440,253 440,257 430,255" class="arrow" />
+    <line x1="320" y1="135" x2="350" y2="135" class="arrow" />
+    <polygon points="350,133 350,137 360,135" class="arrow" />
+    <line x1="910" y1="255" x2="880" y2="255" class="arrow" />
+    <polygon points="880,253 880,257 870,255" class="arrow" />
+    <line x1="970" y1="180" x2="1000" y2="180" class="arrow" />
+    <polygon points="1000,178 1000,182 1010,180" class="arrow" />
+    <line x1="950" y1="40" x2="980" y2="40" class="arrow" />
+    <polygon points="980,38 980,42 990,40" class="arrow" />
+    <line x1="920" y1="115" x2="890" y2="115" class="arrow" />
+    <polygon points="890,113 890,117 880,115" class="arrow" />
+
+    <!-- Info panel --> 
+    <rect x="0" y="168" width="400" height="152" class="describer" />
+
+    <text class="info-text">
+      <tspan x="4" y="178" id="info0"></tspan>
+      <tspan x="4" y="188" id="info1"></tspan>
+      <tspan x="4" y="198" id="info2"></tspan>
+      <tspan x="4" y="208" id="info3"></tspan>
+      <tspan x="4" y="218" id="info4"></tspan>
+      <tspan x="4" y="228" id="info5"></tspan>
+      <tspan x="4" y="238" id="info6"></tspan>
+      <tspan x="4" y="248" id="info7"></tspan>
+      <tspan x="4" y="258" id="info8"></tspan>
+      <tspan x="4" y="268" id="info9"></tspan>
+      <tspan x="4" y="278" id="info10"></tspan>
+      <tspan x="4" y="288" id="info11"></tspan>
+      <tspan x="4" y="298" id="info12"></tspan>
+      <tspan x="4" y="308" id="info13"></tspan>
+      <tspan x="4" y="318" id="info14">livesig.svg  V726</tspan>
+   </text>
+
+   </g>
+</svg>
+

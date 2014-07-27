@@ -40,6 +40,31 @@ if [ "$1" = "all" -o "$1" = "liverail" ]; then
     DONE="liverail"
 fi
 
+if [ "$1" = "all" -o "$1" = "livesig" ]; then
+    if [ "$host" = "friedbread.liverpub.com" ]; then
+        echo "Releasing livesig for friedbread"
+        sudo cp livesig.cgi        /usr/lib/cgi-bin/livesig.cgi
+        cp livesig.css        /var/www/friedbread/livesig.css
+        cp livesig.js         /var/www/friedbread/livesig.js
+        cp livesig.svg        /var/www/friedbread/livesig.svg
+    else
+        if [ "$host" = "oakwood" ]; then
+            echo "Releasing livesig for oakwood"
+            sudo cp livesig.cgi        /usr/lib/cgi-bin-pub/livesig.cgi
+            sudo cp livesig.css        /var/www/livesig.css
+            sudo cp livesig.js         /var/www/livesig.js
+            sudo cp livesig.svg        /var/www/livesig.svg
+        else
+            echo "Releasing livesig"
+            sudo cp livesig.cgi        /usr/lib/cgi-bin/livesig.cgi
+            sudo cp livesig.css        /var/www/livesig.css
+            sudo cp livesig.js         /var/www/livesig.js
+            sudo cp livesig.svg        /var/www/livesig.svg
+        fi
+    fi
+    DONE="livesig"
+fi
+
 if [ "$1" = "all" -o "$1" = "dump-rail" ]; then
     if [ "$host" = "friedbread.liverpub.com" ]; then
         echo "Releasing dump-rail for friedbread"
@@ -78,7 +103,16 @@ if [ "$1" = "all" -o "$1" = "trustdb" ]; then
     DONE="trustdb"
 fi
 
+if [ "$1" = "all" -o "$1" = "tddb" ]; then
+    echo "Releasing tddb"
+    sudo /etc/init.d/tddb stop
+    sleep 4 
+    sudo cp tddb /usr/sbin/tddb 
+    sudo /etc/init.d/tddb start
+    DONE="tddb"
+fi
+
 if [ "$DONE" = "" ]; then
-    echo "Usage:  $0 cifdb|archdb|corpusdb|vstpdb|trustdb|liverail|stompy|all    -    Release specified unit or all."
+    echo "Usage:  $0 cifdb|archdb|corpusdb|vstpdb|trustdb|tddb|liverail|livesig|stompy|all    -    Release specified unit or all."
 fi
 

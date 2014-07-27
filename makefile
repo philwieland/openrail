@@ -1,6 +1,6 @@
 CC=gcc -c -g -O2 -Wall -I/usr/include/mysql -DBIG_JOINS=1 -D_GNU_SOURCE -D_FILE_OFFSET_BITS=64 -fno-strict-aliasing -DUNIV_LINUX
 
-all:            cifdb archdb corpusdb vstpdb trustdb stompy liverail.cgi service-report 
+all:            cifdb archdb corpusdb vstpdb trustdb stompy tddb liverail.cgi livesig.cgi service-report 
 
 jsmn.o:		jsmn.c jsmn.h misc.h
 
@@ -23,6 +23,11 @@ liverail.cgi:	liverail.o misc.o db.o
 
 liverail.o:	liverail.c db.h misc.h
 
+livesig.cgi:	livesig.o misc.o db.o 
+		gcc -g -O2 -I./include -L./lib livesig.o misc.o db.o -lmysqlclient -o livesig.cgi 
+
+livesig.o:	livesig.c db.h misc.h
+
 corpusdb:       corpusdb.o jsmn.o misc.o db.o 
 		gcc -g -O2 -L./lib -I./include corpusdb.o jsmn.o misc.o db.o -lcurl -lmysqlclient -o corpusdb 
 
@@ -37,6 +42,11 @@ trustdb:        trustdb.o jsmn.o misc.o db.o
 		gcc -g -O2 -L./lib -I./include trustdb.o jsmn.o misc.o db.o -lmysqlclient -o trustdb 
 
 trustdb.o:      trustdb.c jsmn.h misc.h db.h
+
+tddb:       	tddb.o jsmn.o misc.o db.o 
+		gcc -g -O2 -L./lib -I./include tddb.o jsmn.o misc.o db.o -lmysqlclient -o tddb 
+
+tddb.o:      	tddb.c jsmn.h misc.h db.h
 
 stompy:         stompy.o misc.o 
 		gcc -g -O2 -L./lib -I./include stompy.o misc.o -o stompy 
@@ -63,6 +73,6 @@ install:
 .PHONY: install
 
 clean:
-		rm -f cifdb archdb liverail.cgi corpusdb vstpdb trustdb service-report stompy *.o 
+		rm -f cifdb archdb liverail.cgi livesig.cgi corpusdb vstpdb trustdb service-report stompy tddb *.o 
 
 

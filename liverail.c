@@ -53,7 +53,7 @@ static const char * const show_cape_reason(const char * const code);
 
 
 #define NAME "Live Rail"
-#define BUILD "V619"
+#define BUILD "V722"
 
 #define COLUMNS 6
 #define URL_BASE "/rail/liverail/"
@@ -2479,6 +2479,7 @@ static char * location_name(const char * const tiploc, const word use_cache)
       strcpy(cache_val[next_cache], tiploc);
    }
    strcpy(cache_key[next_cache], tiploc);
+   mysql_free_result(result0);
 
    char zs[256];
    sprintf(zs, "Cache miss for \"%s\" - Returning \"%s\"", tiploc, cache_val[next_cache]);
@@ -2746,6 +2747,66 @@ static void display_status(void)
             time_t age = now - when;
             if(age > 256) status = 2;
             else if(age > 16) status = 1;
+            else status = 0;
+            strcpy(status_text, time_text(when, true));
+            age += (30*60);
+            age /= (60*60);
+            if(age > 1)
+            {
+               sprintf(zs, " (%ld hours)", age);
+               strcat(status_text, zs);
+            }
+         }
+      }
+   }
+   printf("<tr><td class=\"status-text\">Last message processed </td>");
+   printf("<td class=\"status%d\"> %s </td>\n", status, status_text);
+   printf("</tr>\n");
+
+   // TD feed
+   status = 3;
+   strcpy(status_text, "Failed to read database.");
+   sprintf(q, "SELECT last_td_actual FROM status");
+   if(!db_query(q))
+   {
+      result = db_store_result();
+      if((row = mysql_fetch_row(result)) && row[0][0]) 
+      {
+         time_t when = atol(row[0]);
+         if(when)
+         {
+            time_t age = now - when;
+            if(age > 64) status = 2;
+            else status = 0;
+            strcpy(status_text, time_text(when, true));
+            age += (30*60);
+            age /= (60*60);
+            if(age > 1)
+            {
+               sprintf(zs, " (%ld hours)", age);
+               strcat(status_text, zs);
+            }
+         }
+      }
+   }
+   printf("<tr><td class=\"status-head\"colspan=2><br>Train describer feed</td></tr>");
+   printf("<tr><td class=\"status-text\">Most recent timestamp </td>");
+   printf("<td class=\"status%d\"> %s </td>\n", status, status_text);
+   printf("</tr>\n");
+
+   status = 3;
+   strcpy(status_text, "Failed to read database.");
+   sprintf(q, "SELECT last_td_processed FROM status");
+   if(!db_query(q))
+   {
+      result = db_store_result();
+      if((row = mysql_fetch_row(result)) && row[0][0]) 
+      {
+         time_t when = atol(row[0]);
+         if(when)
+         {
+            time_t age = now - when;
+            if(age > 64) status = 2;
             else status = 0;
             strcpy(status_text, time_text(when, true));
             age += (30*60);

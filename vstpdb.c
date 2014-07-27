@@ -42,7 +42,7 @@
 #include "db.h"
 
 #define NAME  "vstpdb"
-#define BUILD "V611"
+#define BUILD "V717"
 
 static void perform(void);
 static void process_message(const char * body);
@@ -79,13 +79,13 @@ static jsmntok_t tokens[NUM_TOKENS];
 #define REPORT_HOUR 4
 
 // Stats
-time_t start_time;
+static time_t start_time;
 enum stats_categories {ConnectAttempt, GoodMessage, DeleteHit, DeleteMiss, DeleteMulti, Create, 
                        UpdateCreate, UpdateDeleteMiss, UpdateDeleteMulti,
                        NotMessage, NotVSTP, NotTransaction, MAXstats};
-qword stats[MAXstats];
-qword grand_stats[MAXstats];
-const char * stats_category[MAXstats] = 
+static qword stats[MAXstats];
+static qword grand_stats[MAXstats];
+static const char * stats_category[MAXstats] = 
    {
       "Stompy Connect Attempt", "Good Message", "Delete Hit", "Delete Miss", "Delete Multiple Hit", "Create",
       "Update", "Update Delete Miss", "Update Delete Mult. Hit",
@@ -294,7 +294,7 @@ int main(int argc, char *argv[])
       for(i = 0; i < 256 && run; i++) sleep(1);
    }
 
-   perform();
+   if(run) perform();
 
    if(lfp) close(lfp);
 

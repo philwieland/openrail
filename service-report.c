@@ -35,7 +35,7 @@ static void report_train_day(const dword cif_schedule_id, const time_t when, con
 static char * percentage(const dword num, const dword den);
 
 #define NAME "service-report"
-#define BUILD "V609"
+#define BUILD "V702"
 
 static word debug;
 static word bus;
@@ -374,8 +374,8 @@ static void report_day(const char * const tiploc, time_t when)
                   strcpy(trains[train_count].cif_train_uid, trains[index].cif_train_uid);
                   trains[train_count].cif_stp_indicator = trains[index].cif_stp_indicator;
                   trains[train_count].valid = true;
-                  trains[train_count].sort_time = atoi(row0[0]);
-                  trains[train_count].next_day = atoi(row0[1]);
+                  trains[train_count].sort_time = atoi(row1[0]);
+                  trains[train_count].next_day = atoi(row1[1]);
                   _log(DEBUG, "Step 4:  Second visit for %ld, populated entry %d.", trains[index].cif_schedule_id, train_count);
                   train_count++;
                }
@@ -473,20 +473,20 @@ static void report_day(const char * const tiploc, time_t when)
    if(ntrain)
    {
       printf("<tr><td>%s %02d</td><td>%d</td><td>%d</td><td>(%s%%)</td>",
-             days[day % 7], mday, ntrain, ntrain-ncape, percentage(ntrain-ncape, ntrain));
+             days[day % 7], mday, ntrain, ntrain - ncape, percentage(ntrain - ncape, ntrain));
       printf("<td>%d</td><td>(%s%%)</td>",
-             ntrain - nlate, percentage(ntrain - nlate, ntrain));
+             ntrain - ncape - nlate, percentage(ntrain - ncape - nlate, ntrain));
       printf("<td>%d</td><td>(%s%%)</td><td align=\"left\">%s</td></tr>\n",
-             ntrain - nlater, percentage(ntrain - nlater, ntrain), notes);
+             ntrain - ncape - nlater, percentage(ntrain - ncape - nlater, ntrain), notes);
    }
    else
    {
       printf("<tr><td>%s %02d</td><td>%d</td><td>%d</td><td>&nbsp;</td>",
              days[day % 7], mday, ntrain, ntrain-ncape);
       printf("<td>%d</td><td>&nbsp;</td>",
-             ntrain - nlate);
+             0);
       printf("<td>%d</td><td>&nbsp;</td><td align=\"left\">%s</td></tr>\n",
-             ntrain - nlater, notes);
+             0, notes);
    }
 
    gtrain += ntrain;
