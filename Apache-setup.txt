@@ -15,6 +15,16 @@ a virtual host if desired.
 		Order allow,deny
 		allow from all
 	</Directory>
+	<Directory /var/www/auxy>
+		Options Indexes FollowSymLinks MultiViews
+		AllowOverride None
+		Order allow,deny
+		allow from all
+		AuthType Basic
+		AuthName "Rail Server"
+                AuthUserFile /etc/apache2/.htallpasswords
+                Require user xxxxxxxxx
+	</Directory>
 
 	ScriptAlias /cgi-bin/ /usr/lib/cgi-bin/
 	<Directory "/usr/lib/cgi-bin">
