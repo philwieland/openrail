@@ -35,25 +35,28 @@
 #include <netinet/in.h>
 #include <errno.h>
 #include <netdb.h>
+#include <stdarg.h>
 
 #include "jsmn.h"
 #include "misc.h"
 #include "db.h"
 
 #define NAME  "tddb"
-#define BUILD "V726"
+#define BUILD "V810"
 
 static void perform(void);
 static void process_frame(const char * const body);
 static void process_message(const char * const body, const size_t index);
-static void update_berth(const char * const k, const char * const v);
+static void signalling_update(const char * const message_name, const time_t t, const word a, const dword d);
+static void update_database(const word type, const char * const k, const char * const v);
 static const char * const query_berth(const char * const k); 
 static void create_database(void);
 
 static void jsmn_dump_tokens(const char * const string, const jsmntok_t * const tokens, const word object_index);
 static void report_stats(void);
 static void log_message(const char * const message);
-static void log_signalling_state(const byte level);
+static const char * show_signalling_state(void);
+static void log_detail(const time_t stamp, const char * text, ...);
 
 static word debug, run, interrupt, holdoff;
 static char zs[4096];
@@ -76,6 +79,9 @@ static time_t start_time;
 // Status
 static time_t status_last_td_processed, status_last_td_actual;
 static time_t timeout_detect;
+#define TIMEOUT_PERIOD 64
+
+enum data_types {Berth, Signal};
 
 // Stats
 enum stats_categories {ConnectAttempt, GoodMessage, M1, CA, CB, CC, CT, SF, SG, SH, NotRecog, MAXstats};
@@ -92,7 +98,7 @@ static const char * stats_category[MAXstats] =
 static word signalling[SIG_BYTES];
 
 // Update handle
-#define MAX_HANDLE 511
+#define MAX_HANDLE 4095
 static word handle;
 
 // Signal handling
@@ -395,7 +401,7 @@ static void perform(void)
       {
          _log(GENERAL, "Connected.  Waiting for messages...");
          holdoff = 0;
-         timeout_detect = time(NULL) + 128;
+         timeout_detect = time(NULL) + TIMEOUT_PERIOD;
 
          int run_receive = true;
          while(run && run_receive)
@@ -460,7 +466,7 @@ static void perform(void)
                   // Only if there are no M1 messages amongst a flow of other TDs.
                   // Message will repeat every ~128 seconds until an M1 message is received.
                   _log(CRITICAL, "Timeout detected.");
-                  timeout_detect = time(NULL) + 128;
+                  timeout_detect = time(NULL) + TIMEOUT_PERIOD;
                }
             }
          } // while(run && run_receive)
@@ -522,8 +528,6 @@ static void process_frame(const char * const body)
          if(!strcasecmp(area_id, "M1"))
          {
             process_message(body, index);
-            //_log(GENERAL, "TD message in M1:");
-            //jsmn_dump_tokens(body, tokens, index);
             stats[M1]++;
          }
          
@@ -537,8 +541,6 @@ static void process_frame(const char * const body)
    {
       _log(MINOR, "Frame took %s ms to process.", commas_q(elapsed));
    }
-   //sprintf(query, "UPDATE status SET last_trust_processed = %ld, last_trust_actual = %ld", status_last_trust_processed, status_last_trust_actual);
-   //db_query(query);
 }
 
 static void process_message(const char * const body, const size_t index)
@@ -555,7 +557,7 @@ static void process_message(const char * const body, const size_t index)
    timestamp = atol(times);
 
    time_t now = time(NULL);
-   timeout_detect = now + 128;
+   timeout_detect = now + TIMEOUT_PERIOD;
 
    if(((status_last_td_actual + 8) < timestamp) || ((status_last_td_processed + 8) < now))
    {
@@ -574,13 +576,14 @@ static void process_message(const char * const body, const size_t index)
       strcpy(wasf, query_berth(from));
       strcpy(wast, query_berth(to));
       _log(DEBUG, "CA:               Berth step (%s) Description \"%s\" from berth \"%s\" to berth \"%s\"", time_text(timestamp, true), descr, from, to);
+      log_detail(timestamp, "CA: %s from %s to %s", descr, from, to);
       if((strcmp(wasf, descr) && strcmp(from, "STIN")) || 
          (strcmp(wast, "")    && strcmp(to, "COUT")))
       {
          _log(MINOR, "Message CA: Step \"%s\" from \"%s\" to \"%s\" found \"%s\" in \"%s\" and \"%s\" in \"%s\".", descr, from, to, wasf, from, wast, to);
       }
-      update_berth(from, "");
-      update_berth(to, descr);
+      update_database(Berth, from, "");
+      update_database(Berth, to, descr);
       stats[CA]++;
    }
    else if(!strcasecmp(message_type, "CB"))
@@ -589,11 +592,12 @@ static void process_message(const char * const body, const size_t index)
       jsmn_find_extract_token(body, tokens, index, "descr", descr, sizeof(descr));
       strcpy(wasf, query_berth(from));
       _log(DEBUG, "CB:             Berth cancel (%s) Description \"%s\" from berth \"%s\"", time_text(timestamp, true), descr, from);
+      log_detail(timestamp, "CB: %s from %s", descr, from);
       if(strcmp(wasf, descr))
       {
          _log(MINOR, "Message CB: Cancel \"%s\" from \"%s\" found \"%s\" in \"%s\".", descr, from, wasf, from);
       }
-      update_berth(from, "");
+      update_database(Berth, from, "");
       stats[CB]++;
    }
    else if(!strcasecmp(message_type, "CC"))
@@ -601,7 +605,8 @@ static void process_message(const char * const body, const size_t index)
       jsmn_find_extract_token(body, tokens, index, "to", to, sizeof(to));
       jsmn_find_extract_token(body, tokens, index, "descr", descr, sizeof(descr));
       _log(DEBUG, "CC:          Berth interpose (%s) Description \"%s\" to berth \"%s\"", time_text(timestamp, true), descr, to);
-      update_berth(to, descr);
+      log_detail(timestamp, "CC: %s           to %s", descr, to);
+      update_database(Berth, to, descr);
       stats[CC]++;
    }
    else if(!strcasecmp(message_type, "CT"))
@@ -622,16 +627,8 @@ static void process_message(const char * const body, const size_t index)
 
       word a = atoi(address);
       dword d = strtoul(data, NULL, 16);
-      _log(DEBUG, "a = %04x, d = %08x", a, d);
-      if(a < SIG_BYTES)
-      {
-         signalling[a] = d;
-      }
-      else
-      {
-         _log(MINOR, "Signalling address %04x out of range in SF message.  Data %08x", a, d);
-      }
-      log_signalling_state(DEBUG);
+      signalling_update("SF", timestamp, a, d);
+
       stats[SF]++;
    }
    else if(!strcasecmp(message_type, "SG"))
@@ -643,17 +640,10 @@ static void process_message(const char * const body, const size_t index)
       word  a = atoi(address);
       dword d = strtoul(data, NULL, 16);
       _log(DEBUG, "a = %04x, d = %08x", a, d);
-      if(a + 3 < SIG_BYTES)
-      {
-         signalling[a    ] = 0xff & (d >> 24);
-         signalling[a + 1] = 0xff & (d >> 16);
-         signalling[a + 2] = 0xff & (d >> 8 );
-         signalling[a + 3] = 0xff & (d      );
-      }
-      else
-      {
-         _log(MINOR, "Signalling address %02x out of range in SG message.", a);
-      }
+         signalling_update("SG", timestamp, a     , 0xff & (d >> 24));
+         signalling_update("SG", timestamp, a + 1 , 0xff & (d >> 16));
+         signalling_update("SG", timestamp, a + 2 , 0xff & (d >> 8 ));
+         signalling_update("SG", timestamp, a + 3 , 0xff & (d      ));
 
       stats[SG]++;
    }
@@ -666,18 +656,12 @@ static void process_message(const char * const body, const size_t index)
       word  a = atoi(address);
       dword d = strtoul(data, NULL, 16);
       _log(DEBUG, "a = %04x, d = %08x", a, d);
-      if(a + 3 < SIG_BYTES)
-      {
-         signalling[a     ] = 0xff & (d >> 24);
-         signalling[a  + 1] = 0xff & (d >> 16);
-         signalling[a  + 2] = 0xff & (d >>  8);
-         signalling[a  + 3] = 0xff & (d      );
-      }
-      else
-      {
-         _log(MINOR, "Signalling address %02x out of range in SH message.", a);
-      }
-      log_signalling_state(DEBUG);
+      signalling_update("SH", timestamp, a     , 0xff & (d >> 24));
+      signalling_update("SH", timestamp, a + 1 , 0xff & (d >> 16));
+      signalling_update("SH", timestamp, a + 2 , 0xff & (d >> 8 ));
+      signalling_update("SH", timestamp, a + 3 , 0xff & (d      ));
+      if(debug) _log(DEBUG, show_signalling_state());
+      
       stats[SH]++;
    }
    else
@@ -687,12 +671,56 @@ static void process_message(const char * const body, const size_t index)
    }
 }
 
-static void update_berth(const char * const b, const char * const v)
+static void signalling_update(const char * const message_name, const time_t t, const word a, const dword d)
 {
-   char query[512];
+   char detail[256], detail1[256];
+
+   _log(PROC, "signalling_update(\"%s\", %02x, %08x)", message_name, a, d);
+
+   detail[0] = '\0';
+   if(a < SIG_BYTES)
+   {
+      dword o = signalling[a];
+      signalling[a] = d;
+
+      word b;
+      for(b=0; b<8; b++)
+      {
+         if((((o>>b)&0x01) != ((d>>b)&0x01)) || o > 0xff)
+         {
+            sprintf(detail1, "  Bit %d%d = %ld", a, b, ((d>>b)&0x01));
+            strcat(detail, detail1);
+            char signal_key[8];
+            sprintf(signal_key, "%d%d", a, b);
+            update_database(Signal, signal_key, ((d>>b)&0x01)?"1":"0");
+         }
+      }
+   }
+   else
+   {
+      _log(MINOR, "Signalling address %04x out of range in %s message.  Data %08x", a, message_name, d);
+   }
+   if(debug) _log(DEBUG, show_signalling_state());
+   log_detail(t, "%s: %02x = %02x [%s]%s", message_name, a, d, show_signalling_state(), detail);
+}
+
+static void update_database(const word type, const char * const b, const char * const v)
+{
+   char query[512], typec;
    MYSQL_RES * result;
    MYSQL_ROW row;
    time_t now = time(NULL);
+
+   _log(PROC, "update_database(%d, \"%s\", \"%s\")", type, b, v);
+
+   if(type == Berth) 
+   {
+      typec = 'b';
+   }
+   else
+   {
+      typec = 's';
+   }
 
    if(++handle > MAX_HANDLE)
    {
@@ -701,24 +729,24 @@ static void update_berth(const char * const b, const char * const v)
    }
    else
    {
-      sprintf(query, "delete from td_updates where k = 'b%s'", b);
+      sprintf(query, "delete from td_updates where k = '%c%s'", typec, b);
       db_query(query);
    }
 
-   sprintf(query, "INSERT INTO td_updates values(%ld, %d, 'b%s', '%s')", now, handle, b, v);
+   sprintf(query, "INSERT INTO td_updates values(%ld, %d, '%c%s', '%s')", now, handle, typec, b, v);
    db_query(query);
 
-   sprintf(query, "SELECT * FROM td_states where k = 'b%s'", b);
+   sprintf(query, "SELECT * FROM td_states where k = '%c%s'", typec, b);
    if(!db_query(query))
    {
       result = db_store_result();
       if((row = mysql_fetch_row(result))) 
       {
-         sprintf(query, "UPDATE td_states SET updated = %ld, v = '%s' where k = 'b%s'", now, v, b);
+         sprintf(query, "UPDATE td_states SET updated = %ld, v = '%s' where k = '%c%s'", now, v, typec, b);
       }
       else
       {
-         sprintf(query, "INSERT INTO td_states VALUES(%ld, 'b%s', '%s')", now, b, v);
+         sprintf(query, "INSERT INTO td_states VALUES(%ld, '%c%s', '%s')", now, typec, b, v);
       }
       mysql_free_result(result);
       db_query(query);
@@ -732,7 +760,7 @@ static const char * const query_berth(const char * const b)
    MYSQL_ROW row;
    static char reply[32];
 
-   strcpy(reply, "ERR.");
+   strcpy(reply, "");
 
    sprintf(query, "SELECT * FROM td_states where k = 'b%s'", b);
    if(!db_query(query))
@@ -886,22 +914,50 @@ static void log_message(const char * const message)
    }
 }
 
-static void log_signalling_state(const byte level)
+static const char * show_signalling_state(void)
 {
    word i;
-   char s[8], state[128];
+   char s[8];
+   static char  state[128];
+
    state[0] = '\0';
    for(i = 0; i < SIG_BYTES; i++)
    {
+      if(i) strcat(state, " ");
       if(signalling[i] > 0xff)
       {
-         strcat(state, ".. ");
+         strcat(state, "..");
       }
       else
       {
-         sprintf(s, "%02x ", signalling[i]);
+         sprintf(s, "%02x", signalling[i]);
          strcat(state, s);
       }
    }
-   _log(level, "Signalling state %s", state);
+   return state;
+}
+
+static void log_detail(const time_t stamp, const char * text, ...)
+{
+   FILE * fp;
+   char filename[128];
+
+   va_list vargs;
+   va_start(vargs, text);
+
+   time_t now = time(NULL);
+   struct tm * broken = gmtime(&now);
+      
+   sprintf(filename, "/tmp/tddb-results-%04d-%02d-%02d.log", broken->tm_year + 1900, broken->tm_mon + 1, broken->tm_mday);
+
+   if((fp = fopen(filename, "a")))
+   {
+      fprintf(fp, "%s ] ", time_text(stamp, false));
+      vfprintf(fp, text, vargs);
+      fprintf(fp, "\n");
+      fclose(fp);
+   }
+
+   va_end(vargs);
+   return;
 }

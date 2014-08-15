@@ -276,7 +276,7 @@ word email_alert(const char * const name, const char * const build, const char *
 
    fprintf(fp, "Report from %s build %s at %s\n\n%s\n", name, build, host, message);
    fclose(fp);
-   sprintf(command, "/bin/cat %s | /usr/bin/mail -s \"[openrail-%s] %s\" %s >>\tmp\email_alert.log 2>&1", 
+   sprintf(command, "/bin/cat %s | /usr/bin/mail -s \"[openrail-%s] %s\" %s >>/tmp/email_alert.log 2>&1", 
            tmp_file, name, title, conf.report_email);
    i = system(command);
    

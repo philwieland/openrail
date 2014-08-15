@@ -35,7 +35,7 @@ static void report_train_day(const dword cif_schedule_id, const time_t when, con
 static char * percentage(const dword num, const dword den);
 
 #define NAME "service-report"
-#define BUILD "V702"
+#define BUILD "V801"
 
 static word debug;
 static word bus;
@@ -196,7 +196,7 @@ static void report_day(const char * const tiploc, time_t when)
    
    strcat(query, " AND (cif_schedules.CIF_stp_indicator = 'N' OR cif_schedules.CIF_stp_indicator = 'P' OR cif_schedules.CIF_stp_indicator = 'O')");
    
-   sprintf(zs, " AND deleted >= %ld", when + (12*60*60));
+   sprintf(zs, " AND deleted >= %ld AND created <= %ld", when + (12*60*60), when + (12*60*60));
    strcat(query, zs);
    
    // Select the day
@@ -498,6 +498,7 @@ static void report_day(const char * const tiploc, time_t when)
 
 static void report_train_day(const dword cif_schedule_id, const time_t when, const char * const tiploc)
 {
+   enum statuses {NoReport, Activated, Moving, Cancelled, Arrived, Departed};
    MYSQL_RES * result0, * result1;
    MYSQL_ROW row0, row1;
 
@@ -551,7 +552,7 @@ static void report_train_day(const dword cif_schedule_id, const time_t when, con
          bus = (row0[0][0] == 'B' || row0[0][0] == '5');
 
          if(!bus) ntrain++;
-         status = 0;
+         status = NoReport;
          // TRUST
          if(!bus)
          {
@@ -572,7 +573,7 @@ static void report_train_day(const dword cif_schedule_id, const time_t when, con
                result1 = db_store_result();
                if((row1 = mysql_fetch_row(result1)))
                {
-                  status = 1;
+                  status = Activated;
                   strcpy(trust_id, row1[1]);
                }
                mysql_free_result(result1);
@@ -588,12 +589,12 @@ static void report_train_day(const dword cif_schedule_id, const time_t when, con
                   {
                      if(status < 4)
                      {
-                        status = 2;
+                        status = Moving;
                         strcpy(actual, row1[2]);
                         deviation = atoi(row1[3]);
                         late = !strcasecmp("late", row1[4]);
                      }
-                     if(status < 5)
+                     if(status < Departed)
                      {
                         sprintf(query, "SELECT tiploc FROM corpus WHERE stanox = %s", row1[1]);
                         if(!db_query(query))
@@ -606,15 +607,15 @@ static void report_train_day(const dword cif_schedule_id, const time_t when, con
                                  if(!strcasecmp("departure", row1[0]))
                                  {
                                     // Got a departure report at our station
-                                    status = 5;
+                                    status = Departed;
                                     strcpy(actual, row1[2]);
                                     deviation = atoi(row1[3]);
                                     late = !strcasecmp("late", row1[4]);
                                  }
-                                 else if(status < 4)
+                                 else if(status < Arrived)
                                  {
                                     // Got an arrival from our station AND haven't seen a departure yet
-                                    status = 4;
+                                    status = Arrived;
                                  }
                               }
                            }
@@ -626,8 +627,9 @@ static void report_train_day(const dword cif_schedule_id, const time_t when, con
                }
             }
             
-            if(status < 4)
+            if(status < Arrived)
             {
+               // Check for cancellations.  We only do this if the train hasn't called.
                word save_status = status;
                sprintf(query, "SELECT created, reason, type, reinstate from trust_cancellation where trust_id='%s' AND created > %ld AND created < %ld order by created ", trust_id, when - 15*24*60*60, when + 15*24*60*60);                  
                if(!db_query(query))
@@ -656,27 +658,27 @@ static void report_train_day(const dword cif_schedule_id, const time_t when, con
    // Build analysis
    switch(status)
    {
-   case 0: 
+   case NoReport: 
       if(bus) 
       {
          nbus++;
       }
       break;
 
-   case 1: // Activated
+   case Activated: // Activated
       break;
 
-   case 2: // Moved
+   case Moving: // Moved
       if(deviation > 2) nlate++;
       if(deviation > 5) nlater++;
       break;
 
-   case 3: // Cape
+   case Cancelled: // Cape
       ncape++;
       break;
 
-   case 4: // Arrived
-   case 5: // Departed
+   case Arrived: // Arrived
+   case Departed: // Departed
       if(deviation > 2) nlate++;
       if(deviation > 5) nlater++;
       break;

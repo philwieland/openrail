@@ -37,9 +37,7 @@ static void query(void);
 static char * location_name(const char * const tiploc);
 
 #define NAME "livesig"
-#define BUILD "V726"
-
-#define URL_BASE "/rail/livesig/"
+#define BUILD "V810"
 
 word debug;
 enum {PageMode, UpdateMode, QueryMode} mode;
@@ -67,7 +65,11 @@ int main()
       }
       else
       {
-         parameters[j][k++] = parms[i++];
+         // Due to the simple nature of the queries we can use brute force here to bar little bobby tables and others...
+         if((parms[i] >= 'A' && parms[i] <= 'Z') || (parms[i] >= '0' && parms[i] <= '9'))
+            parameters[j][k++] = parms[i++];
+         else
+            i++;
          l = j;
       }
    }
@@ -81,7 +83,7 @@ int main()
       exit(1);
    }
 
-   debug = (strcmp(conf.debug,"true") == 0  );
+   debug = !strcasecmp(conf.debug,"true");
 
    // Set up log
    {
@@ -104,7 +106,7 @@ int main()
    if(!strcasecmp(parameters[0], "u")) 
    {
       // Update
-      printf("Content-Type: text/plain\n\n");
+      printf("Content-Type: text/plain\nCache-Control: no-cache\n\n");
       mode = UpdateMode;
    }
    else if(!strcasecmp(parameters[0], "q"))
@@ -122,10 +124,10 @@ int main()
       printf("<html xmlns=\"http://www.w3.org/1999/xhtml\" lang=\"en\" xml:lang=\"en\">\n");
       printf("<head>\n");
       printf("<title>%s %s</title>\n", NAME, BUILD);
-      printf("<link rel=\"stylesheet\" type=\"text/css\" href=\"/livesig.css\">\n");
+      printf("<link rel=\"stylesheet\" type=\"text/css\" href=\"/auxy/livesig.css\">\n");
       printf("</head>\n");
       printf("<body style=\"font-family: arial,sans-serif; background:#eeeeee\" onload=\"startup();\">\n");
-      printf("<script type=\"text/javascript\" src=\"/livesig.js\"></script>\n");
+      printf("<script type=\"text/javascript\" src=\"/auxy/livesig.js\"></script>\n");
    }
 
    // Initialise database
@@ -168,7 +170,7 @@ int main()
 
    case PageMode:
       // Bottom line if required
-      printf("<p id=\"bottom-line\">&copy;2014 Phil Wieland.  Data from Network Rail under <a href=\"http://www.networkrail.co.uk/data-feeds/terms-and-conditions\">this licence</a>.");
+      printf("<p id=\"bottom-line\">&copy;2014 Phil Wieland.  Live data from Network Rail under <a href=\"http://www.networkrail.co.uk/data-feeds/terms-and-conditions\">this licence</a>.");
       printf("</body></html>\n\n");
       break;
 
@@ -180,15 +182,7 @@ int main()
 
 static void page(void)
 {
-   printf("<object id=\"diagram\" width=\"1350\" height=\"320\" type=\"image/svg+xml\" data=\"/livesig.svg\"></object>\n");
-#if 0
-printf("<svg width=\"1350\" height=\"320\" id=\"svg2\">\n");
-   printf(
-" <text class=\"caption-text\">\n"
-" <tspan x=\"440\"  y=\"312\" id=\"caption\">livesig.svg V724</tspan>\n"
-" </text></svg>\n"
-          );
-#endif
+   printf("<object id=\"diagram\" width=\"1260\" height=\"470\" type=\"image/svg+xml\" data=\"/auxy/livesig.svg\"></object>\n");
 }
 
 static void update(void)
@@ -258,7 +252,7 @@ static void query(void)
 
    if(strlen(parameters[1]) != 4)
    {
-      printf("Error.\n");
+      printf("Not found.\n");
       return;
    }
    strcpy(headcode, parameters[1]);
@@ -275,7 +269,7 @@ static void query(void)
    {
       schedule_id = atol(row0[0]);
 
-      sprintf(query, "SELECT * from cif_schedule_locations WHERE cif_schedule_id = %ld AND (tiploc_code = 'HUYTON' OR tiploc_code = 'HUYTJUN')", schedule_id);
+      sprintf(query, "SELECT * from cif_schedule_locations WHERE cif_schedule_id = %ld AND (tiploc_code = 'HUYTON' OR tiploc_code = 'HUYTJUN' OR tiploc_code = 'LVRPLSH')", schedule_id);
       if(db_query(query))
       {
          printf("DB error.\n");

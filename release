@@ -29,13 +29,13 @@ if [ "$1" = "all" -o "$1" = "liverail" ]; then
     if [ "$host" = "friedbread.liverpub.com" ]; then
         echo "Releasing liverail for friedbread"
         sudo cp liverail.cgi        /usr/lib/cgi-bin/liverail.cgi
-        cp liverail.css        /var/www/friedbread/liverail.css
-        cp liverail.js         /var/www/friedbread/liverail.js
+        sudo cp liverail.css        /var/www/friedbread/auxy/liverail.css
+        sudo cp liverail.js         /var/www/friedbread/auxy/liverail.js
     else
         echo "Releasing liverail"
         sudo cp liverail.cgi        /usr/lib/cgi-bin/liverail.cgi
-        sudo cp liverail.css        /var/www/liverail.css
-        sudo cp liverail.js         /var/www/liverail.js
+        sudo cp liverail.css        /var/www/auxy/liverail.css
+        sudo cp liverail.js         /var/www/auxy/liverail.js
     fi
     DONE="liverail"
 fi
@@ -44,22 +44,22 @@ if [ "$1" = "all" -o "$1" = "livesig" ]; then
     if [ "$host" = "friedbread.liverpub.com" ]; then
         echo "Releasing livesig for friedbread"
         sudo cp livesig.cgi        /usr/lib/cgi-bin/livesig.cgi
-        cp livesig.css        /var/www/friedbread/livesig.css
-        cp livesig.js         /var/www/friedbread/livesig.js
-        cp livesig.svg        /var/www/friedbread/livesig.svg
+        sudo cp livesig.css        /var/www/friedbread/auxy/livesig.css
+        sudo cp livesig.js         /var/www/friedbread/auxy/livesig.js
+        sudo cp livesig.svg        /var/www/friedbread/auxy/livesig.svg
     else
         if [ "$host" = "oakwood" ]; then
             echo "Releasing livesig for oakwood"
             sudo cp livesig.cgi        /usr/lib/cgi-bin-pub/livesig.cgi
-            sudo cp livesig.css        /var/www/livesig.css
-            sudo cp livesig.js         /var/www/livesig.js
-            sudo cp livesig.svg        /var/www/livesig.svg
+            sudo cp livesig.css        /var/www/auxy/livesig.css
+            sudo cp livesig.js         /var/www/auxy/livesig.js
+            sudo cp livesig.svg        /var/www/auxy/livesig.svg
         else
             echo "Releasing livesig"
             sudo cp livesig.cgi        /usr/lib/cgi-bin/livesig.cgi
-            sudo cp livesig.css        /var/www/livesig.css
-            sudo cp livesig.js         /var/www/livesig.js
-            sudo cp livesig.svg        /var/www/livesig.svg
+            sudo cp livesig.css        /var/www/auxy/livesig.css
+            sudo cp livesig.js         /var/www/auxy/livesig.js
+            sudo cp livesig.svg        /var/www/auxy/livesig.svg
         fi
     fi
     DONE="livesig"

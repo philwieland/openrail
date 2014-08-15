@@ -53,7 +53,7 @@ static const char * const show_cape_reason(const char * const code);
 
 
 #define NAME "Live Rail"
-#define BUILD "V722"
+#define BUILD "V810"
 
 #define COLUMNS 6
 #define URL_BASE "/rail/liverail/"
@@ -158,7 +158,7 @@ int main()
       }
       else
       {
-         parameters[j][k++] = parms[i++];
+            parameters[j][k++] = parms[i++];
          l = j;
       }
    }
@@ -166,7 +166,6 @@ int main()
 
    while(j < 10) parameters[j++][0] = '\0';
 
-   debug = !strcasecmp(parameters[l], "debug");
    refresh = !strcasecmp(parameters[l], "r");
 
    if(load_config("/etc/openrail.conf"))
@@ -174,6 +173,8 @@ int main()
       printf("Failed to load config.\n");
       exit(1);
    }
+
+   debug = !strcasecmp(conf.debug, "true");
 
    // Set up log
    {
@@ -194,7 +195,7 @@ int main()
       _log(GENERAL, "No PARMS provided!");
    }
 
-   if(refresh || debug) parameters[l][0] = '\0';
+   if(refresh) parameters[l][0] = '\0';
 
    if(!strcasecmp(parameters[0], "full")) mode = FULL;
    else if(!strcasecmp(parameters[0], "sum")) mode = SUMMARY;
@@ -215,14 +216,14 @@ int main()
       printf("<html xmlns=\"http://www.w3.org/1999/xhtml\" lang=\"en\" xml:lang=\"en\">\n");
       printf("<head>\n");
       printf("<title>%s %s</title>\n", NAME, BUILD);
-      printf("<link rel=\"stylesheet\" type=\"text/css\" href=\"/liverail.css\">\n");
+      printf("<link rel=\"stylesheet\" type=\"text/css\" href=\"/auxy/liverail.css\">\n");
       printf("</head>\n");
       printf("<body style=\"font-family: arial,sans-serif;\" onload=\"startup();\">\n");
-      printf("<script type=\"text/javascript\" src=\"/liverail.js\"></script>\n");
+      printf("<script type=\"text/javascript\" src=\"/auxy/liverail.js\"></script>\n");
    }
    else
    {
-      printf("Content-Type: text/plain\n\n");
+      printf("Content-Type: text/plain\nCache-Control: no-cache\n\n");
    }
    // Initialise location name cache
    location_name(NULL, false);
@@ -1285,7 +1286,7 @@ static void report_train_summary(const word index, const time_t when, const word
                   result1 = db_store_result();
                   while((row1 = mysql_fetch_row(result1)))
                   {
-                     if(status < Arrived)
+                     if(status == Activated || status == Moving)
                      {
                         status = Moving;
                         strcpy(actual, row1[2]);
@@ -1443,6 +1444,7 @@ static void report_train_summary(const word index, const time_t when, const word
    case SUMMARY:
    case DEPART:
       printf("<tr id=\"tr%d%d\" class=\"%s\"><td>%s</td><td>%s</td>%s", row/rows, row%rows, row_class, train_time, train_details, analysis);
+      
       // Symbols
       if(deduced || status == Arrived)
       {
@@ -1542,6 +1544,7 @@ static void as(void)
       printf("<table>");
       printf("<tr><td>CIF UID</td><td><input type=\"text\" id=\"as-uid\" size=\"16\" maxlength=\"64\" value=\"\" onkeydown=\"if(event.keyCode == 13) as_search_onclick();\"></td><td></td></tr>\n");
       printf("<tr><td>Headcode</td><td><input type=\"text\" id=\"as-head\" size=\"16\" maxlength=\"64\" value=\"\" onkeydown=\"if(event.keyCode == 13) as_search_onclick();\"></td><td></td></tr>\n");
+      printf("<tr><td colspan=2>Only if valid this week.<input type=\"checkbox\" id=\"as-this-week\" value=\"0\"></td><td></td></tr>\n");
       printf("</table>\n");
 
       printf("<br><button class=\"cp-button\" onclick=\"as_search_onclick();\">Search</button>\n");
@@ -1579,7 +1582,14 @@ static void as(void)
                sprintf(zs, "CIF_train_uid = '%s'", safe);
          }
          strcat(query, zs);
-         strcat(query, " ORDER BY schedule_start_date LIMIT 128");
+
+         // This week
+         if(parameters[3][0] == 'w')
+         {
+            sprintf(zs, " AND schedule_start_date < %ld AND schedule_end_date > %ld and deleted > %ld", now+(7*24*60*60), now-(7*24*60*60), now-(7*24*60*60));
+            strcat(query, zs);
+         }
+         strcat(query, " ORDER BY schedule_start_date LIMIT 1024");
          if(!db_query(query))
          {
             result0 = db_store_result();
@@ -1711,7 +1721,7 @@ static void as(void)
             }
          mysql_free_result(result0);
             printf("</table>\n");
-            if(matches >= 128) printf("<p>Matches limited to 128.</p>\n");
+            if(matches >= 1024) printf("<p>Matches limited to 1024.</p>\n");
             return;            
          }
          printf("<p>No matching trains found.</p>");

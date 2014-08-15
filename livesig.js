@@ -20,7 +20,6 @@
 
 var url_base = "/rail/livesig/";
 var refresh_tick = 8192; /* ms between ticks */
-//var refresh_tick = 400; /* Testing only */
 var updating_timeout = 0;
 var got_handle = 32767;
 var elapsed;
@@ -28,10 +27,11 @@ var req;
 var req_cache = null;
 var req_cache_k;
 var req_cache_timout = 0;
+var feed_failed = 0;
 
 var svg_doc;
 
-var SLOTS = 15;
+var SLOTS = 12;
 var displayed = new Array(SLOTS);
 var cache_k   = new Array(SLOTS);
 var cache_v   = new Array(SLOTS);
@@ -69,7 +69,8 @@ function tick()
          req = null;
          updating_timeout = 0;
          svg_doc.getElementById('caption').style.stroke = 'red';
-         svg_doc.getElementById('caption').innerHTML = " Failed to contact server.";
+         svg_doc.getElementById('caption').textContent = " Failed to contact server.";
+         got_handle = 32767;
       }
    }
    else
@@ -90,12 +91,12 @@ function tick()
             }
             else
             {
-               // Failed.  No action, try again on next tick.
-               updating_timeout = 0;
+               // Failed.  No action, leave for timeout to sort it out.
+               req = null;
             }
          }
       }
-      req.open('GET', url_base + 'u/' + got_handle, true);
+      req.open('GET', url_base + 'U/' + got_handle, true);
       req.send(null);
    }
 }
@@ -106,38 +107,52 @@ function process_updates(text)
 
    var index = 1; // Index of first data line.
 
+   if(!document.getElementById('diagram').contentDocument)
+   {
+      document.getElementById('bottom-line').innerHTML = " Sorry, does not work in this browser with your current settings.";
+      updating_timeout = 0;
+      return;
+   }
+      
    svg_doc = document.getElementById('diagram').contentDocument;
 
-   if(results[index - 1] === 'reload')
+   got_handle = results[index - 1];
+   while(results.length > index && results[index].length > 2 && (results[index].substr(0, 1) === 'b' || results[index].substr(0, 1) === 's'))
    {
-      window.location = url_base;
-   }
-   else
-   {
-      got_handle = results[index - 1];
-      while(results.length > index && results[index].length > 2 && results[index].substr(0, 1) == 'b')
+      var parts = results[index++].split('|');
+      if(parts.length > 1)
       {
-         var parts = results[index++].split('|');
-         if(parts.length > 1)
+         if(parts[0].substr(0,1) == 'b')
          {
             update_berth(parts[0], parts[1]);
          }
+         else
+         {
+            update_signal(parts[0], parts[1]);
+         }
       }
-      update_panel();
-      var caption = results[index].split('|');
-      elapsed = new Date().getTime() - elapsed;
-      svg_doc.getElementById('caption').innerHTML = 'Updated to ' + caption[1] + ' by ' + caption[2] + ' ' + caption[3] + ' at ' + caption[4] + '  Elapsed time ' + elapsed + ' ms. ';
-      if(caption[0] > 0)
-      {
-         svg_doc.getElementById('caption').style.stroke = 'red';
-         svg_doc.getElementById('caption').innerHTML += "  Data feed failed.";
-      }
-      else
-      {
-         svg_doc.getElementById('caption').style.stroke = 'black';
-      }
-      updating_timeout = 0;
    }
+   
+   update_panel();
+   var caption = results[index].split('|');
+   elapsed = new Date().getTime() - elapsed;
+   svg_doc.getElementById('caption').textContent = 'Updated to ' + caption[1] + ' by ' + caption[2] + ' ' + caption[3] + ' at ' + caption[4] + '  Elapsed time ' + elapsed + ' ms. ';
+   if(caption[0] > 0)
+   {
+      feed_failed = 10;
+   }
+   
+   if(feed_failed)
+   {
+      feed_failed--;
+      svg_doc.getElementById('caption').style.stroke = 'red';
+      svg_doc.getElementById('caption').textContent += "  Data feed failed.";
+   }
+   else
+   {
+      svg_doc.getElementById('caption').style.stroke = 'black';
+   }
+   updating_timeout = 0;
 }
 
 function update_berth(k, v)
@@ -145,8 +160,7 @@ function update_berth(k, v)
    var i;
    if(svg_doc.getElementById(k))
    {
-      var old = svg_doc.getElementById(k).innerHTML;
-
+      var old = svg_doc.getElementById(k).textContent;
       if(old != '')
       {
          for(i=0; i < SLOTS; i++)
@@ -169,7 +183,24 @@ function update_berth(k, v)
             }
          }
       }
-      svg_doc.getElementById(k).innerHTML = v;
+      svg_doc.getElementById(k).textContent = v;
+   }
+}
+
+function update_signal(k, v)
+{
+   var i;
+   if(svg_doc.getElementById(k))
+   {
+      if(k.substr(1, 1) === '5' || k.substr(1, 1) === '6')
+      {
+         svg_doc.getElementById(k).style.stroke = ((v === '1')?'black':'#dddddd');
+         //svg_doc.getElementById(k).style.stroke = ((v === '1')?'blue':'#bbbbbb');
+      }
+      else
+      {
+         svg_doc.getElementById(k).style.fill = ((v === '1')?'#00ff00':'red');
+      }
    }
 }
 
@@ -184,12 +215,12 @@ function update_panel()
    {
       if(displayed[i] && displayed[i] != '')
       {
-         svg_doc.getElementById('info' + j++).innerHTML = displayed[i] + ' ' + cached(displayed[i]);
+         svg_doc.getElementById('info' + j++).textContent = displayed[i] + ' ' + cached(displayed[i]);
       }
    }
    for(;j < SLOTS; j++)
    {
-      svg_doc.getElementById('info' + j).innerHTML = '';
+      svg_doc.getElementById('info' + j).textContent = '';
    }
 
 }
@@ -229,7 +260,7 @@ function cached(k)
             }
          }
       }
-      req_cache.open('GET', url_base + 'q/' + k, true);
+      req_cache.open('GET', url_base + 'Q/' + k, true);
       req_cache.send(null);
       return '';
    }

@@ -18,8 +18,7 @@
 
 */
 
-BODY { color:black; background-color:white;
-       font-family: Geneva, Helvetica, Arial, sans-serif;
+BODY { background-color:white;
      }
 
 /* Image background */
@@ -33,10 +32,15 @@ BODY { color:black; background-color:white;
     stroke:#000000;
     stroke-width:5;
 }
+.track-off
+{
+    stroke:#999999;
+    stroke-width:5;
+}
 .arrow
 {
     stroke:black;
-    stroke-width:1;
+    stroke-width:2;
 }
 
 .platform
@@ -55,7 +59,13 @@ BODY { color:black; background-color:white;
 }
 .platform-text
 {
-font-size:10px;font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;text-align:start;line-height:125%;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:start;fill:#000000;fill-opacity:1;stroke:#000000;stroke-opacity:1;font-family:sans-serif;}
+    font-size:10px;
+    fill:#000000;
+    fill-opacity:1;
+    stroke:#000000;
+    stroke-opacity:1;
+    font-family:Helvetica, Arial, sans-serif;
+}
 .describer
 {
     fill:#000000;
@@ -64,21 +74,21 @@ font-size:10px;font-style:normal;font-variant:normal;font-weight:normal;font-str
 }
 .describer-text
 {
-font-size:16px;font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;text-align:start;line-height:125%;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:start;fill:#ffff00;fill-opacity:1;stroke:#ffff00;stroke-opacity:1;font-family:Courier;
+font-size:16px;font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;text-align:start;line-height:125%;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:start;fill:#ffff00;fill-opacity:1;stroke:#ffff00;stroke-opacity:1;font-family:Courier, monospace;
 }
 .info-text
 {
-font-size:12px;font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;text-align:start;line-height:125%;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:start;fill:#ffff00;fill-opacity:1;stroke:#ffff00;stroke-opacity:1;font-family:Courier;
+font-size:12px;font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;text-align:start;line-height:125%;letter-spacing:0px;word-spacing:0px;writing-mode:lr-tb;text-anchor:start;fill:#ffff00;fill-opacity:1;stroke:#ffff00;stroke-opacity:1;font-family:Courier, monospace;
 }
 .label-text
 {
     font-size:18px;
-    fill:#000000;fill-opacity:1;stroke:#000000;stroke-opacity:1;font-family:sans-serif;
+    fill:#000000;fill-opacity:1;stroke:#000000;stroke-opacity:1;font-family:Helvetica, Arial, sans-serif;
 }
 .label-text-small
 {
     font-size:12px;
-    fill:#000000;fill-opacity:1;stroke:#000000;stroke-opacity:1;font-family:sans-serif;
+    fill:#000000;fill-opacity:1;stroke:#000000;stroke-opacity:1;font-family:Helvetica, Arial, sans-serif;
 }
 .caption-text
 {
@@ -87,7 +97,7 @@ font-size:12px;font-style:normal;font-variant:normal;font-weight:normal;font-str
     text-anchor:start;
     stroke:black;
     stroke-opacity:1;
-    font-family:serif;
+    font-family:Courier, monospace;
 }
 .caption-text-alert
 {
@@ -96,5 +106,11 @@ font-size:12px;font-style:normal;font-variant:normal;font-weight:normal;font-str
     text-anchor:start;
     stroke:red;
     stroke-opacity:1;
-    font-family:serif;
+    font-family:Courier, monospace;
+}
+
+.sig-line
+{
+    stroke:black;
+    stroke-width:2;
 }

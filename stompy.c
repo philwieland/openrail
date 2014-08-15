@@ -39,7 +39,7 @@
 #include "misc.h"
 
 #define NAME  "stompy"
-#define BUILD "V714"
+#define BUILD "V802"
 
 static void perform(void);
 static void set_up_server_sockets(void);
@@ -1652,12 +1652,12 @@ static void report_stats(void)
    char report[2048];
 
    _log(GENERAL, "");
-   sprintf(zs, "%25s: %-12s Total", "", "Day");
+   sprintf(zs, "%27s: %-14s Total", "", "Day");
    _log(GENERAL, zs);
    strcpy(report, zs);
    strcat(report, "\n");
 
-   sprintf(zs, "%25s: %-12s %ld days", "Run time", "", (now - start_time)/(24*60*60));
+   sprintf(zs, "%27s: %-14s %ld days", "Run time", "", (now - start_time)/(24*60*60));
    _log(GENERAL, zs);
    strcat(report, zs);
    strcat(report, "\n");
@@ -1669,7 +1669,7 @@ static void report_stats(void)
          if(stomp_topics[i - BaseStreamFrameSent][0])
          {
             sprintf(zs1, "%s Frame Sent", stomp_topic_names[i - BaseStreamFrameSent]);
-            sprintf(zs, "%25s: %-12s ", zs1, commas_q(stats[i]));
+            sprintf(zs, "%27s: %-14s ", zs1, commas_q(stats[i]));
             strcat(zs, commas_q(grand_stats[i]));
             _log(GENERAL, zs);
             strcat(report, zs);
@@ -1678,7 +1678,7 @@ static void report_stats(void)
       }
       else
       {
-         sprintf(zs, "%25s: %-12s ", stats_category[i], commas_q(stats[i]));
+         sprintf(zs, "%27s: %-14s ", stats_category[i], commas_q(stats[i]));
          strcat(zs, commas_q(grand_stats[i]));
          _log(GENERAL, zs);
          strcat(report, zs);
@@ -1687,7 +1687,7 @@ static void report_stats(void)
       stats[i] = 0;
    }
    if(stats_longest > grand_stats_longest)grand_stats_longest = stats_longest;
-   sprintf(zs, "%25s: %-12s ", "Longest STOMP frame", commas_q(stats_longest));
+   sprintf(zs, "%27s: %-14s ", "Longest STOMP frame", commas_q(stats_longest));
    strcat(zs, commas_q(grand_stats_longest));
    _log(GENERAL, zs);
    strcat(report, zs);

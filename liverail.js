@@ -50,6 +50,10 @@ function as_search_onclick()
 {
    ar_off();
    result = url_base + "as" + '/' + document.getElementById("as-uid").value + '/' + document.getElementById("as-head").value;
+   if(document.getElementById("as-this-week").checked)
+   {
+      result += '/w';
+   }
    window.location = result;
 }
 
@@ -221,7 +225,7 @@ function smart_update(url)
       if(parts.length > 2)
       {
          document.getElementById(parts[0]).className = parts[1];
-         document.getElementById(parts[0]).innerHTML = parts[2];
+         document.getElementById(parts[0]).innerHTML = parts[2]; // This doesn't work in IE9
       }
       index++;
    }

@@ -1,0 +1,10 @@
+/var/log/garner/*.log {
+        weekly
+        missingok
+        rotate 63
+        notifempty
+        nocreate
+        compress
+        delaycompress
+        dateext
+}
