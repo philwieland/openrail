@@ -19,7 +19,6 @@
 */
 
 #include <unistd.h>
-
 #include <stdio.h>
 #include <string.h>
 #include <signal.h>
@@ -42,21 +41,22 @@
 #include "db.h"
 
 #define NAME  "tddb"
-#define BUILD "V810"
+#define BUILD "VB04"
 
 static void perform(void);
 static void process_frame(const char * const body);
-static void process_message(const char * const body, const size_t index);
-static void signalling_update(const char * const message_name, const time_t t, const word a, const dword d);
-static void update_database(const word type, const char * const k, const char * const v);
-static const char * const query_berth(const char * const k); 
+static void process_message(const word describer, const char * const body, const size_t index);
+static void signalling_update(const char * const message_name, const word describer, const time_t t, const word a, const dword d);
+static void update_database(const word type, const word describer, const char * const k, const char * const v);
+static const char * const query_berth(const word describer, const char * const k); 
 static void create_database(void);
 
 static void jsmn_dump_tokens(const char * const string, const jsmntok_t * const tokens, const word object_index);
 static void report_stats(void);
 static void log_message(const char * const message);
-static const char * show_signalling_state(void);
+static const char * show_signalling_state(const word describer);
 static void log_detail(const time_t stamp, const char * text, ...);
+static void check_timeout(void);
 
 static word debug, run, interrupt, holdoff;
 static char zs[4096];
@@ -76,28 +76,32 @@ static jsmntok_t tokens[NUM_TOKENS];
 
 static time_t start_time;
 
+// Describers 
+#define DESCRIBERS 2
+static const char * describers[DESCRIBERS] = {"M1", "ZZ"};
+
 // Status
 static time_t status_last_td_processed, status_last_td_actual;
-static time_t timeout_detect;
-#define TIMEOUT_PERIOD 64
+static word timeout_reported;
 
 enum data_types {Berth, Signal};
 
 // Stats
-enum stats_categories {ConnectAttempt, GoodMessage, M1, CA, CB, CC, CT, SF, SG, SH, NotRecog, MAXstats};
+enum stats_categories {ConnectAttempt, GoodMessage, M1, CA, CB, CC, CT, SF, SG, SH, NewBerth, NotRecog, HandleWrap, MAXstats};
 static qword stats[MAXstats];
 static qword grand_stats[MAXstats];
 static const char * stats_category[MAXstats] = 
    {
       "Stompy connect attempt", "Good message", 
-      "M1 message", "CA message", "CB message", "CC message", "CT message", "SF message", "SG message", "SH message", "Unrecognised message",
+      "M1 message", "CA message", "CB message", "CC message", "CT message", "SF message", "SG message", "SH message", "New berth", "Unrecognised message", "Handle wrap",
    };
 
 // Signalling
 #define SIG_BYTES 8
-static word signalling[SIG_BYTES];
+static word max_sig_address[DESCRIBERS] = {8, 8};
+static word signalling[DESCRIBERS][SIG_BYTES];
 
-// Update handle
+// Update handle.  MAX_HANDLE must be < 32767
 #define MAX_HANDLE 4095
 static word handle;
 
@@ -277,6 +281,7 @@ int main(int argc, char *argv[])
 
    run = true;
    interrupt = false;
+   timeout_reported = false;
 
    {
       // Sort out the signal handlers
@@ -309,7 +314,7 @@ int main(int argc, char *argv[])
    {
       _log(GENERAL, "Startup delay...");
       word i;
-      for(i = 0; i < 256 && run; i++) sleep(1);
+      for(i = 0; i < 190 && run; i++) sleep(1);
    }
 
    if(run) perform();
@@ -325,10 +330,8 @@ int main(int argc, char *argv[])
 
 static void perform(void)
 {
-   struct sockaddr_in serv_addr;
-   struct hostent *server;
-   int rc, stompy_socket;
    word last_report_day = 9;
+   word stompy_timeout = true;
 
    // Initialise database
    while(db_init(conf.db_server, conf.db_user, conf.db_pass, conf.db_name) && run) 
@@ -356,135 +359,107 @@ static void perform(void)
    }
 
    // Status
-   timeout_detect = status_last_td_processed = status_last_td_actual = 0;
+   status_last_td_processed = status_last_td_actual = 0;
 
    // Signalling
    {
-      word i;
-      for(i = 0; i < SIG_BYTES; i++)
+      word i,j;
+      for(i = 0; i < DESCRIBERS; i++)
       {
-         signalling[i] = 0xffff;
+         for(j = 0; j < SIG_BYTES; j++)
+         {
+            signalling[i][j] = 0xffff;
+         }
       }
    }
 
    while(run)
    {   
       stats[ConnectAttempt]++;
-      _log(GENERAL, "Connecting socket to stompy...");
-      stompy_socket = socket(AF_INET, SOCK_STREAM, 0);
-      if (stompy_socket < 0) 
+      int run_receive = !open_stompy(STOMPY_PORT);
+      while(run_receive && run)
       {
-         _log(CRITICAL, "Failed to create client socket.  Error %d %s", errno, strerror(errno));
-      }
-      server = gethostbyname("localhost");
-      if (server == NULL) 
-      {
-         _log(CRITICAL, "Failed to resolve localhost\".");
-         return;
-      }
-
-      bzero((char *) &serv_addr, sizeof(serv_addr));
-      serv_addr.sin_family = AF_INET;
-      bcopy((char *)server->h_addr, 
-            (char *)&serv_addr.sin_addr.s_addr,
-            server->h_length);
-      serv_addr.sin_port = htons(STOMPY_PORT);
-
-      /* Now connect to the server */
-      rc = connect(stompy_socket, &serv_addr, sizeof(serv_addr));
-      if(rc)
-      {
-         sprintf(zs,"Failed to connect.  Error %d %s", errno, strerror(errno));
-         _log(CRITICAL, zs);
-      }
-      else
-      {
-         _log(GENERAL, "Connected.  Waiting for messages...");
          holdoff = 0;
-         timeout_detect = time(NULL) + TIMEOUT_PERIOD;
-
-         int run_receive = true;
-         while(run && run_receive)
          {
+            time_t now = time(NULL);
+            struct tm * broken = localtime(&now);
+            if(broken->tm_hour >= REPORT_HOUR && broken->tm_wday != last_report_day)
             {
-               time_t now = time(NULL);
-               struct tm * broken = localtime(&now);
-               if(broken->tm_hour >= REPORT_HOUR && broken->tm_wday != last_report_day)
-               {
-                  last_report_day = broken->tm_wday;
-                  report_stats();
-               }
+               last_report_day = broken->tm_wday;
+               report_stats();
             }
-            size_t  length = 0;
-            ssize_t l = read_all(stompy_socket, &length, sizeof(size_t));
-            if(l < sizeof(size_t))
+         }
+
+         int r = read_stompy(body, FRAME_SIZE, 64);
+         _log(DEBUG, "read_stompy() returned %d.", r);
+         if(!r && run && run_receive)
+         {
+            if(stompy_timeout)
             {
-               if(l) _log(CRITICAL, "Failed to read message size.  Error %d %s.", errno, strerror(errno));
-               else  _log(CRITICAL, "Failed to read message size.  End of file.");
+               _log(MINOR, "TD message stream - Receive OK.");
+               stompy_timeout = false;
+            }
+            if(db_start_transaction())
+            {
                run_receive = false;
             }
-            if(run && run_receive && (length < 10 || length > FRAME_SIZE))
+            if(run_receive) process_frame(body);
+
+            if(!db_errored)
             {
-               _log(MAJOR, "Received invalid frame size 0x%08lx.", length);
+               if(db_commit_transaction())
+               {
+                  db_rollback_transaction();
+                  run_receive = false;
+               }
+               else
+               {
+                  // Send ACK
+                  if(ack_stompy())
+                  {
+                     _log(CRITICAL, "Failed to write message ack.  Error %d %s", errno, strerror(errno));
+                     run_receive = false;
+                  }
+               }
+            }
+            else
+            {
+               // DB error.
+               db_rollback_transaction();
                run_receive = false;
             }
-            if(run && run_receive)
+         }
+         else if(run && run_receive)
+         {
+            if(r != 3)
             {
-               _log(DEBUG, "RX frame size = %ld", length);
-               l = read_all(stompy_socket, body, length);
-               if(l < 1)
-               {
-                  if(l) _log(CRITICAL, "Failed to read message body.  Error %d %s.", errno, strerror(errno));
-                  else  _log(CRITICAL, "Failed to read message body.  End of file.");
-                  run_receive = false;
-               }
-               else if(l < length)
-               {
-                  // Impossible?
-                  _log(CRITICAL, "Only received %ld of %ld bytes of message body.", l, length);
-                  run_receive = false;
-               }
+               run_receive = false;
+               _log(CRITICAL, "Receive error %d on stompy connection.", r);
             }
-
-            // Process the message
-            if(run && run_receive)
+            else
             {
-               process_frame(body);
-
-               // Send ACK
-               l = write(stompy_socket, "A", 1);
-               if(l < 0)
-               {
-                  _log(CRITICAL, "Failed to write message ack.  Error %d %s", errno, strerror(errno));
-                  run_receive = false;
-               }
-
-               // Check for timeout
-               if(timeout_detect && time(NULL) > timeout_detect)
-               {
-                  // N.B.  This wont trigger if the message stream stops completely.
-                  // Only if there are no M1 messages amongst a flow of other TDs.
-                  // Message will repeat every ~128 seconds until an M1 message is received.
-                  _log(CRITICAL, "Timeout detected.");
-                  timeout_detect = time(NULL) + TIMEOUT_PERIOD;
-               }
+               if(!stompy_timeout) _log(MINOR, "TD message stream - Receive timeout."); 
+               stompy_timeout = true;
             }
-         } // while(run && run_receive)
-      }
+         }
+         if(run) check_timeout();
+      } // while(run_receive && run)
 
-      _log(GENERAL, "Disconnecting socket.");
-      close(stompy_socket);
-      stompy_socket = -1;
+      close_stompy();
+      if(run) check_timeout();
       {      
          word i;
          if(holdoff < 128) holdoff += 15;
          else holdoff = 128;
          for(i = 0; i < holdoff && run; i++) sleep(1);
       }
-   }  // while(run)
+   }    
+   if(interrupt)
+   {
+      _log(CRITICAL, "Terminating due to interrupt.");
+   }
 
    db_disconnect();
-
    report_stats();
 }
 
@@ -510,13 +485,13 @@ static void process_frame(const char * const body)
       {
          messages = tokens[0].size;
          index = 1;
-         _log(DEBUG, "STOMP message is array of %d TRUST messages.", messages);
+         _log(DEBUG, "STOMP message is array of %d TD messages.", messages);
       }
       else
       {
          messages = 1;
          index = 0;
-         _log(DEBUG, "STOMP message contains a single TRUST message.");
+         _log(DEBUG, "STOMP message contains a single TD message.");
       }
 
       for(i=0; i < messages && run; i++)
@@ -527,7 +502,7 @@ static void process_frame(const char * const body)
          stats[GoodMessage]++;
          if(!strcasecmp(area_id, "M1"))
          {
-            process_message(body, index);
+            process_message(0, body, index);
             stats[M1]++;
          }
          
@@ -543,7 +518,7 @@ static void process_frame(const char * const body)
    }
 }
 
-static void process_message(const char * const body, const size_t index)
+static void process_message(const word describer, const char * const body, const size_t index)
 {
    char message_type[8];
    char times[16];
@@ -557,7 +532,6 @@ static void process_message(const char * const body, const size_t index)
    timestamp = atol(times);
 
    time_t now = time(NULL);
-   timeout_detect = now + TIMEOUT_PERIOD;
 
    if(((status_last_td_actual + 8) < timestamp) || ((status_last_td_processed + 8) < now))
    {
@@ -573,40 +547,40 @@ static void process_message(const char * const body, const size_t index)
       jsmn_find_extract_token(body, tokens, index, "from", from, sizeof(from));
       jsmn_find_extract_token(body, tokens, index, "to", to, sizeof(to));
       jsmn_find_extract_token(body, tokens, index, "descr", descr, sizeof(descr));
-      strcpy(wasf, query_berth(from));
-      strcpy(wast, query_berth(to));
-      _log(DEBUG, "CA:               Berth step (%s) Description \"%s\" from berth \"%s\" to berth \"%s\"", time_text(timestamp, true), descr, from, to);
-      log_detail(timestamp, "CA: %s from %s to %s", descr, from, to);
+      strcpy(wasf, query_berth(describer, from));
+      strcpy(wast, query_berth(describer, to));
+      _log(DEBUG, "%s CA:               Berth step (%s) Description \"%s\" from berth \"%s\" to berth \"%s\"", describers[describer], time_text(timestamp, true), descr, from, to);
+      log_detail(timestamp, "%s CA: %s from %s to %s", describers[describer], descr, from, to);
       if((strcmp(wasf, descr) && strcmp(from, "STIN")) || 
          (strcmp(wast, "")    && strcmp(to, "COUT")))
       {
-         _log(MINOR, "Message CA: Step \"%s\" from \"%s\" to \"%s\" found \"%s\" in \"%s\" and \"%s\" in \"%s\".", descr, from, to, wasf, from, wast, to);
+         _log(MINOR, "Message %s CA: Step \"%s\" from \"%s\" to \"%s\" found \"%s\" in \"%s\" and \"%s\" in \"%s\".", describers[describer], descr, from, to, wasf, from, wast, to);
       }
-      update_database(Berth, from, "");
-      update_database(Berth, to, descr);
+      update_database(Berth, describer, from, "");
+      update_database(Berth, describer, to, descr);
       stats[CA]++;
    }
    else if(!strcasecmp(message_type, "CB"))
    {
       jsmn_find_extract_token(body, tokens, index, "from", from, sizeof(from));
       jsmn_find_extract_token(body, tokens, index, "descr", descr, sizeof(descr));
-      strcpy(wasf, query_berth(from));
-      _log(DEBUG, "CB:             Berth cancel (%s) Description \"%s\" from berth \"%s\"", time_text(timestamp, true), descr, from);
-      log_detail(timestamp, "CB: %s from %s", descr, from);
+      strcpy(wasf, query_berth(describer, from));
+      _log(DEBUG, "%s CB:             Berth cancel (%s) Description \"%s\" from berth \"%s\"", describers[describer], time_text(timestamp, true), descr, from);
+      log_detail(timestamp, "%s CB: %s from %s", describers[describer], descr, from);
       if(strcmp(wasf, descr))
       {
-         _log(MINOR, "Message CB: Cancel \"%s\" from \"%s\" found \"%s\" in \"%s\".", descr, from, wasf, from);
+         _log(MINOR, "Message %s CB: Cancel \"%s\" from \"%s\" found \"%s\" in \"%s\".", describers[describer], descr, from, wasf, from);
       }
-      update_database(Berth, from, "");
+      update_database(Berth, describer, from, "");
       stats[CB]++;
    }
    else if(!strcasecmp(message_type, "CC"))
    {
       jsmn_find_extract_token(body, tokens, index, "to", to, sizeof(to));
       jsmn_find_extract_token(body, tokens, index, "descr", descr, sizeof(descr));
-      _log(DEBUG, "CC:          Berth interpose (%s) Description \"%s\" to berth \"%s\"", time_text(timestamp, true), descr, to);
-      log_detail(timestamp, "CC: %s           to %s", descr, to);
-      update_database(Berth, to, descr);
+      _log(DEBUG, "%s CC:          Berth interpose (%s) Description \"%s\" to berth \"%s\"", describers[describer], time_text(timestamp, true), descr, to);
+      log_detail(timestamp, "%s CC: %s           to %s", describers[describer], descr, to);
+      update_database(Berth, describer, to, descr);
       stats[CC]++;
    }
    else if(!strcasecmp(message_type, "CT"))
@@ -615,7 +589,7 @@ static void process_message(const char * const body, const size_t index)
       char report_time[16];
    
       jsmn_find_extract_token(body, tokens, index, "report_time", report_time, sizeof(report_time));
-      _log(DEBUG, "CT:                  Heartbeat (%s) Report time = %s", time_text(timestamp, true), report_time);
+      _log(DEBUG, "%s CT:                  Heartbeat (%s) Report time = %s", describers[describer], time_text(timestamp, true), report_time);
       stats[CT]++;
    }
    else if(!strcasecmp(message_type, "SF"))
@@ -623,11 +597,11 @@ static void process_message(const char * const body, const size_t index)
       char address[16], data[32];
       jsmn_find_extract_token(body, tokens, index, "address", address, sizeof(address));
       jsmn_find_extract_token(body, tokens, index, "data", data, sizeof(data));
-      _log(DEBUG, "SF:        Signalling update (%s) Address \"%s\", data \"%s\"", time_text(timestamp, true), address, data);
+      _log(DEBUG, "%s SF:        Signalling update (%s) Address \"%s\", data \"%s\"", describers[describer], time_text(timestamp, true), address, data);
 
       word a = atoi(address);
       dword d = strtoul(data, NULL, 16);
-      signalling_update("SF", timestamp, a, d);
+      signalling_update("SF", describer, timestamp, a, d);
 
       stats[SF]++;
    }
@@ -636,14 +610,14 @@ static void process_message(const char * const body, const size_t index)
       char address[16], data[32];
       jsmn_find_extract_token(body, tokens, index, "address", address, sizeof(address));
       jsmn_find_extract_token(body, tokens, index, "data", data, sizeof(data));
-      _log(DEBUG, "SG:       Signalling refresh (%s) Address \"%s\", data \"%s\"", time_text(timestamp, true), address, data);
+      _log(DEBUG, "%s SG:       Signalling refresh (%s) Address \"%s\", data \"%s\"", describers[describer], time_text(timestamp, true), address, data);
       word  a = atoi(address);
       dword d = strtoul(data, NULL, 16);
       _log(DEBUG, "a = %04x, d = %08x", a, d);
-         signalling_update("SG", timestamp, a     , 0xff & (d >> 24));
-         signalling_update("SG", timestamp, a + 1 , 0xff & (d >> 16));
-         signalling_update("SG", timestamp, a + 2 , 0xff & (d >> 8 ));
-         signalling_update("SG", timestamp, a + 3 , 0xff & (d      ));
+      signalling_update("SG", describer, timestamp, a     , 0xff & (d >> 24));
+      signalling_update("SG", describer, timestamp, a + 1 , 0xff & (d >> 16));
+      signalling_update("SG", describer, timestamp, a + 2 , 0xff & (d >> 8 ));
+      signalling_update("SG", describer, timestamp, a + 3 , 0xff & (d      ));
 
       stats[SG]++;
    }
@@ -652,15 +626,15 @@ static void process_message(const char * const body, const size_t index)
       char address[16], data[32];
       jsmn_find_extract_token(body, tokens, index, "address", address, sizeof(address));
       jsmn_find_extract_token(body, tokens, index, "data", data, sizeof(data));
-      _log(DEBUG, "SH: Signalling refresh final (%s) Address \"%s\", data \"%s\"", time_text(timestamp, true), address, data);
+      _log(DEBUG, "%s SH: Signalling refresh final (%s) Address \"%s\", data \"%s\"", describers[describer], time_text(timestamp, true), address, data);
       word  a = atoi(address);
       dword d = strtoul(data, NULL, 16);
       _log(DEBUG, "a = %04x, d = %08x", a, d);
-      signalling_update("SH", timestamp, a     , 0xff & (d >> 24));
-      signalling_update("SH", timestamp, a + 1 , 0xff & (d >> 16));
-      signalling_update("SH", timestamp, a + 2 , 0xff & (d >> 8 ));
-      signalling_update("SH", timestamp, a + 3 , 0xff & (d      ));
-      if(debug) _log(DEBUG, show_signalling_state());
+      signalling_update("SH", describer, timestamp, a     , 0xff & (d >> 24));
+      signalling_update("SH", describer, timestamp, a + 1 , 0xff & (d >> 16));
+      signalling_update("SH", describer, timestamp, a + 2 , 0xff & (d >> 8 ));
+      signalling_update("SH", describer, timestamp, a + 3 , 0xff & (d      ));
+      if(debug) _log(DEBUG, show_signalling_state(describer));
       
       stats[SH]++;
    }
@@ -671,28 +645,28 @@ static void process_message(const char * const body, const size_t index)
    }
 }
 
-static void signalling_update(const char * const message_name, const time_t t, const word a, const dword d)
+static void signalling_update(const char * const message_name, const word describer, const time_t t, const word a, const dword d)
 {
    char detail[256], detail1[256];
 
-   _log(PROC, "signalling_update(\"%s\", %02x, %08x)", message_name, a, d);
+   _log(PROC, "signalling_update(\"%s\", %d, %02x, %08x)", message_name, describer, a, d);
 
    detail[0] = '\0';
-   if(a < SIG_BYTES)
+   if(a < SIG_BYTES && a < max_sig_address[describer])
    {
-      dword o = signalling[a];
-      signalling[a] = d;
+      dword o = signalling[describer][a];
+      signalling[describer][a] = d;
 
       word b;
       for(b=0; b<8; b++)
       {
          if((((o>>b)&0x01) != ((d>>b)&0x01)) || o > 0xff)
          {
-            sprintf(detail1, "  Bit %d%d = %ld", a, b, ((d>>b)&0x01));
+            sprintf(detail1, "  Bit %02d %d = %ld", a, b, ((d>>b)&0x01));
             strcat(detail, detail1);
             char signal_key[8];
-            sprintf(signal_key, "%d%d", a, b);
-            update_database(Signal, signal_key, ((d>>b)&0x01)?"1":"0");
+            sprintf(signal_key, "%02d%d", a, b);
+            update_database(Signal, describer, signal_key, ((d>>b)&0x01)?"1":"0");
          }
       }
    }
@@ -700,18 +674,18 @@ static void signalling_update(const char * const message_name, const time_t t, c
    {
       _log(MINOR, "Signalling address %04x out of range in %s message.  Data %08x", a, message_name, d);
    }
-   if(debug) _log(DEBUG, show_signalling_state());
-   log_detail(t, "%s: %02x = %02x [%s]%s", message_name, a, d, show_signalling_state(), detail);
+   if(debug) _log(DEBUG, show_signalling_state(describer));
+   log_detail(t, "%s %s: %02x = %02x [%s]%s", describers[describer], message_name, a, d, show_signalling_state(describer), detail);
 }
 
-static void update_database(const word type, const char * const b, const char * const v)
+static void update_database(const word type, const word describer, const char * const b, const char * const v)
 {
    char query[512], typec;
    MYSQL_RES * result;
    MYSQL_ROW row;
    time_t now = time(NULL);
 
-   _log(PROC, "update_database(%d, \"%s\", \"%s\")", type, b, v);
+   _log(PROC, "update_database(%d, %d, \"%s\", \"%s\")", type, describer, b, v);
 
    if(type == Berth) 
    {
@@ -726,34 +700,40 @@ static void update_database(const word type, const char * const b, const char * 
    {
       handle = 1;
       db_query("delete from td_updates");
+      stats[HandleWrap]++;
    }
    else
    {
-      sprintf(query, "delete from td_updates where k = '%c%s'", typec, b);
+      sprintf(query, "delete from td_updates where k = '%s%c%s'", describers[describer], typec, b);
       db_query(query);
    }
 
-   sprintf(query, "INSERT INTO td_updates values(%ld, %d, '%c%s', '%s')", now, handle, typec, b, v);
+   sprintf(query, "INSERT INTO td_updates values(%ld, %d, '%s%c%s', '%s')", now, handle, describers[describer], typec, b, v);
    db_query(query);
 
-   sprintf(query, "SELECT * FROM td_states where k = '%c%s'", typec, b);
+   sprintf(query, "SELECT * FROM td_states where k = '%s%c%s'", describers[describer], typec, b);
    if(!db_query(query))
    {
       result = db_store_result();
       if((row = mysql_fetch_row(result))) 
       {
-         sprintf(query, "UPDATE td_states SET updated = %ld, v = '%s' where k = '%c%s'", now, v, typec, b);
+         sprintf(query, "UPDATE td_states SET updated = %ld, v = '%s' where k = '%s%c%s'", now, v, describers[describer], typec, b);
       }
       else
       {
-         sprintf(query, "INSERT INTO td_states VALUES(%ld, '%c%s', '%s')", now, typec, b, v);
+         sprintf(query, "INSERT INTO td_states VALUES(%ld, '%s%c%s', '%s')", now, describers[describer], typec, b, v);
+         if(type == Berth)
+         {
+            _log(MINOR, "Added new berth \"%s\" to database.", b);
+            stats[NewBerth]++;
+         }
       }
       mysql_free_result(result);
       db_query(query);
    }
 }
 
-static const char * const query_berth(const char * const b)
+static const char * const query_berth(const word describer, const char * const b)
 {
    char query[512];
    MYSQL_RES * result;
@@ -762,7 +742,7 @@ static const char * const query_berth(const char * const b)
 
    strcpy(reply, "");
 
-   sprintf(query, "SELECT * FROM td_states where k = 'b%s'", b);
+   sprintf(query, "SELECT * FROM td_states where k = '%sb%s'", describers[describer], b);
    if(!db_query(query))
    {
       result = db_store_result();
@@ -899,6 +879,7 @@ static void report_stats(void)
 
 static void log_message(const char * const message)
 {
+#if 0
    FILE * fp;
    char filename[128];
 
@@ -912,9 +893,10 @@ static void log_message(const char * const message)
       fprintf(fp, "%s\n%s\n", time_text(now, false), message);
       fclose(fp);
    }
+#endif
 }
 
-static const char * show_signalling_state(void)
+static const char * show_signalling_state(const word describer)
 {
    word i;
    char s[8];
@@ -924,13 +906,13 @@ static const char * show_signalling_state(void)
    for(i = 0; i < SIG_BYTES; i++)
    {
       if(i) strcat(state, " ");
-      if(signalling[i] > 0xff)
+      if(signalling[describer][i] > 0xff)
       {
          strcat(state, "..");
       }
       else
       {
-         sprintf(s, "%02x", signalling[i]);
+         sprintf(s, "%02x", signalling[describer][i]);
          strcat(state, s);
       }
    }
@@ -940,19 +922,16 @@ static const char * show_signalling_state(void)
 static void log_detail(const time_t stamp, const char * text, ...)
 {
    FILE * fp;
-   char filename[128];
 
    va_list vargs;
    va_start(vargs, text);
 
    time_t now = time(NULL);
-   struct tm * broken = gmtime(&now);
       
-   sprintf(filename, "/tmp/tddb-results-%04d-%02d-%02d.log", broken->tm_year + 1900, broken->tm_mon + 1, broken->tm_mday);
-
-   if((fp = fopen(filename, "a")))
+   if((fp = fopen(debug?"/tmp/tddb-detail.log":"/var/log/garner/tddb-detail.log", "a")))
    {
-      fprintf(fp, "%s ] ", time_text(stamp, false));
+      fprintf(fp, "%s ] ", time_text(now, false));
+      fprintf(fp, "(Timestamp %s) ", time_text(stamp, false));
       vfprintf(fp, text, vargs);
       fprintf(fp, "\n");
       fclose(fp);
@@ -960,4 +939,55 @@ static void log_detail(const time_t stamp, const char * text, ...)
 
    va_end(vargs);
    return;
+}
+
+static void check_timeout(void)
+{
+   MYSQL_RES * result;
+   MYSQL_ROW row;
+
+   if(time(NULL) - status_last_td_processed > 333 && status_last_td_processed)
+   {
+      // Timeout
+      if(timeout_reported) return;
+      timeout_reported = true;
+      _log(MAJOR, "Describer message stream - Receive timeout - Clearing database.");
+      
+      // Blank out the database
+      if(!db_query("SELECT k FROM td_states"))
+      {
+         result = db_store_result();
+         while((row = mysql_fetch_row(result))) 
+         {
+            char des[8];
+            word describer;
+            des[0] = row[0][0];
+            des[1] = row[0][1];
+            des[2] = '\0';
+            for(describer = 0; describer < DESCRIBERS; describer++)
+            {
+               if(!strcasecmp(des, describers[describer]))
+               {
+                  update_database((row[0][2] == 'b')?Berth:Signal, describer, &row[0][3], "");
+                  describer = DESCRIBERS;
+               }
+            }
+         }
+         mysql_free_result(result);
+      }
+      word i,j;
+      for(i = 0; i < DESCRIBERS; i++)
+      {
+         for(j = 0; j < SIG_BYTES; j++)
+         {
+            signalling[i][j] = 0xffff;
+         }
+      }
+   }
+   else
+   {
+      if(!timeout_reported) return;
+      timeout_reported = false;
+      _log(MINOR, "Describer message stream - Receive OK.");
+   }
 }

@@ -25,6 +25,9 @@
 #include <unistd.h>
 #include <sys/timex.h>
 #include <stdarg.h>
+#include <netinet/in.h>
+#include <errno.h>
+#include <netdb.h>
 #include "misc.h"
 
 static char log_file[512];
@@ -48,6 +51,23 @@ char * time_text(const time_t time, const byte local)
            broken->tm_min,
            broken->tm_sec, 
            local?"":"Z");
+   return result;
+}
+
+char * day_date_text(const time_t time, const byte local)
+{
+   struct tm * broken;
+   static char result[32];
+   char * days[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"};
+
+   broken = local?localtime(&time):gmtime(&time);
+      
+   sprintf(result, "%s %02d/%02d/%02d",
+           days[broken->tm_wday],
+           broken->tm_mday, 
+           broken->tm_mon + 1, 
+           broken->tm_year % 100
+           );
    return result;
 }
 
@@ -478,8 +498,6 @@ qword time_us(void)
 
 ssize_t read_all(const int socket, void * buffer, const size_t size)
 {
-   // TODO Needs a timeout of some sort, for error recovery.
-
    // Just the same as read() except it blocks until size bytes have been read, or an end-of-file or error occurs.
    // Return -1 = error, 0 = EOF, or size = success
    // Suitable for blocking sockets only.
@@ -493,3 +511,154 @@ ssize_t read_all(const int socket, void * buffer, const size_t size)
    }
    return size;
 }
+
+static fd_set sockets;
+static int stompy_socket;
+word open_stompy(const word port)
+{
+   struct sockaddr_in serv_addr;
+   struct hostent *server;
+   stompy_socket = -1;
+
+   _log(GENERAL, "Connecting socket to stompy...");
+   stompy_socket = socket(AF_INET, SOCK_STREAM, 0);
+   if (stompy_socket < 0) 
+   {
+      _log(CRITICAL, "Failed to create client socket.  Error %d %s", errno, strerror(errno));
+      return 1;
+   }
+   
+   server = gethostbyname("localhost");
+   if (server == NULL) 
+   {
+      _log(CRITICAL, "Failed to resolve localhost\".");
+      close(stompy_socket);
+      stompy_socket = -1;
+      return 1;
+   }
+
+   bzero((char *) &serv_addr, sizeof(serv_addr));
+   serv_addr.sin_family = AF_INET;
+   bcopy((char *)server->h_addr, 
+         (char *)&serv_addr.sin_addr.s_addr,
+         server->h_length);
+   serv_addr.sin_port = htons(port);
+
+   /* Now connect to the server */
+   int rc = connect(stompy_socket, &serv_addr, sizeof(serv_addr));
+   if(rc)
+   {
+      _log(CRITICAL, "Failed to connect.  Error %d %s", errno, strerror(errno));
+      close(stompy_socket);
+      stompy_socket = -1;
+      return 1;
+   }
+   _log(GENERAL, "Connected.  Waiting for messages...");
+   FD_ZERO(&sockets);
+   FD_SET(stompy_socket, &sockets);
+   return 0;
+}
+
+word read_stompy(void * buffer, const size_t max_size, const word seconds)
+{
+   // Given a blocking socket, blocks until a full STOMP frame has been read, or end-of-file/error/timeout
+   // Return 0 Success.
+   //        1 End of file.
+   //        2 Error.  See errno.
+   //        3 Timeout.
+   //        4 Closed.
+   //        5 Message too long.
+
+   ssize_t l;
+   size_t got = 0;
+   size_t length;
+   word result = 0;
+   fd_set active_sockets;
+   struct timeval wait_time;
+   _log(PROC, "read_stompy(~, %ld, %d)", max_size, seconds);
+
+   if(stompy_socket < 0) return 4;
+
+   wait_time.tv_sec = seconds;
+   wait_time.tv_usec = 0;
+
+   while(got < sizeof(size_t) && !result)
+   {
+      active_sockets = sockets;
+      int r = select(FD_SETSIZE, &active_sockets, NULL, NULL, seconds?(&wait_time):NULL);
+      _log(DEBUG, "First select returns %d.", r);
+      if(r == 0) result = 3;
+      if(r <  0) result = 2;
+
+      if(!result)
+      {
+         l = read(stompy_socket, buffer + got, sizeof(size_t) - got);
+         if(l < 0) result = 2;
+         if(l == 0) result = 1;
+         got += l;
+      }
+   }
+
+   if(result) return result;
+
+   memcpy(&length, buffer, sizeof(size_t));
+   _log(DEBUG, "Received frame length = 0x%08lx", length);
+   if(length > max_size) 
+   {
+      _log(MAJOR, "read_stompy() Error 5, received length %x08lx exceeds limit %x08lx.", length, max_size);
+      return 5;
+   }
+
+   got = 0;
+   while(got < length && !result)
+   {
+      active_sockets = sockets;
+      int r = select(FD_SETSIZE, &active_sockets, NULL, NULL, seconds?(&wait_time):NULL);
+      _log(DEBUG, "Second select returns %d.", r);
+      if(r == 0) result = 3;
+      if(r <  0) result = 2;
+
+      if(!result)
+      {
+         l = read(stompy_socket, buffer + got, length - got);
+         if(l < 0) result = 2;
+         if(l == 0) result = 1;
+         got += l;
+      }
+   }
+
+   return result;
+}
+
+word ack_stompy(void)
+{
+   _log(PROC, "ack_stompy()");
+   if(stompy_socket < 0) return 1;
+   if(write(stompy_socket, "A", 1) < 1) return 1;
+   return 0;
+   
+}
+void close_stompy(void)
+{
+   _log(PROC, "close_stompy()");
+   if(stompy_socket >= 0) close(stompy_socket);
+}
+
+void extract_match(const char * const source, const regmatch_t * const matches, const unsigned int match, char * result, const size_t max_length)
+{
+   // Helper for regex matches.
+   size_t size;
+
+   size = matches[match].rm_eo - matches[match].rm_so;
+   if(size > max_length - 1) 
+   {
+      char zs[128];
+      sprintf(zs, "extract_match():  String length 0x%x truncated to 0x%x.", size, max_length - 1);
+      _log(MAJOR, zs);
+      size = max_length - 1;
+   }
+
+   strncpy(result, source + matches[match].rm_so, size);
+   result[size] = '\0';
+}
+

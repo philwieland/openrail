@@ -21,6 +21,7 @@
 #ifndef __MISC_H
 #define __MISC_H
 #include <time.h>
+#include <regex.h>
 
 typedef unsigned long long qword;
 typedef unsigned long      dword;
@@ -45,6 +46,7 @@ extern conf_t conf;
 enum log_types {GENERAL, PROC, DEBUG, MINOR, MAJOR, CRITICAL};
 
 extern char * time_text(const time_t time, const byte local);
+extern char * day_date_text(const time_t time, const byte local);
 extern char * date_text(const time_t time, const byte local);
 extern time_t parse_datestamp(const char * string);
 extern time_t parse_timestamp(const char * string);
@@ -61,5 +63,10 @@ extern int load_config(const char * const filepath);
 extern qword time_ms(void);
 extern qword time_us(void);
 extern ssize_t read_all(const int socket, void * buffer, const size_t size);
+extern word open_stompy(const word port);
+extern word read_stompy(void * buffer, const size_t max_size, const word seconds);
+extern word ack_stompy(void);
+extern void close_stompy(void);
+extern void extract_match(const char * const source, const regmatch_t * const matches, const unsigned int match, char * result, const size_t max_length);
 
 #endif

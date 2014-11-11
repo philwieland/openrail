@@ -28,6 +28,9 @@
 static MYSQL * mysql_object;
 static char server[256], user[256], password[256], database[256];
 
+/* Public data */
+word db_errored;
+
 word db_init(const char * const s, const char * const u, const char * const p, const char * const d)
 {
    _log(PROC, "db_init(\"%s\", \"%s\", \"%s\", \"%s\")",s, u, p, d);
@@ -41,6 +44,7 @@ word db_init(const char * const s, const char * const u, const char * const p, c
    strcpy(password, p);
    strcpy(database, d);
    mysql_object = 0;
+   db_errored = false;
 
    // Test if database is there
    return db_connect();
@@ -48,16 +52,14 @@ word db_init(const char * const s, const char * const u, const char * const p, c
 
 word db_query(const char * const query)
 {
-   char zs[2048];
-
    if(strlen(query) > 2000)
    {
       _log(MAJOR, "db_query() called with overlong query.");
+      db_errored = true;
       return 99;
    }
 
-   sprintf(zs, "db_query(\"%s\")", query);
-   _log(PROC, zs);
+   _log(PROC, "db_query(\"%s\")", query);
 
    if(db_connect()) return 9;
    
@@ -65,6 +67,7 @@ word db_query(const char * const query)
    {
       _log(CRITICAL, "db_query():  mysql_query() Error %u: %s    Query:", mysql_errno(mysql_object), mysql_error(mysql_object));
       _log(CRITICAL, query);
+      db_errored = true;
 
       db_disconnect();
       return 3;
@@ -92,9 +95,8 @@ word db_row_count(void)
 
    if (mysql_query(mysql_object, "SELECT row_count()"))
    {
-      char zs[1024];
-      sprintf(zs, "db_row_count():  mysql_query() Error %u: %s", mysql_errno(mysql_object), mysql_error(mysql_object));
-      _log(CRITICAL, zs);
+      _log(CRITICAL, "db_row_count():  mysql_query() Error %u: %s", mysql_errno(mysql_object), mysql_error(mysql_object));
+      db_errored = true;
       
       db_disconnect();
       return 3;
@@ -119,14 +121,14 @@ word db_connect(void)
       if(mysql_object == NULL)
       {
          _log(CRITICAL, "db_connect() error 1: mysql_init() returned NULL");
+         db_errored = true;
          return 1;
       }
    
       if(mysql_real_connect(mysql_object, server, user, password, database, 0, NULL, 0) == NULL) 
       {
-         char zs[1024];
-         sprintf(zs, "db_connect() error 2: Connect failed:  Error %u: %s", mysql_errno(mysql_object), mysql_error(mysql_object));
-         _log(CRITICAL, zs);
+         _log(CRITICAL, "db_connect() error 2: Connect failed:  Error %u: %s", mysql_errno(mysql_object), mysql_error(mysql_object));
+         db_errored = true;
 
          db_disconnect();
          return 2;
@@ -154,7 +156,6 @@ void db_disconnect(void)
       _log(GENERAL, "Connection to database closed.");
    }
    mysql_object = NULL;
-    
 }
 
 void dump_mysql_result_query(const char * const query)
@@ -181,7 +182,7 @@ void dump_mysql_result(MYSQL_RES * result)
    word field, row_i;
    char zs[1024];
 
-   sprintf(zs, "Result dump: %d rows of %d fields", num_rows, num_fields); _log(MINOR, zs);
+   _log(MINOR, "Result dump: %d rows of %d fields", num_rows, num_fields); 
 
    for(row_i = 0; row_i < num_rows; row_i++)
    {
@@ -221,3 +222,27 @@ word db_real_escape_string(char * to, const char * const from, const size_t size
    
    return mysql_real_escape_string(mysql_object, to, from, size);
 }
+
+word db_start_transaction(void)
+{
+   db_errored = false;
+
+   word r = db_query("START TRANSACTION");
+   if(r) db_errored = true;
+   return r;
+}
+
+word db_commit_transaction(void)
+{
+   word r = db_query("COMMIT");
+   if(r) db_errored = true;
+   return r;
+}
+
+word db_rollback_transaction(void)
+{
+   word r = db_query("ROLLBACK");
+   if(r) db_errored = true;
+   return r;
+}
+

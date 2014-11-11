@@ -19,15 +19,15 @@
 */
 
 var url_base = "/rail/livesig/";
-var refresh_tick = 8192; /* ms between ticks */
+var refresh_tick = 4096; /* ms between ticks */
 var updating_timeout = 0;
 var got_handle = 32767;
-var elapsed;
 var req;
 var req_cache = null;
 var req_cache_k;
 var req_cache_timout = 0;
 var feed_failed = 0;
+var progress = 0;
 
 var svg_doc;
 
@@ -76,7 +76,6 @@ function tick()
    else
    {
       updating_timeout = 1;
-      elapsed = new Date().getTime();
 
       req = new XMLHttpRequest();
 
@@ -117,12 +116,12 @@ function process_updates(text)
    svg_doc = document.getElementById('diagram').contentDocument;
 
    got_handle = results[index - 1];
-   while(results.length > index && results[index].length > 2 && (results[index].substr(0, 1) === 'b' || results[index].substr(0, 1) === 's'))
+   while(results.length > index && results[index].length > 4 && (results[index].substr(2, 1) === 'b' || results[index].substr(2, 1) === 's'))
    {
       var parts = results[index++].split('|');
       if(parts.length > 1)
       {
-         if(parts[0].substr(0,1) == 'b')
+         if(parts[0].substr(2,1) == 'b')
          {
             update_berth(parts[0], parts[1]);
          }
@@ -135,8 +134,7 @@ function process_updates(text)
    
    update_panel();
    var caption = results[index].split('|');
-   elapsed = new Date().getTime() - elapsed;
-   svg_doc.getElementById('caption').textContent = 'Updated to ' + caption[1] + ' by ' + caption[2] + ' ' + caption[3] + ' at ' + caption[4] + '  Elapsed time ' + elapsed + ' ms. ';
+   svg_doc.getElementById('caption').textContent = 'Updated to ' + caption[1] + ' by ' + caption[2] + ' ' + caption[3] + ' at ' + caption[4];
    if(caption[0] > 0)
    {
       feed_failed = 10;
@@ -146,13 +144,18 @@ function process_updates(text)
    {
       feed_failed--;
       svg_doc.getElementById('caption').style.stroke = 'red';
-      svg_doc.getElementById('caption').textContent += "  Data feed failed.";
+      svg_doc.getElementById('caption').textContent += " - Data feed failed.";
    }
    else
    {
       svg_doc.getElementById('caption').style.stroke = 'black';
    }
    updating_timeout = 0;
+
+   // Progress wheel
+   progress += 40;
+   if(progress > 360) progress -= 360;
+   svg_doc.getElementById('progress').setAttribute('transform', 'rotate(' + progress + ',415,275)');
 }
 
 function update_berth(k, v)
@@ -174,6 +177,8 @@ function update_berth(k, v)
       }
       if(v != '')
       {
+         // Insert new value into displayed list.  If list is full, ignore the new value.
+         // Note - If there are two locations with the same headcode, it will appear in the list twice.
          for(i=0; i < SLOTS; i++)
          {
             if(!displayed[i] || displayed[i] == '')
@@ -183,7 +188,18 @@ function update_berth(k, v)
             }
          }
       }
-      svg_doc.getElementById(k).textContent = v;
+      if(v == '')
+      {
+         svg_doc.getElementById(k).textContent = v;
+         svg_doc.getElementById(k).style.opacity = '0.0';
+         if(svg_doc.getElementById(k + 'off')) svg_doc.getElementById(k + 'off').style.opacity = '1.0';
+      }
+      else
+      {
+         svg_doc.getElementById(k).textContent = v;
+         svg_doc.getElementById(k).style.opacity = '1.0';
+         if(svg_doc.getElementById(k + 'off')) svg_doc.getElementById(k + 'off').style.opacity = '0.0';
+      }
    }
 }
 
@@ -192,14 +208,20 @@ function update_signal(k, v)
    var i;
    if(svg_doc.getElementById(k))
    {
-      if(k.substr(1, 1) === '5' || k.substr(1, 1) === '6')
+      if(k.substr(0, 5) === 'M1s05' || k.substr(0, 5) === 'M1s06')
       {
-         svg_doc.getElementById(k).style.stroke = ((v === '1')?'black':'#dddddd');
-         //svg_doc.getElementById(k).style.stroke = ((v === '1')?'blue':'#bbbbbb');
+         svg_doc.getElementById(k).style.opacity = ((v === '1')?'1.0':'0.0');
       }
       else
       {
-         svg_doc.getElementById(k).style.fill = ((v === '1')?'#00ff00':'red');
+         if(v === '')
+         {
+            svg_doc.getElementById(k).style.fill = 'black';
+         }
+         else
+         {
+            svg_doc.getElementById(k).style.fill = ((v === '1')?'#00ff00':'red');
+         }
       }
    }
 }
@@ -231,9 +253,15 @@ function cached(k)
    var now =  new Date().getTime();
    for(i = 0; i < SLOTS; i++)
    {
+      //                                   2 Hours
+      if(cache_s[i] && cache_s[i] < now - (2*60*60*1000))
+      {
+         // Expire old ones
+         cache_k[i] = '';
+      }
       if(cache_k[i] && cache_k[i] == k)
       {
-         cache_s[i] = now;
+         //cache_s[i] = now; // Cached value DOES NOT persist just beciase it's used a lot.
          return cache_v[i];
       }
    }

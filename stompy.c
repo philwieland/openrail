@@ -39,7 +39,7 @@
 #include "misc.h"
 
 #define NAME  "stompy"
-#define BUILD "V802"
+#define BUILD "VB04"
 
 static void perform(void);
 static void set_up_server_sockets(void);
@@ -88,9 +88,9 @@ static enum {STOMP_IDLE, STOMP_HEADER, STOMP_BODY, STOMP_FAIL} stomp_read_state;
 static struct frame_buffer * stomp_read_buffer;
 
 // STOMP TX Queue
-#define STOMP_TX_QUEUE_SIZE 2048
+#define STOMP_TX_QUEUE_SIZE 32768
 static char stomp_tx_queue[STOMP_TX_QUEUE_SIZE];
-static word stomp_tx_queue_on, stomp_tx_queue_off;
+static ssize_t stomp_tx_queue_on, stomp_tx_queue_off;
 
 #define BASE_PORT 55840
 

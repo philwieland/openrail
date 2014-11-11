@@ -1,6 +1,6 @@
 CC=gcc -c -g -O2 -Wall -I/usr/include/mysql -DBIG_JOINS=1 -D_GNU_SOURCE -D_FILE_OFFSET_BITS=64 -fno-strict-aliasing -DUNIV_LINUX
 
-all:            cifdb archdb corpusdb vstpdb trustdb stompy tddb liverail.cgi livesig.cgi service-report 
+all:            cifdb archdb corpusdb vstpdb trustdb stompy tddb liverail.cgi livesig.cgi service-report livesiglog
 
 jsmn.o:		jsmn.c jsmn.h misc.h
 
@@ -58,6 +58,11 @@ service-report: service-report.o misc.o db.o
 
 service-report.o: service-report.c misc.h db.h
 
+livesiglog:     livesiglog.o misc.o
+		gcc -g -O2 -L./lib -I./include livesiglog.o misc.o -o livesiglog
+
+livesiglog.o:   livesiglog.c misc.h
+
 install:
 		mkdir -p $(DESTDIR)$(prefix)/lib/cgi-bin
 		install -m 0755 cifdb $(DESTDIR)$(prefix)/sbin
@@ -73,6 +78,6 @@ install:
 .PHONY: install
 
 clean:
-		rm -f cifdb archdb liverail.cgi livesig.cgi corpusdb vstpdb trustdb service-report stompy tddb *.o 
+		rm -f cifdb archdb liverail.cgi livesig.cgi corpusdb vstpdb trustdb service-report stompy tddb livesiglog *.o 
 
 

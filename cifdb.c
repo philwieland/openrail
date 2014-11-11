@@ -21,7 +21,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <regex.h>
 #include <time.h>
 #include <mysql.h>
 #include <unistd.h>
@@ -33,7 +32,7 @@
 #include "db.h"
 
 #define NAME  "cifdb"
-#define BUILD "V609"
+#define BUILD "VB06"
 
 static void process_object(const char * object);
 static void process_timetable(const char * string, const jsmntok_t * tokens);
@@ -50,7 +49,6 @@ static void reset_database(void);
 static void jsmn_dump_tokens(const char * string, const jsmntok_t * tokens, const word object_index);
 static word fetch_file(void);
 static size_t cif_write_data(void *buffer, size_t size, size_t nmemb, void *userp);
-static void extract_match(const char * source, const regmatch_t * matches, const unsigned int match, char * result, const size_t max_length);
 static char * tiploc_name(const char * const tiploc);
 
 static word debug, reset_db, fetch_all, run, tiploc_ignored, test_mode;
@@ -63,7 +61,7 @@ static time_t start_time, last_reported_time;
 #define NOT_DELETED 0xffffffffL
 
 // Stats
-enum stats_categories {Fetches, DBError, 
+enum stats_categories {Fetches, Sequence, DBError, 
                        ScheduleCreate, ScheduleDeleteHit, ScheduleDeleteMiss,
                        ScheduleLocCreate,
                        AssocCreate, AssocDeleteHit, AssocDeleteMiss,
@@ -71,7 +69,7 @@ enum stats_categories {Fetches, DBError,
 static qword stats[MAXStats];
 static const char * stats_category[MAXStats] = 
    {
-      "File Fetch", "Database Error", 
+      "File Fetch", "Sequence Number", "Database Error", 
       "Schedule Create", "Schedule Delete Hit", "Schedule Delete Miss",
       "Schedule Location Create",
       "Association Create", "Association Delete Hit", "Association Delete Miss",
@@ -96,11 +94,12 @@ jsmntok_t tokens[MAX_TOKENS];
 FILE * fp_result;   
 static size_t total_bytes;
 
-#define MATCHES 1
+#define MATCHES 2
 static regex_t match[MATCHES];
 static char* match_strings[MATCHES] =
    {
       "\"timestamp\":([[:digit:]]{1,12})",  // 0
+      "\"sequence\":([[:digit:]]{1,12})",   // 1
    };
 
 // Blank database
@@ -412,10 +411,10 @@ int main(int argc, char **argv)
          if(now - last_reported_time > 10*60)
          {
             char zs[128], zs1[128];
-            sprintf(zs, "Progress: Created %s associations, ", commas(stats[AssocCreate]));
-            sprintf(zs1, "%s schedules and ", commas(stats[ScheduleCreate]));
+            sprintf(zs, "Progress: Created %s associations, ", commas_q(stats[AssocCreate]));
+            sprintf(zs1, "%s schedules and ", commas_q(stats[ScheduleCreate]));
             strcat(zs, zs1);
-            sprintf(zs1, "%s schedule locations.  Working...", commas(stats[ScheduleLocCreate]));
+            sprintf(zs1, "%s schedule locations.  Working...", commas_q(stats[ScheduleLocCreate]));
             strcat(zs, zs1);
             _log(GENERAL, zs);
             last_reported_time += (10*60);
@@ -472,7 +471,8 @@ int main(int argc, char **argv)
    sprintf(zs, "Schedules created passing Huyton: %s", commas(home_report_index));
    _log(GENERAL, zs);
    strcat(report, "\n"); strcat(report, zs); strcat(report, "\n");
-
+   
+   if(!fetch_all)
    {
       // Report details of home trains
       word i;
@@ -528,14 +528,14 @@ int main(int argc, char **argv)
             if(from == to)
             {
                strcat(zs, "  Runs on ");
-               strcat(zs, date_text(from, true));
+               strcat(zs, day_date_text(from, true));
             }
             else
             {
                strcat(zs, "  Runs from ");
-               strcat(zs, date_text(from, true));
+               strcat(zs, day_date_text(from, true));
                strcat(zs, " to ");
-               strcat(zs, date_text(to,   true));
+               strcat(zs, day_date_text(to,   true));
             }
          }
          if(result0) mysql_free_result(result0);
@@ -841,7 +841,7 @@ static void process_delete_schedule(const char * string, const jsmntok_t * token
 
    if(num_rows > 1)
    {
-      _log(MAJOR, "Delete schedule CIF_train_uid = \"%s\", schedule_start_date = %s (%ld), CIF_stp_indicator = %s found %d matches.", CIF_train_uid, schedule_start_date, schedule_start_date_stamp, CIF_stp_indicator, num_rows);
+      _log(MINOR, "Delete schedule CIF_train_uid = \"%s\", schedule_start_date = %s, CIF_stp_indicator = %s found %d matches.  All deleted.", CIF_train_uid, schedule_start_date, CIF_stp_indicator, num_rows);
       if(debug)
       {
          jsmn_dump_tokens(string, tokens, 0);
@@ -1269,10 +1269,18 @@ static word fetch_file(void)
          char zstamp[256];
          extract_match(front, matches, 1, zstamp, sizeof(zstamp));
          time_t stamp = atoi(zstamp);
-         sprintf(zs, "Recovered timestamp: %s", time_text(stamp, 0));
-         _log(test_mode?GENERAL:DEBUG, zs);
-         sprintf(zs, "Stored in file \"%s\"", filepath);
-         _log(test_mode?GENERAL:DEBUG, zs);
+         _log(test_mode?GENERAL:DEBUG, "Recovered timestamp: %s", time_text(stamp, 0));
+         _log(test_mode?GENERAL:DEBUG, "Stored in file \"%s\"", filepath);
+         if(regexec(&match[1], front, 2, matches, 0))
+         {
+            _log(MINOR, "Failed to derive CIF file sequence number.");
+         }
+         else
+         {
+            extract_match(front, matches, 1, zstamp, sizeof(zstamp));
+            stats[Sequence] = atol(zstamp);
+            _log(test_mode?GENERAL:DEBUG, "Sequence number: %s", commas_q(stats[Sequence]));
+         }
 
          if(!test_mode && !opt_url && !opt_filename && (now < stamp || now - stamp > 36*60*60))
          {
@@ -1305,23 +1313,6 @@ static size_t cif_write_data(void *buffer, size_t size, size_t nmemb, void *user
    total_bytes += bytes;
 
    return bytes;
-}
-
-static void extract_match(const char * source, const regmatch_t * matches, const unsigned int match, char * result, const size_t max_length)
-{
-   size_t size;
-
-   size = matches[match].rm_eo - matches[match].rm_so;
-   if(size > max_length - 1) 
-   {
-      char zs[128];
-      sprintf(zs, "extract_match():  String length 0x%x truncated to 0x%x.", size, max_length - 1);
-      _log(MAJOR, zs);
-      size = max_length - 1;
-   }
-
-   strncpy(result, source + matches[match].rm_so, size);
-   result[size] = '\0';
 }
 
 static char * tiploc_name(const char * const tiploc)

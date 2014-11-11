@@ -37,7 +37,7 @@ static void query(void);
 static char * location_name(const char * const tiploc);
 
 #define NAME "livesig"
-#define BUILD "V810"
+#define BUILD "VA20"
 
 word debug;
 enum {PageMode, UpdateMode, QueryMode} mode;
@@ -111,8 +111,8 @@ int main()
    }
    else if(!strcasecmp(parameters[0], "q"))
    {
-      // Update
-      printf("Content-Type: text/plain\n\n");
+      // Query
+      printf("Content-Type: text/plain\nCache-Control: no-cache\n\n");
       mode = QueryMode;
    }
    else
@@ -169,8 +169,6 @@ int main()
       break;
 
    case PageMode:
-      // Bottom line if required
-      printf("<p id=\"bottom-line\">&copy;2014 Phil Wieland.  Live data from Network Rail under <a href=\"http://www.networkrail.co.uk/data-feeds/terms-and-conditions\">this licence</a>.");
       printf("</body></html>\n\n");
       break;
 
@@ -182,7 +180,11 @@ int main()
 
 static void page(void)
 {
-   printf("<object id=\"diagram\" width=\"1260\" height=\"470\" type=\"image/svg+xml\" data=\"/auxy/livesig.svg\"></object>\n");
+   printf("<object id=\"diagram\" width=\"1260\" height=\"290\" type=\"image/svg+xml\" data=\"/auxy/livesig.svg\"></object>\n");
+
+   printf("<table width=\"1260\"><tr><td align=\"left\" id=\"bottom-line\">&copy;2014 Phil Wieland.  Live data from Network Rail under <a href=\"http://www.networkrail.co.uk/data-feeds/terms-and-conditions\">this licence</a>.</td>");
+   printf("<td align=\"right\"><a href=\"/\">Home</a></td><td width=\"10%%\">&nbsp;</td>");
+   printf("<td align=\"right\"><a href=\"/about.html\">About livesig</a></td></tr></table>");
 }
 
 static void update(void)
@@ -269,7 +271,7 @@ static void query(void)
    {
       schedule_id = atol(row0[0]);
 
-      sprintf(query, "SELECT * from cif_schedule_locations WHERE cif_schedule_id = %ld AND (tiploc_code = 'HUYTON' OR tiploc_code = 'HUYTJUN' OR tiploc_code = 'LVRPLSH')", schedule_id);
+      sprintf(query, "SELECT * from cif_schedule_locations WHERE cif_schedule_id = %ld AND (tiploc_code = 'HUYTON' OR tiploc_code = 'HUYTJUN' OR tiploc_code = 'LVRPLSH' OR tiploc_code = 'WVRTTEC')", schedule_id);
       if(db_query(query))
       {
          printf("DB error.\n");
@@ -283,13 +285,14 @@ static void query(void)
          mysql_free_result(result1);
          mysql_free_result(result0);
          
+         // Note we use WTT time, not GBTT.
          sprintf(query, "SELECT tiploc_code, departure FROM cif_schedule_locations WHERE record_identity = 'LO' AND cif_schedule_id = %ld", schedule_id);
          if(!db_query(query))
          {
             result0 = db_store_result();
             if((row0 = mysql_fetch_row(result0)))
             {
-               printf("%s %s to ", show_time(row0[1]), location_name(row0[0]));
+               printf("%s %s to ", show_time_text(row0[1]), location_name(row0[0]));
             }
             mysql_free_result(result0);
          }

@@ -1,8 +1,8 @@
 #! /bin/sh
 ### BEGIN INIT INFO
 # Provides:          vstpdb
-# Required-Start:    $remote_fs $syslog stompy
-# Required-Stop:     $remote_fs $syslog stompy
+# Required-Start:    $remote_fs $syslog stompy mysql
+# Required-Stop:     $remote_fs $syslog stompy mysql
 # Default-Start:     2 3 4 5
 # Default-Stop:      0 1 6
 # Short-Description: vstpdb Process VSTP timetable data 

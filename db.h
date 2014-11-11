@@ -19,6 +19,9 @@
 */
 
 #include <mysql.h>
+
+extern word db_errored;
+
 extern word db_init(const char * const server, const char * const user, const char * const password, const char * const database);
 extern word db_query(const char * const query);
 extern MYSQL_RES * db_store_result(void);
@@ -30,3 +33,6 @@ extern void dump_mysql_result_query(const char * const query);
 extern void dump_mysql_result(MYSQL_RES * result);
 extern dword db_insert_id(void);
 extern word db_real_escape_string(char * to, const char * const from, const size_t size);
+extern word db_start_transaction(void);
+extern word db_commit_transaction(void);
+extern word db_rollback_transaction(void);

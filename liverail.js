@@ -19,7 +19,7 @@
 */
 
 var url_base = "/rail/liverail/";
-var refresh_tick = 3072; /* ms between ticks */
+var refresh_tick = 2048; /* ms between ticks */
 //var refresh_tick = 400; /* Testing only */
 var refresh_period = 25; /* Number of ticks before refresh.  If not 25, css styles must be changed */
 var refresh_count = 0;
@@ -81,10 +81,6 @@ function status_onclick()
 function train_date_onclick(schedule_id)
 {
    // url may already have a date, and may have /r at the end.  Both to be dropped.
-   // var url_parts = document.URL.split('/');
-   // var url = "/";
-   // for(var i = 3; i < 7; i++) url += url_parts[i] + '/';
-   // url += document.getElementById("train_date").value;
    ar_off();
    result = url_base + "train" + '/' + schedule_id + '/' + document.getElementById("train_date").value;
    window.location = result;
@@ -124,7 +120,7 @@ function startup()
  
       var url = document.URL;
       var url_parts = url.split('/');
-      if(url_parts[5] == "sum" || url_parts[5] == "dep")
+      if(url_parts[5] == "sum" || url_parts[5] == "dep" || url_parts[5] == "panel")
       {
          // trigger an immediate update
          document.getElementById("progress").style.display='none';
@@ -163,7 +159,7 @@ function ar()
             var url = document.URL;
             if(url.substr(-2,2) != "/r") { url += "/r"; }
             var url_parts = url.split('/');
-            if(url_parts[5] == "sum" || url_parts[5] == "dep")
+            if(url_parts[5] == "sum" || url_parts[5] == "dep" || url_parts[5] == "panel")
             {
                // Smart update
                smart_update(url);
@@ -201,6 +197,7 @@ function smart_update(url)
 {
    var update_url = url.replace('/sum', '/sumu');
    update_url = update_url.replace('/dep', '/depu');
+   update_url = update_url.replace('/panel', '/panelu');
    document.getElementById("bottom-line").innerHTML += "&nbsp;&nbsp;Updating...";
 
    var req = new XMLHttpRequest();

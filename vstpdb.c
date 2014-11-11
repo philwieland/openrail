@@ -42,10 +42,10 @@
 #include "db.h"
 
 #define NAME  "vstpdb"
-#define BUILD "V717"
+#define BUILD "VB04"
 
 static void perform(void);
-static void process_message(const char * body);
+static void process_frame(const char * body);
 static void process_vstp(const char * string, const jsmntok_t * tokens);
 static void process_delete_schedule(const char * string, const jsmntok_t * tokens);
 static void process_create_schedule(const char * string, const jsmntok_t * tokens, const word update);
@@ -61,7 +61,6 @@ static void log_message(const char * message);
 static char * tiploc_name(const char * const tiploc);
 
 static word debug, run, interrupt, holdoff, huyton_flag;
-static char zs[4096];
 
 #define FRAME_SIZE 64000
 static char body[FRAME_SIZE];
@@ -291,7 +290,7 @@ int main(int argc, char *argv[])
    {
       _log(GENERAL, "Startup delay...");
       word i;
-      for(i = 0; i < 256 && run; i++) sleep(1);
+      for(i = 0; i < 200 && run; i++) sleep(1);
    }
 
    if(run) perform();
@@ -303,9 +302,6 @@ int main(int argc, char *argv[])
 
 static void perform(void)
 {
-   struct sockaddr_in serv_addr;
-   struct hostent *server;
-   int rc, stompy_socket;
    word last_report_day = 9;
 
    // Initialise database
@@ -324,118 +320,66 @@ static void perform(void)
    }
    while(run)
    {   
-      stats[ConnectAttempt]++;
-      _log(GENERAL, "Connecting socket to stompy...");
-      stompy_socket = socket(AF_INET, SOCK_STREAM, 0);
-      if (stompy_socket < 0) 
+      int run_receive = !open_stompy(STOMPY_PORT);
+      while(run_receive && run)
       {
-         _log(CRITICAL, "Failed to create client socket.  Error %d %s", errno, strerror(errno));
-      }
-      server = gethostbyname("localhost");
-      if (server == NULL) 
-      {
-         _log(CRITICAL, "Failed to resolve localhost\".");
-         return;
-      }
-
-      bzero((char *) &serv_addr, sizeof(serv_addr));
-      serv_addr.sin_family = AF_INET;
-      bcopy((char *)server->h_addr, 
-            (char *)&serv_addr.sin_addr.s_addr,
-            server->h_length);
-      serv_addr.sin_port = htons(STOMPY_PORT);
-
-      /* Now connect to the server */
-      rc=connect(stompy_socket, &serv_addr, sizeof(serv_addr));
-      if(rc)
-      {
-         sprintf(zs,"Failed to connect.  Error %d %s", errno, strerror(errno));
-         _log(CRITICAL, zs);
-      }
-      else
-      {
-         _log(GENERAL, "Connected.  Waiting for messages...");
          holdoff = 0;
-
-         int run_receive = true;
-         while(run && run_receive)
          {
+            time_t now = time(NULL);
+            struct tm * broken = localtime(&now);
+            if(broken->tm_hour >= REPORT_HOUR && broken->tm_wday != last_report_day)
             {
-               time_t now = time(NULL);
-               struct tm * broken = localtime(&now);
-               if(broken->tm_hour >= REPORT_HOUR && broken->tm_wday != last_report_day)
-               {
-                  last_report_day = broken->tm_wday;
-                  report_stats();
-               }
+               last_report_day = broken->tm_wday;
+               report_stats();
             }
-            size_t  length = 0;
-            ssize_t l = read_all(stompy_socket, &length, sizeof(size_t));
-            if(l < sizeof(size_t))
+         }
+
+         int r = read_stompy(body, FRAME_SIZE, 64);
+         _log(DEBUG, "read_stompy() returned %d.", r);
+         if(!r && run && run_receive)
+         {
+            process_frame(body);
+
+            // Send ACK
+            if(ack_stompy())
             {
-               if(l) _log(CRITICAL, "Failed to read message size.  Error %d %s.", errno, strerror(errno));
-               else  _log(CRITICAL, "Failed to read message size.  End of file.");
+               _log(CRITICAL, "Failed to write message ack.  Error %d %s", errno, strerror(errno));
                run_receive = false;
             }
-            if(run && run_receive && (length < 10 || length > FRAME_SIZE))
+         }
+         else if(run && run_receive)
+         {
+            if(r != 3)
             {
-               _log(MAJOR, "Received invalid frame size 0x%08lx.", length);
                run_receive = false;
+               _log(CRITICAL, "Receive error %d on stompy connection.", r);
             }
-            if(run && run_receive)
+            else
             {
-               _log(DEBUG, "RX frame size = %ld", length);
-               l = read_all(stompy_socket, body, length);
-               if(l < 1)
-               {
-                  if(l) _log(CRITICAL, "Failed to read message body.  Error %d %s.", errno, strerror(errno));
-                  else  _log(CRITICAL, "Failed to read message body.  End of file.");
-                  run_receive = false;
-               }
-               else if(l < length)
-               {
-                  // Impossible?
-                  _log(CRITICAL, "Only received %ld of %ld bytes of message body.", l, length);
-                  run_receive = false;
-               }
+               // Don't report these because it is normal on VSTP stream
+               // _log(MINOR, "Receive timeout on stompy connection."); 
             }
-
-            if(run && run_receive)
-            {
-               process_message(body);
-
-               // Send ACK
-               l = write(stompy_socket, "A", 1);
-               if(l < 0)
-               {
-                  _log(CRITICAL, "Failed to write message ack.  Error %d %s", errno, strerror(errno));
-                  run_receive = false;
-               }
-            }
-         } // while(run && run_receive)
-      }
-
-      _log(GENERAL, "Disconnecting socket ...");
-      close(stompy_socket);
-      stompy_socket = -1;
+         }
+      } // while(run_receive && run)
+      close_stompy();
       {      
          word i;
-         if(holdoff < 128) holdoff += 16;
+         if(holdoff < 128) holdoff += 15;
          else holdoff = 128;
          for(i = 0; i < holdoff && run; i++) sleep(1);
       }
    }  // while(run)
 
-   db_disconnect();
-
    if(interrupt)
    {
       _log(CRITICAL, "Terminating due to interrupt.");
    }
+
+   db_disconnect();
    report_stats();
 }
 
-static void process_message(const char * body)
+static void process_frame(const char * body)
 {
    jsmn_parser parser;
    time_t elapsed = time(NULL);
@@ -980,6 +924,7 @@ static char * vstp_to_CIF_time(const char * buffer)
 
 static void log_message(const char * message)
 {
+#if 0
    FILE * fp;
    char filename[128];
    
@@ -993,6 +938,7 @@ static void log_message(const char * message)
       fprintf(fp, "%s\n", message);
       fclose(fp);
    }
+#endif
 }
 
 static char * tiploc_name(const char * const tiploc)
