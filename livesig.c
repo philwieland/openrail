@@ -37,7 +37,7 @@ static void query(void);
 static char * location_name(const char * const tiploc);
 
 #define NAME "livesig"
-#define BUILD "VA20"
+#define BUILD "W114"
 
 word debug;
 enum {PageMode, UpdateMode, QueryMode} mode;
@@ -47,8 +47,6 @@ static char parameters[10][128];
 int main()
 {
    now = time(NULL);
-
-   qword start_time = time_ms();
 
    char * parms = getenv("PARMS");
    // Parse parms
@@ -65,7 +63,7 @@ int main()
       }
       else
       {
-         // Due to the simple nature of the queries we can use brute force here to bar little bobby tables and others...
+         // Due to the simple nature of the queries we can use brute force here to bar Little Bobby Tables and others...
          if((parms[i] >= 'A' && parms[i] <= 'Z') || (parms[i] >= '0' && parms[i] <= '9'))
             parameters[j][k++] = parms[i++];
          else
@@ -73,7 +71,7 @@ int main()
          l = j;
       }
    }
-   if(k) parameters[j++][k] - '\0';
+   if(k) parameters[j++][k] = '\0';
 
    while(j < 10) parameters[j++][0] = '\0';
 
@@ -84,6 +82,9 @@ int main()
    }
 
    debug = !strcasecmp(conf.debug,"true");
+
+   // TEMPO
+   debug = true;
 
    // Set up log
    {
@@ -106,6 +107,7 @@ int main()
    if(!strcasecmp(parameters[0], "u")) 
    {
       // Update
+      // parameters[1] is map designator, parameters[2] = handle
       printf("Content-Type: text/plain\nCache-Control: no-cache\n\n");
       mode = UpdateMode;
    }
@@ -118,6 +120,7 @@ int main()
    else
    {
       // Page
+      // parameters[0] is map designator (Or blank)
       mode = PageMode;
       printf("Content-Type: text/html; charset=iso-8859-1\n\n");
       printf("<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.01 Transitional//EN\" \"http://www.w3.org/TR/html4/loose.dtd\">\n");
@@ -126,7 +129,8 @@ int main()
       printf("<title>%s %s</title>\n", NAME, BUILD);
       printf("<link rel=\"stylesheet\" type=\"text/css\" href=\"/auxy/livesig.css\">\n");
       printf("</head>\n");
-      printf("<body style=\"font-family: arial,sans-serif; background:#eeeeee\" onload=\"startup();\">\n");
+      printf("<body style=\"font-family: arial,sans-serif; background:#eeeeee\" onload=\"startup('%s');\">\n", parameters[0][0]?parameters[0]:"M1");
+      //printf("<body style=\"font-family: arial,sans-serif; background:#eeeeee\" onload=\"startup();\">\n");
       printf("<script type=\"text/javascript\" src=\"/auxy/livesig.js\"></script>\n");
    }
 
@@ -146,26 +150,27 @@ int main()
    case QueryMode: query(); break;
    }
 
-   char host[256];
-   if(gethostname(host, sizeof(host))) host[0] = '\0';
-   qword elapsed = time_ms();
-   elapsed -= start_time;
-   time_t last_actual = 0;
-   if(!db_query("SELECT last_td_actual FROM status"))
-   {
-      MYSQL_RES * result = db_store_result();
-      MYSQL_ROW row;
-      if((row = mysql_fetch_row(result)))
-      {
-         last_actual = atol(row[0]);
-      }
-      mysql_free_result(result);
-   }
       
    switch(mode)
    {
    case UpdateMode:
-      printf("%d|%s|%s|%s|%s\n", ((time(NULL) - last_actual < 64)?0:1), time_text(last_actual, 1), NAME, BUILD, host);
+      {
+         char host[256], query[256];
+         if(gethostname(host, sizeof(host))) host[0] = '\0';
+         time_t last_actual = 0;
+         sprintf(query, "SELECT last_timestamp FROM td_status WHERE d = '%s'", parameters[2][0]?parameters[2]:"M1");
+         if(!db_query(query))
+         {
+            MYSQL_RES * result = db_store_result();
+            MYSQL_ROW row;
+            if((row = mysql_fetch_row(result)))
+            {
+               last_actual = atol(row[0]);
+            }
+            mysql_free_result(result);
+         }
+         printf("%d|%s|%s|%s|%s\n", ((time(NULL) - last_actual < 64)?0:1), time_text(last_actual, 1), NAME, BUILD, host);
+      }
       break;
 
    case PageMode:
@@ -180,11 +185,18 @@ int main()
 
 static void page(void)
 {
-   printf("<object id=\"diagram\" width=\"1260\" height=\"290\" type=\"image/svg+xml\" data=\"/auxy/livesig.svg\"></object>\n");
+   if(!strcmp(parameters[0], "M1") || !parameters[0][0])
+   {
+      printf("<object id=\"diagram\" width=\"1260\" height=\"290\" type=\"image/svg+xml\" data=\"/auxy/livesig.svg\"></object>\n");
+   }
+   else if(!strcmp(parameters[0], "XZ"))
+   {
+      printf("<object id=\"diagram\" width=\"1260\" height=\"290\" type=\"image/svg+xml\" data=\"/auxy/livesigXZ.svg\"></object>\n");
+   }
 
-   printf("<table width=\"1260\"><tr><td align=\"left\" id=\"bottom-line\">&copy;2014 Phil Wieland.  Live data from Network Rail under <a href=\"http://www.networkrail.co.uk/data-feeds/terms-and-conditions\">this licence</a>.</td>");
-   printf("<td align=\"right\"><a href=\"/\">Home</a></td><td width=\"10%%\">&nbsp;</td>");
-   printf("<td align=\"right\"><a href=\"/about.html\">About livesig</a></td></tr></table>");
+   printf("<table width=\"1260\"><tr><td align=\"left\" id=\"bottom-line\">&copy;2015 Phil Wieland.  Live data from Network Rail under <a href=\"http://www.networkrail.co.uk/data-feeds/terms-and-conditions\">this licence</a>.</td>\n");
+   printf("<td align=\"right\"><a href=\"/\">Home and other maps</a></td><td width=\"10%%\">&nbsp;</td>\n");
+   printf("<td align=\"right\"><a href=\"/about.html\">About livesig</a></td></tr></table>\n");
 }
 
 static void update(void)
@@ -194,6 +206,8 @@ static void update(void)
    word handle = atoi(parameters[1]);
    MYSQL_RES * result;
    MYSQL_ROW row;
+
+   // Map Designator in parameters[2] (or blank => M1)
 
    if(!db_query("SELECT MAX(handle) from td_updates"))
    {
@@ -218,7 +232,8 @@ static void update(void)
    {
       // Send all
       printf("%d\n", new_handle);
-      if(!db_query("SELECT * FROM td_states"))
+      sprintf(query, "SELECT * FROM td_states WHERE k LIKE '%s%%'", parameters[2][0]?parameters[2]:"M1");
+      if(!db_query(query))
       {
          result = db_store_result();
          while((row = mysql_fetch_row(result))) 
@@ -232,7 +247,7 @@ static void update(void)
    {
       // Send updates
       printf("%d\n", new_handle);
-      sprintf(query, "SELECT * FROM td_updates where handle > %d", handle);
+      sprintf(query, "SELECT * FROM td_updates where handle > %d AND k LIKE '%s%%'", handle, parameters[2][0]?parameters[2]:"M1");
       if(!db_query(query))
       {
          result = db_store_result();
@@ -271,10 +286,11 @@ static void query(void)
    {
       schedule_id = atol(row0[0]);
 
-      sprintf(query, "SELECT * from cif_schedule_locations WHERE cif_schedule_id = %ld AND (tiploc_code = 'HUYTON' OR tiploc_code = 'HUYTJUN' OR tiploc_code = 'LVRPLSH' OR tiploc_code = 'WVRTTEC')", schedule_id);
+      sprintf(query, "SELECT * from cif_schedule_locations WHERE cif_schedule_id = %ld AND (tiploc_code = 'HUYTON' OR tiploc_code = 'HUYTJUN' OR tiploc_code = 'LVRPLSH' OR tiploc_code = 'WVRTTEC' OR tiploc_code = 'LVRPLSH')", schedule_id);
       if(db_query(query))
       {
          printf("DB error.\n");
+         mysql_free_result(result0);
          return;
       }
       
@@ -309,8 +325,11 @@ static void query(void)
          }
          return;
       }
+      else
+      {
+         mysql_free_result(result1);
+      }
    }
-   mysql_free_result(result0);
    
    printf("Not found.\n");
 }

@@ -41,7 +41,7 @@
 #include "db.h"
 
 #define NAME  "trustdb"
-#define BUILD "VB04"
+#define BUILD "W104"
 
 static void perform(void);
 static void process_frame(const char * const body);
@@ -56,7 +56,6 @@ static void create_database(void);
 static void jsmn_dump_tokens(const char * const string, const jsmntok_t * const tokens, const word object_index);
 static void report_stats(void);
 #define INVALID_SORT_TIME 9999
-static void log_message(const char * const message);
 static time_t correct_trust_timestamp(const time_t in);
 
 static word debug, run, interrupt, holdoff;
@@ -92,6 +91,11 @@ static const char * stats_category[MAXstats] =
       "Message type 1","Message type 2","Message type 3","Message type 4","Message type 5","Message type 6","Message type 7","Message type 8",
       "Not a message", "Invalid or not recognised", "Activation no schedule", "Found by second search", "Movement without act.", "Deduced activation",
    };
+
+// Message count
+word message_count;
+time_t last_message_count_report;
+#define MESSAGE_COUNT_REPORT_INTERVAL 64
 
 // Signal handling
 void termination_handler(int signum)
@@ -323,10 +327,6 @@ static void perform(void)
       for(i = 0; i < 64 && run; i++) sleep(1);
    }
 
-   log_message("");
-   log_message("");
-   log_message("trustdb started.");
-
    create_database();
 
    {
@@ -336,6 +336,8 @@ static void perform(void)
       {
          last_report_day = broken->tm_wday;
       }
+      last_message_count_report = now;
+      message_count = 0;
    }
 
    // Status
@@ -356,18 +358,50 @@ static void perform(void)
                last_report_day = broken->tm_wday;
                report_stats();
             }
+            if(now - last_message_count_report > MESSAGE_COUNT_REPORT_INTERVAL)
+            {
+               char query[256];
+               sprintf(query, "INSERT INTO message_count VALUES('trustdb', %ld, %d)", now, message_count);
+               if(!db_query(query))
+               {
+                  _log(DEBUG, "Message count of %d recorded.", message_count);
+                  message_count = 0;
+                  last_message_count_report = now;
+               }
+            }
          }
 
-         int r = read_stompy(body, FRAME_SIZE, 64);
+         int r = read_stompy(body, FRAME_SIZE, 128);
          _log(DEBUG, "read_stompy() returned %d.", r);
          if(!r && run && run_receive)
          {
-            process_frame(body);
-
-            // Send ACK
-            if(ack_stompy())
+            if(db_start_transaction())
             {
-               _log(CRITICAL, "Failed to write message ack.  Error %d %s", errno, strerror(errno));
+               run_receive = false;
+            }
+            if(run_receive) process_frame(body);
+
+            if(!db_errored)
+            {
+               if(db_commit_transaction())
+               {
+                  db_rollback_transaction();
+                  run_receive = false;
+               }
+               else
+               {
+                  // Send ACK
+                  if(ack_stompy())
+                  {
+                     _log(CRITICAL, "Failed to write message ack.  Error %d %s", errno, strerror(errno));
+                     run_receive = false;
+                  }
+               }
+            }
+            else
+            {
+               // DB error occurred during processing of frame.
+               db_rollback_transaction();
                run_receive = false;
             }
          }
@@ -408,8 +442,6 @@ static void process_frame(const char * const body)
    char query[256];
    qword elapsed = time_ms();
    
-   log_message(body);
-
    jsmn_init(&parser);
    int r = jsmn_parse(&parser, body, tokens, NUM_TOKENS);
    if(r != 0) 
@@ -447,6 +479,7 @@ static void process_frame(const char * const body)
          if(!strncmp(message_name, "000", 3) && message_type > 0 && message_type < 9) 
          {
             stats[GoodMessage]++;
+            message_count++;
             stats[GoodMessage + message_type]++;
             switch(message_type)
             {
@@ -689,7 +722,7 @@ static void process_trust_0003(const char * string, const jsmntok_t * tokens, co
          // Movement no activation.  Attempt to create the missing activation.
          MYSQL_ROW row0;
          char tiploc[128], reason[128];
-         word sort_time;
+         word sort_time = 0;
          time_t now = time(NULL);
          qword elapsed = time_ms();
 
@@ -698,11 +731,24 @@ static void process_trust_0003(const char * string, const jsmntok_t * tokens, co
 
          _log(MINOR, "Movement message received with %d matching activations, train_id = \"%s\".", num_rows, train_id);
 
+         sprintf(query, "SELECT * from trust_activation where trust_id = '%s' and created > %ld", train_id, actual_timestamp - (4*24*60*60));
+         if(!db_query(query))
+         {
+            MYSQL_RES * result0 = db_store_result();
+
+            word num_rows = mysql_num_rows(result0);
+            mysql_free_result(result0);
+            if(num_rows > 0)
+            {
+               _log(MINOR, "   A matching activation with no schedule exists.");
+            }
+         }
+         stats[MovtNoAct]++;
+
 #ifdef NO_DEDUCE_ACT
          return;
 #endif
    
-         stats[MovtNoAct]++;
          if(planned_timestamp == 0)
          {
             strcpy(reason, "No planned timestamp");
@@ -893,12 +939,12 @@ static void create_database(void)
    MYSQL_RES * result0;
    MYSQL_ROW row0;
    word create_trust_activation, create_trust_cancellation, create_trust_movement;
-   word create_trust_changeorigin, create_trust_changeid, create_status;
+   word create_trust_changeorigin, create_trust_changeid, create_status, create_message_count;
 
    _log(PROC, "create_database()");
 
    create_trust_activation = create_trust_cancellation = create_trust_movement = true;
-   create_trust_changeorigin = create_trust_changeid = create_status = true;
+   create_trust_changeorigin = create_trust_changeid = create_status = create_message_count = true;
 
    if(db_query("show tables")) return;
    
@@ -911,6 +957,7 @@ static void create_database(void)
       if(!strcasecmp(row0[0], "trust_changeorigin")) create_trust_changeorigin = false;
       if(!strcasecmp(row0[0], "trust_changeid")) create_trust_changeid = false;
       if(!strcasecmp(row0[0], "status")) create_status = false;
+      if(!strcasecmp(row0[0], "message_count")) create_message_count = false;
    }
    mysql_free_result(result0);
 
@@ -997,16 +1044,27 @@ static void create_database(void)
       db_query(
 "CREATE TABLE status "
 "(last_trust_processed INT UNSIGNED NOT NULL, "
-"last_trust_actual INT UNSIGNED NOT NULL,     "
-"last_vstp_processed INT UNSIGNED NOT NULL,   "
-"last_td_processed     INT UNSIGNED NOT NULL, "
-"last_td_actual        INT UNSIGNED NOT NULL  "
+"last_trust_actual     INT UNSIGNED NOT NULL, "
+"last_vstp_processed   INT UNSIGNED NOT NULL, "
+"last_td_processed     INT UNSIGNED NOT NULL  "
 ") ENGINE = InnoDB"
                );
       db_query(
 "INSERT INTO status VALUES(0, 0, 0, 0, 0)"
                );
-      _log(GENERAL, "Created database table trust_status.");
+      _log(GENERAL, "Created database table status.");
+   }
+   if(create_message_count)
+   {
+      db_query(
+"CREATE TABLE message_count "
+"(application          CHAR(16) NOT NULL,     "
+"time                  INT UNSIGNED NOT NULL, "
+"count                 INT UNSIGNED NOT NULL, "
+"INDEX(time)                                  "
+") ENGINE = InnoDB"
+               );
+      _log(GENERAL, "Created database table message_count.");
    }
 }
 
@@ -1073,25 +1131,6 @@ static void report_stats(void)
       stats[i] = 0;
    }
    email_alert(NAME, BUILD, "Statistics Report", report);
-}
-
-static void log_message(const char * const message)
-{
-#if 0
-   FILE * fp;
-   char filename[128];
-
-   time_t now = time(NULL);
-   struct tm * broken = gmtime(&now);
-   
-   sprintf(filename, "/tmp/trustdb-messages-%04d-%02d-%02d.log", broken->tm_year + 1900, broken->tm_mon + 1, broken->tm_mday);
-   
-   if((fp = fopen(filename, "a")))
-   {
-      fprintf(fp, "%s\n%s\n", time_text(now, false), message);
-      fclose(fp);
-   }
-#endif
 }
 
 static time_t correct_trust_timestamp(const time_t in)

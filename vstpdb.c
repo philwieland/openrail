@@ -42,7 +42,7 @@
 #include "db.h"
 
 #define NAME  "vstpdb"
-#define BUILD "VB04"
+#define BUILD "VC28"
 
 static void perform(void);
 static void process_frame(const char * body);
@@ -57,7 +57,6 @@ static void report_stats(void);
 #define INVALID_SORT_TIME 9999
 static word get_sort_time_vstp(const char const * buffer);
 static char * vstp_to_CIF_time(const char * buffer);
-static void log_message(const char * message);
 static char * tiploc_name(const char * const tiploc);
 
 static word debug, run, interrupt, holdoff, huyton_flag;
@@ -307,9 +306,6 @@ static void perform(void)
    // Initialise database
    db_init(conf.db_server, conf.db_user, conf.db_pass, conf.db_name);
 
-   log_message("");
-   log_message("");
-   log_message("vstpdb started.");
    {
       time_t now = time(NULL);
       struct tm * broken = localtime(&now);
@@ -320,6 +316,7 @@ static void perform(void)
    }
    while(run)
    {   
+      stats[ConnectAttempt]++;
       int run_receive = !open_stompy(STOMPY_PORT);
       while(run_receive && run)
       {
@@ -334,16 +331,37 @@ static void perform(void)
             }
          }
 
-         int r = read_stompy(body, FRAME_SIZE, 64);
+         word r = read_stompy(body, FRAME_SIZE, 64);
          _log(DEBUG, "read_stompy() returned %d.", r);
          if(!r && run && run_receive)
          {
-            process_frame(body);
-
-            // Send ACK
-            if(ack_stompy())
+            if(db_start_transaction())
             {
-               _log(CRITICAL, "Failed to write message ack.  Error %d %s", errno, strerror(errno));
+               run_receive = false;
+            }
+            if(run_receive) process_frame(body);
+
+            if(!db_errored)
+            {
+               if(db_commit_transaction())
+               {
+                  db_rollback_transaction();
+                  run_receive = false;
+               }
+               else
+               {
+                  // Send ACK
+                  if(ack_stompy())
+                  {
+                     _log(CRITICAL, "Failed to write message ack.  Error %d %s", errno, strerror(errno));
+                     run_receive = false;
+                  }
+               }
+            }
+            else
+            {
+               // DB error occurred during processing of frame.
+               db_rollback_transaction();
                run_receive = false;
             }
          }
@@ -384,8 +402,6 @@ static void process_frame(const char * body)
    jsmn_parser parser;
    time_t elapsed = time(NULL);
    
-   log_message(body);
-
    jsmn_init(&parser);
    int r = jsmn_parse(&parser, body, tokens, NUM_TOKENS);
    if(r != 0) 
@@ -922,25 +938,6 @@ static char * vstp_to_CIF_time(const char * buffer)
    return cif;
 }
 
-static void log_message(const char * message)
-{
-#if 0
-   FILE * fp;
-   char filename[128];
-   
-   time_t now = time(NULL);
-   struct tm * broken = gmtime(&now);
-   
-   sprintf(filename, "/tmp/vstpdb-messages-%04d-%02d-%02d.log", broken->tm_year + 1900, broken->tm_mon + 1, broken->tm_mday);
-   
-   if((fp = fopen(filename, "a")))
-   {
-      fprintf(fp, "%s\n", message);
-      fclose(fp);
-   }
-#endif
-}
-
 static char * tiploc_name(const char * const tiploc)
 {
    // Not re-entrant
@@ -961,6 +958,8 @@ static char * tiploc_name(const char * const tiploc)
    {
       strcpy(result, tiploc);
    }
+   mysql_free_result(result0);
+
    return result;
 }
 

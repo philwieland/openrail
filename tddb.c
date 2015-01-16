@@ -41,7 +41,7 @@
 #include "db.h"
 
 #define NAME  "tddb"
-#define BUILD "VB04"
+#define BUILD "W115"
 
 static void perform(void);
 static void process_frame(const char * const body);
@@ -53,7 +53,6 @@ static void create_database(void);
 
 static void jsmn_dump_tokens(const char * const string, const jsmntok_t * const tokens, const word object_index);
 static void report_stats(void);
-static void log_message(const char * const message);
 static const char * show_signalling_state(const word describer);
 static void log_detail(const time_t stamp, const char * text, ...);
 static void check_timeout(void);
@@ -78,32 +77,38 @@ static time_t start_time;
 
 // Describers 
 #define DESCRIBERS 2
-static const char * describers[DESCRIBERS] = {"M1", "ZZ"};
+static const char * describers[DESCRIBERS] = {"M1", "XZ"};
 
 // Status
-static time_t status_last_td_processed, status_last_td_actual;
-static word timeout_reported;
+static time_t status_last_td_processed, status_last_td_actual[DESCRIBERS];
+static word timeout_reported[DESCRIBERS];
+static time_t last_td_processed[DESCRIBERS];
 
 enum data_types {Berth, Signal};
 
 // Stats
-enum stats_categories {ConnectAttempt, GoodMessage, M1, CA, CB, CC, CT, SF, SG, SH, NewBerth, NotRecog, HandleWrap, MAXstats};
+enum stats_categories {ConnectAttempt, GoodMessage, RelMessage, CA, CB, CC, CT, SF, SG, SH, NewBerth, NotRecog, HandleWrap, MAXstats};
 static qword stats[MAXstats];
 static qword grand_stats[MAXstats];
 static const char * stats_category[MAXstats] = 
    {
       "Stompy connect attempt", "Good message", 
-      "M1 message", "CA message", "CB message", "CC message", "CT message", "SF message", "SG message", "SH message", "New berth", "Unrecognised message", "Handle wrap",
+      "Relevant message", "CA message", "CB message", "CC message", "CT message", "SF message", "SG message", "SH message", "New berth", "Unrecognised message", "Handle wrap",
    };
 
 // Signalling
-#define SIG_BYTES 8
-static word max_sig_address[DESCRIBERS] = {8, 8};
+#define SIG_BYTES 256
+static word no_of_sig_address[DESCRIBERS] = {8, 0};
 static word signalling[DESCRIBERS][SIG_BYTES];
 
 // Update handle.  MAX_HANDLE must be < 32767
-#define MAX_HANDLE 4095
+#define MAX_HANDLE 9990
 static word handle;
+
+// Message count
+word message_count, message_count_rel;
+time_t last_message_count_report;
+#define MESSAGE_COUNT_REPORT_INTERVAL 64
 
 // Signal handling
 void termination_handler(int signum)
@@ -281,7 +286,6 @@ int main(int argc, char *argv[])
 
    run = true;
    interrupt = false;
-   timeout_reported = false;
 
    {
       // Sort out the signal handlers
@@ -333,17 +337,13 @@ static void perform(void)
    word last_report_day = 9;
    word stompy_timeout = true;
 
-   // Initialise database
+   // Initialise database connection
    while(db_init(conf.db_server, conf.db_user, conf.db_pass, conf.db_name) && run) 
    {
       _log(CRITICAL, "Failed to initialise database connection.  Will retry...");
       word i;
       for(i = 0; i < 64 && run; i++) sleep(1);
    }
-
-   log_message("");
-   log_message("");
-   log_message("tddb started.");
 
    create_database();
 
@@ -356,10 +356,20 @@ static void perform(void)
       {
          last_report_day = broken->tm_wday;
       }
+      last_message_count_report = now;
+      message_count = message_count_rel = 0;
    }
 
    // Status
-   status_last_td_processed = status_last_td_actual = 0;
+   status_last_td_processed = 0;
+   {
+      word describer;
+      for(describer = 0; describer < DESCRIBERS; describer++)
+      {
+         status_last_td_actual[describer] = last_td_processed[describer] = 0;
+         timeout_reported[describer] = false;
+      }
+   }
 
    // Signalling
    {
@@ -387,6 +397,21 @@ static void perform(void)
             {
                last_report_day = broken->tm_wday;
                report_stats();
+            }
+            if(now - last_message_count_report > MESSAGE_COUNT_REPORT_INTERVAL)
+            {
+               char query[256];
+               sprintf(query, "INSERT INTO message_count VALUES('tddb', %ld, %d)", now, message_count);
+               if(!db_query(query))
+               {
+                  message_count = 0;
+                  last_message_count_report = now;
+               }
+               sprintf(query, "INSERT INTO message_count VALUES('tddbrel', %ld, %d)", now, message_count_rel);
+               if(!db_query(query))
+               {
+                  message_count_rel = 0;
+               }
             }
          }
 
@@ -468,8 +493,6 @@ static void process_frame(const char * const body)
    jsmn_parser parser;
    qword elapsed = time_ms();
    
-   log_message(body);
-
    jsmn_init(&parser);
    int r = jsmn_parse(&parser, body, tokens, NUM_TOKENS);
    if(r != 0) 
@@ -497,13 +520,21 @@ static void process_frame(const char * const body)
       for(i=0; i < messages && run; i++)
       {
          char area_id[4];
+         word describer;
          jsmn_find_extract_token(body, tokens, index, "area_id", area_id, sizeof(area_id));
 
          stats[GoodMessage]++;
-         if(!strcasecmp(area_id, "M1"))
+         message_count++;
+
+         for(describer = 0; describer < DESCRIBERS; describer++)
          {
-            process_message(0, body, index);
-            stats[M1]++;
+            if(!strcasecmp(area_id, describers[describer]))
+            {
+               process_message(describer, body, index);
+               stats[RelMessage]++;
+               message_count_rel++;
+               describer = DESCRIBERS;
+            }
          }
          
          size_t message_ends = tokens[index].end;
@@ -533,12 +564,16 @@ static void process_message(const word describer, const char * const body, const
 
    time_t now = time(NULL);
 
-   if(((status_last_td_actual + 8) < timestamp) || ((status_last_td_processed + 8) < now))
+   last_td_processed[describer] = now;
+
+   if(((status_last_td_actual[describer] + 8) < timestamp) || ((status_last_td_processed + 8) < now))
    {
-       status_last_td_actual = timestamp;
+       status_last_td_actual[describer] = timestamp;
        status_last_td_processed = now;
        char query[256];
-       sprintf(query, "update status SET last_td_actual = %ld, last_td_processed = %ld", timestamp, now);
+       sprintf(query, "update status SET last_td_processed = %ld", now);
+       db_query(query);
+       sprintf(query, "update td_status set last_timestamp = %ld WHERE d = '%s'", timestamp, describers[describer]);
        db_query(query);
    }
 
@@ -599,8 +634,8 @@ static void process_message(const word describer, const char * const body, const
       jsmn_find_extract_token(body, tokens, index, "data", data, sizeof(data));
       _log(DEBUG, "%s SF:        Signalling update (%s) Address \"%s\", data \"%s\"", describers[describer], time_text(timestamp, true), address, data);
 
-      word a = atoi(address);
-      dword d = strtoul(data, NULL, 16);
+      word  a = strtoul(address, NULL, 16);
+      dword d = strtoul(data,    NULL, 16);
       signalling_update("SF", describer, timestamp, a, d);
 
       stats[SF]++;
@@ -611,8 +646,8 @@ static void process_message(const word describer, const char * const body, const
       jsmn_find_extract_token(body, tokens, index, "address", address, sizeof(address));
       jsmn_find_extract_token(body, tokens, index, "data", data, sizeof(data));
       _log(DEBUG, "%s SG:       Signalling refresh (%s) Address \"%s\", data \"%s\"", describers[describer], time_text(timestamp, true), address, data);
-      word  a = atoi(address);
-      dword d = strtoul(data, NULL, 16);
+      word  a = strtoul(address, NULL, 16);
+      dword d = strtoul(data,    NULL, 16);
       _log(DEBUG, "a = %04x, d = %08x", a, d);
       signalling_update("SG", describer, timestamp, a     , 0xff & (d >> 24));
       signalling_update("SG", describer, timestamp, a + 1 , 0xff & (d >> 16));
@@ -627,8 +662,8 @@ static void process_message(const word describer, const char * const body, const
       jsmn_find_extract_token(body, tokens, index, "address", address, sizeof(address));
       jsmn_find_extract_token(body, tokens, index, "data", data, sizeof(data));
       _log(DEBUG, "%s SH: Signalling refresh final (%s) Address \"%s\", data \"%s\"", describers[describer], time_text(timestamp, true), address, data);
-      word  a = atoi(address);
-      dword d = strtoul(data, NULL, 16);
+      word  a = strtoul(address, NULL, 16);
+      dword d = strtoul(data,    NULL, 16);
       _log(DEBUG, "a = %04x, d = %08x", a, d);
       signalling_update("SH", describer, timestamp, a     , 0xff & (d >> 24));
       signalling_update("SH", describer, timestamp, a + 1 , 0xff & (d >> 16));
@@ -652,7 +687,7 @@ static void signalling_update(const char * const message_name, const word descri
    _log(PROC, "signalling_update(\"%s\", %d, %02x, %08x)", message_name, describer, a, d);
 
    detail[0] = '\0';
-   if(a < SIG_BYTES && a < max_sig_address[describer])
+   if(a < SIG_BYTES && a < no_of_sig_address[describer])
    {
       dword o = signalling[describer][a];
       signalling[describer][a] = d;
@@ -662,10 +697,10 @@ static void signalling_update(const char * const message_name, const word descri
       {
          if((((o>>b)&0x01) != ((d>>b)&0x01)) || o > 0xff)
          {
-            sprintf(detail1, "  Bit %02d %d = %ld", a, b, ((d>>b)&0x01));
+            sprintf(detail1, "  Bit %02x %d = %ld", a, b, ((d>>b)&0x01));
             strcat(detail, detail1);
             char signal_key[8];
-            sprintf(signal_key, "%02d%d", a, b);
+            sprintf(signal_key, "%02x%d", a, b);
             update_database(Signal, describer, signal_key, ((d>>b)&0x01)?"1":"0");
          }
       }
@@ -675,7 +710,7 @@ static void signalling_update(const char * const message_name, const word descri
       _log(MINOR, "Signalling address %04x out of range in %s message.  Data %08x", a, message_name, d);
    }
    if(debug) _log(DEBUG, show_signalling_state(describer));
-   log_detail(t, "%s %s: %02x = %02x [%s]%s", describers[describer], message_name, a, d, show_signalling_state(describer), detail);
+   log_detail(t, "%s %s: %02x = %02x %s%s", describers[describer], message_name, a, d, show_signalling_state(describer), detail);
 }
 
 static void update_database(const word type, const word describer, const char * const b, const char * const v)
@@ -724,7 +759,7 @@ static void update_database(const word type, const word describer, const char * 
          sprintf(query, "INSERT INTO td_states VALUES(%ld, '%s%c%s', '%s')", now, describers[describer], typec, b, v);
          if(type == Berth)
          {
-            _log(MINOR, "Added new berth \"%s\" to database.", b);
+            _log(MINOR, "Added new berth \"%s\" on describer %s to database.", b, describers[describer]);
             stats[NewBerth]++;
          }
       }
@@ -759,19 +794,21 @@ static void create_database(void)
 {
    MYSQL_RES * result0;
    MYSQL_ROW row0;
-   word create_td_updates, create_td_states, create_friendly_names_20;
+   word create_td_updates, create_td_states, create_td_status, create_friendly_names_20;
+   char query[1024];
 
    _log(PROC, "create_database()");
 
-   create_td_updates = create_td_states = create_friendly_names_20 = true;
+   create_td_updates = create_td_states = create_td_status = create_friendly_names_20 = true;
 
    if(db_query("show tables")) return;
    
    result0 = db_store_result();
    while((row0 = mysql_fetch_row(result0))) 
    {
-      if(!strcasecmp(row0[0], "td_updates"))      create_td_updates      = false;
-      if(!strcasecmp(row0[0], "td_states"))       create_td_states       = false;
+      if(!strcasecmp(row0[0], "td_updates"))      create_td_updates            = false;
+      if(!strcasecmp(row0[0], "td_states"))       create_td_states             = false;
+      if(!strcasecmp(row0[0], "td_status"))       create_td_status             = false;
       if(!strcasecmp(row0[0], "friendly_names_20"))  create_friendly_names_20  = false;
    }
    mysql_free_result(result0);
@@ -783,7 +820,8 @@ static void create_database(void)
 "(created INT UNSIGNED NOT NULL, "
 "handle   INT UNSIGNED NOT NULL, "
 "k        CHAR(8) NOT NULL, "
-"v        CHAR(8) NOT NULL "
+"v        CHAR(8) NOT NULL, "
+"PRIMARY KEY(k) "
 ") ENGINE = InnoDB"
                );
       _log(GENERAL, "Created database table td_updates.");
@@ -794,10 +832,21 @@ static void create_database(void)
 "CREATE TABLE td_states "
 "(updated INT UNSIGNED NOT NULL, "
 "k        CHAR(8) NOT NULL, "
-"v        CHAR(8) NOT NULL "
+"v        CHAR(8) NOT NULL, "
+"PRIMARY KEY(k) "
 ") ENGINE = InnoDB"
                );
       _log(GENERAL, "Created database table td_states.");
+   }
+   if(create_td_status)
+   {
+      db_query(
+"CREATE TABLE td_status "
+"(d             CHAR(4) NOT NULL, "
+"last_timestamp INT UNSIGNED NOT NULL "
+") ENGINE = InnoDB"
+               );
+      _log(GENERAL, "Created database table td_status.");
    }
    if(create_friendly_names_20)
    {
@@ -809,6 +858,24 @@ static void create_database(void)
 ") ENGINE = InnoDB"
                );
       _log(GENERAL, "Created database table friendly_names_20.");
+   }
+
+   // Ensure the rows are all present in td_status
+   word d;
+   for(d=0; d < DESCRIBERS; d++)
+   {
+      sprintf(query, "SELECT * FROM td_status WHERE d = '%s'", describers[d]);
+      if(!db_query(query))
+      {
+         result0 = db_store_result();
+         if(!mysql_num_rows(result0))
+         {
+            sprintf(query, "INSERT INTO td_status VALUES('%s', 0)", describers[d]);
+            db_query(query);
+            _log(GENERAL, "Created td_status row for describer \"%s\".", describers[d]);
+         }
+         mysql_free_result(result0);
+      }
    }
 }
 
@@ -877,33 +944,19 @@ static void report_stats(void)
    email_alert(NAME, BUILD, "Statistics Report", report);
 }
 
-static void log_message(const char * const message)
-{
-#if 0
-   FILE * fp;
-   char filename[128];
-
-   time_t now = time(NULL);
-   struct tm * broken = gmtime(&now);
-   
-   sprintf(filename, "/tmp/tddb-messages-%04d-%02d-%02d.log", broken->tm_year + 1900, broken->tm_mon + 1, broken->tm_mday);
-   
-   if((fp = fopen(filename, "a")))
-   {
-      fprintf(fp, "%s\n%s\n", time_text(now, false), message);
-      fclose(fp);
-   }
-#endif
-}
-
 static const char * show_signalling_state(const word describer)
 {
    word i;
    char s[8];
    static char  state[128];
 
-   state[0] = '\0';
-   for(i = 0; i < SIG_BYTES; i++)
+   if(no_of_sig_address[describer] > 16)
+   {
+      state[0] = '\0';
+      return state;
+   }
+   strcpy(state, "[");
+   for(i = 0; i < no_of_sig_address[describer]; i++)
    {
       if(i) strcat(state, " ");
       if(signalling[describer][i] > 0xff)
@@ -916,6 +969,7 @@ static const char * show_signalling_state(const word describer)
          strcat(state, s);
       }
    }
+   strcat(state, "]");
    return state;
 }
 
@@ -945,49 +999,47 @@ static void check_timeout(void)
 {
    MYSQL_RES * result;
    MYSQL_ROW row;
+   word describer;
+   char q[256];
 
-   if(time(NULL) - status_last_td_processed > 333 && status_last_td_processed)
+   for(describer = 0; describer < DESCRIBERS; describer++)
    {
-      // Timeout
-      if(timeout_reported) return;
-      timeout_reported = true;
-      _log(MAJOR, "Describer message stream - Receive timeout - Clearing database.");
-      
-      // Blank out the database
-      if(!db_query("SELECT k FROM td_states"))
+      if(time(NULL) - last_td_processed[describer] > 333 && last_td_processed[describer])
       {
-         result = db_store_result();
-         while((row = mysql_fetch_row(result))) 
+         // Timeout
+         if(!timeout_reported[describer])
          {
-            char des[8];
-            word describer;
-            des[0] = row[0][0];
-            des[1] = row[0][1];
-            des[2] = '\0';
-            for(describer = 0; describer < DESCRIBERS; describer++)
+            timeout_reported[describer] = true;
+            _log(MAJOR, "Describer %s message stream - Receive timeout - Clearing database.", describers[describer]);
+         
+            // Blank out the database
+            sprintf(q, "SELECT k FROM td_states where k like '%s%%'", describers[describer]);
+            if(!db_query(q))
             {
-               if(!strcasecmp(des, describers[describer]))
+               result = db_store_result();
+               while((row = mysql_fetch_row(result))) 
                {
                   update_database((row[0][2] == 'b')?Berth:Signal, describer, &row[0][3], "");
-                  describer = DESCRIBERS;
                }
+               mysql_free_result(result);
             }
+         
+            word j;
+            for(j = 0; j < SIG_BYTES; j++)
+            {
+               signalling[describer][j] = 0xffff;
+            }
+            // To spread database load, drop out after one timeout, remainder will be spotted later.
+            describer = DESCRIBERS;
          }
-         mysql_free_result(result);
       }
-      word i,j;
-      for(i = 0; i < DESCRIBERS; i++)
+      else
       {
-         for(j = 0; j < SIG_BYTES; j++)
+         if(timeout_reported[describer])
          {
-            signalling[i][j] = 0xffff;
+            timeout_reported[describer] = false;
+            _log(MINOR, "Describer %s message stream - Receive OK.", describers[describer]);
          }
       }
-   }
-   else
-   {
-      if(!timeout_reported) return;
-      timeout_reported = false;
-      _log(MINOR, "Describer message stream - Receive OK.");
    }
 }

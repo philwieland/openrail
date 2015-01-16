@@ -32,7 +32,7 @@
 #include "db.h"
 
 #define NAME  "cifdb"
-#define BUILD "VB06"
+#define BUILD "W105"
 
 static void process_object(const char * object);
 static void process_timetable(const char * string, const jsmntok_t * tokens);
@@ -51,7 +51,7 @@ static word fetch_file(void);
 static size_t cif_write_data(void *buffer, size_t size, size_t nmemb, void *userp);
 static char * tiploc_name(const char * const tiploc);
 
-static word debug, reset_db, fetch_all, run, tiploc_ignored, test_mode;
+static word debug, reset_db, fetch_all, run, tiploc_ignored, test_mode, verbose, insecure;
 static char * opt_filename;
 static char * opt_url;
 static dword update_id;
@@ -209,11 +209,13 @@ int main(int argc, char **argv)
    opt_url = NULL;
    fetch_all = false;
    test_mode = false;
+   verbose = false;
+   insecure = false;
 
    strcpy(config_file_path, "/etc/openrail.conf");
    word usage = false;
    int c;
-   while ((c = getopt (argc, argv, ":c:u:f:atrh")) != -1)
+   while ((c = getopt (argc, argv, ":c:u:f:atrpih")) != -1)
       switch (c)
       {
       case 'c':
@@ -234,6 +236,12 @@ int main(int argc, char **argv)
       case 'r':
          reset_db = true;
          break;
+      case 'p':
+         verbose = true;
+         break;
+      case 'i':
+         insecure = true;
+         break;
       case 'h':
          usage = true;
          break;
@@ -253,7 +261,7 @@ int main(int argc, char **argv)
 
    if(usage) 
    {
-      printf("%s %s  Usage: %s [-c /path/to/config/file.conf] [-u <url> | -f <path> | -a] [-t | -r]\n", NAME, BUILD, argv[0]);
+      printf("%s %s  Usage: %s [-c /path/to/config/file.conf] [-u <url> | -f <path> | -a] [-t | -r] [-p][-i]\n", NAME, BUILD, argv[0]);
       printf(
              "-c <file>  Path to config file.\n"
              "Data source:\n"
@@ -265,6 +273,9 @@ int main(int argc, char **argv)
              "default    Apply data to database.\n"
              "-t         Report datestamp on file, do not apply to database.\n"
              "-r         Reset database.  Do not process any data.\n"
+             "Options:\n"
+             "-i         Insecure.  Circumvent certificate checks.\n"
+             "-p         Print activity as well as logging.\n"
              );
       exit(1);
    }
@@ -290,8 +301,7 @@ int main(int argc, char **argv)
       debug = 0;
    }
    
-
-   _log_init(debug?"/tmp/cifdb.log":"/var/log/garner/cifdb.log", debug?1:0);
+   _log_init(debug?"/tmp/cifdb.log":"/var/log/garner/cifdb.log", (debug?1:(verbose?4:0)));
    
    _log(GENERAL, "");
    _log(GENERAL, "%s %s", NAME, BUILD);
@@ -346,6 +356,7 @@ int main(int argc, char **argv)
 
    run = 1;
    tiploc_ignored = false;
+
    // Zero the stats
    {
       word i;
@@ -455,9 +466,22 @@ int main(int argc, char **argv)
 
    _log(GENERAL, "");
    _log(GENERAL, "End of run:");
+
+   if(insecure)
+   {
+      strcat(report, "*** Warning: Insecure mode selected.\n");
+   }
+
    sprintf(zs, "             Elapsed time: %ld minutes", (time(NULL) - start_time + 30) / 60);
    _log(GENERAL, zs);
    strcat(report, zs); strcat(report, "\n");
+   if(test_mode)
+   {
+      sprintf(zs, "Test mode.  No database changes made.");
+      _log(GENERAL, zs);
+      strcat(report, zs); strcat(report, "\n");
+      exit(0);
+   }
 
    for(i=0; i<MAXStats; i++)
    {
@@ -633,7 +657,9 @@ static void process_timetable(const char * string, const jsmntok_t * tokens)
          sprintf(zs, "SELECT count(*) from updates_processed where time = %ld", stamp);
          MYSQL_RES * result;
          MYSQL_ROW row;
-         if(db_connect()) return;
+
+         // Try twice in case database has gone away.
+         if(db_connect() && db_connect()) return;
          
          if (db_query(zs))
          {
@@ -1117,6 +1143,7 @@ static word fetch_file(void)
 
    stats[Fetches]++;
 
+   now = time(NULL);
    if(!opt_filename)
    {
       static CURL * curlh;
@@ -1138,15 +1165,14 @@ static word fetch_file(void)
       }
 
       // Build URL
+      when = now - 24*60*60;
+      broken = localtime(&when); // Note broken contains "yesterday"
       if(opt_url)
       {
          strcpy(url, opt_url);
       }
       else
       {
-         now = time(NULL);
-         when = now - 24*60*60;
-         broken = localtime(&when);
          if(fetch_all)
          {
             sprintf(url, "https://datafeeds.networkrail.co.uk/ntrod/CifFileAuthenticate?type=CIF_ALL_FULL_DAILY&day=toc-full");
@@ -1161,7 +1187,6 @@ static word fetch_file(void)
 
       if(opt_url || debug)
       {
-         now = time(NULL);
          sprintf(filepathz, "/tmp/cifdb-cif-fetch-%ld.gz", now);
          sprintf(filepath,  "/tmp/cifdb-cif-fetch-%ld",    now);
       }
@@ -1198,7 +1223,12 @@ static word fetch_file(void)
       curl_easy_setopt(curlh, CURLOPT_URL,     url);
       sprintf(zs, "%s:%s", conf.nr_user, conf.nr_pass);
       curl_easy_setopt(curlh, CURLOPT_USERPWD, zs);
-      curl_easy_setopt(curlh, CURLOPT_FOLLOWLOCATION,        1);
+      curl_easy_setopt(curlh, CURLOPT_FOLLOWLOCATION,        1);  // On receiving a 3xx response, follow the redirect.
+      if(insecure)
+      {
+         curl_easy_setopt(curlh, CURLOPT_SSL_VERIFYPEER, 0);
+         curl_easy_setopt(curlh, CURLOPT_SSL_VERIFYHOST, 0);
+      }
 
       total_bytes = 0;
 

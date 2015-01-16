@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2014 Phil Wieland
+    Copyright (C) 2014, 2015 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -33,14 +33,6 @@ BODY { background-color:white;
     stroke-width:4;
     fill:none;
 }
-/*
-.route
-{
-    stroke:#ffff00;
-    stroke-width:2;
-    fill:none;
-}
-*/
 .route
 {
     stroke:#ffff00;
@@ -75,11 +67,10 @@ BODY { background-color:white;
 }
 .platform-text
 {
-    font-size:8px;
-    fill:#000000;
-    fill-opacity:1;
+    font-size:9px;
     stroke:#000000;
     stroke-opacity:1;
+    stroke-width:0.5;
     font-family:Helvetica, Arial, sans-serif;
 }
 .describer
@@ -94,21 +85,26 @@ font-size:12px;stroke:#ffff00;stroke-opacity:1;font-family:Courier, monospace;
 }
 .describer-text-off
 {
-font-size:8px;stroke:#909090;stroke-opacity:1;font-family:Courier, monospace;
+font-size:8px;stroke:#909090;stroke-opacity:1;stroke-width:0.5;font-family:Courier, monospace;
 }
 .info-text
 {
 font-size:12px;stroke:#ffff00;stroke-opacity:1;font-family:Courier, monospace;
 }
+.title-text
+{
+    font-size:18px;
+    stroke:#000000;stroke-opacity:1;stroke-width:0.5;font-family:Helvetica, Arial, sans-serif;
+}
 .label-text
 {
     font-size:14px;
-    stroke:#000000;stroke-opacity:1;font-family:Helvetica, Arial, sans-serif;
+    stroke:#000000;stroke-opacity:1;stroke-width:0.5;font-family:Helvetica, Arial, sans-serif;
 }
 .label-text-small
 {
     font-size:10px;
-    fill:#000000;fill-opacity:1;stroke:#000000;stroke-opacity:1;font-family:Helvetica, Arial, sans-serif;
+    stroke:#000000;stroke-opacity:1;stroke-width:0.2;font-family:Helvetica, Arial, sans-serif;
 }
 .caption-text
 {

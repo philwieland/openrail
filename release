@@ -47,6 +47,7 @@ if [ "$1" = "all" -o "$1" = "livesig" ]; then
         sudo cp livesig.css        /var/www/friedbread/auxy/livesig.css
         sudo cp livesig.js         /var/www/friedbread/auxy/livesig.js
         m4 livesig.svg > /tmp/zzz.svg && sudo ./cpm /tmp/zzz.svg /var/www/friedbread/auxy/livesig.svg
+        m4 livesigXZ.svg > /tmp/zzz.svg && sudo ./cpm /tmp/zzz.svg /var/www/friedbread/auxy/livesigXZ.svg
     else
         if [ "$host" = "oakwood" ]; then
             echo "Releasing livesig for oakwood"
@@ -54,12 +55,14 @@ if [ "$1" = "all" -o "$1" = "livesig" ]; then
             sudo cp livesig.css        /var/www/auxy/livesig.css
             sudo cp livesig.js         /var/www/auxy/livesig.js
             m4 livesig.svg > /tmp/zzz.svg && sudo ./cpm /tmp/zzz.svg /var/www/auxy/livesig.svg
+            m4 livesigXZ.svg > /tmp/zzz.svg && sudo ./cpm /tmp/zzz.svg /var/www/auxy/livesigXZ.svg
         else
             echo "Releasing livesig"
             sudo cp livesig.cgi        /usr/lib/cgi-bin/livesig.cgi
             sudo cp livesig.css        /var/www/auxy/livesig.css
             sudo cp livesig.js         /var/www/auxy/livesig.js
             m4 livesig.svg > /tmp/zzz.svg && sudo cp /tmp/zzz.svg /var/www/auxy/livesig.svg
+            m4 livesigXZ.svg > /tmp/zzz.svg && sudo cp /tmp/zzz.svg /var/www/auxy/livesigXZ.svg
         fi
     fi
     DONE="livesig"

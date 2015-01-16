@@ -25,11 +25,16 @@ var got_handle = 32767;
 var req;
 var req_cache = null;
 var req_cache_k;
-var req_cache_timout = 0;
+var req_cache_timeout = 0;
 var feed_failed = 0;
 var progress = 0;
 
 var svg_doc;
+
+// Coordinates of progress wheel
+var progress_points;
+
+var map_designator;
 
 var SLOTS = 12;
 var displayed = new Array(SLOTS);
@@ -37,12 +42,18 @@ var cache_k   = new Array(SLOTS);
 var cache_v   = new Array(SLOTS);
 var cache_s   = new Array(SLOTS);
 
-function startup()
+function startup(map)
 {
    setInterval('tick()', refresh_tick);
    refresh_count = 0;
    updating_timeout = 0;
    req_cache_timeout = 0;
+   map_designator = map;
+   svg_doc = document.getElementById('diagram').contentDocument;
+   // Get co-ordinates
+   var z = svg_doc.getElementById('progress').getAttribute('points').split(' ');
+   progress_points = z[0].split(',');
+
 }
 
 function tick()
@@ -95,13 +106,14 @@ function tick()
             }
          }
       }
-      req.open('GET', url_base + 'U/' + got_handle, true);
+      req.open('GET', url_base + 'U/' + got_handle + '/' + map_designator, true);
       req.send(null);
    }
 }
 
 function process_updates(text)
 {
+   // Note that we may get an update with a handle but no updates in it, which should be handled quietly.
    var results = text.split("\n");
 
    var index = 1; // Index of first data line.
@@ -113,8 +125,6 @@ function process_updates(text)
       return;
    }
       
-   svg_doc = document.getElementById('diagram').contentDocument;
-
    got_handle = results[index - 1];
    while(results.length > index && results[index].length > 4 && (results[index].substr(2, 1) === 'b' || results[index].substr(2, 1) === 's'))
    {
@@ -155,7 +165,8 @@ function process_updates(text)
    // Progress wheel
    progress += 40;
    if(progress > 360) progress -= 360;
-   svg_doc.getElementById('progress').setAttribute('transform', 'rotate(' + progress + ',415,275)');
+
+   svg_doc.getElementById('progress').setAttribute('transform', 'rotate(' + progress + ',' + progress_points[0] + ',' + progress_points[1] + ')');
 }
 
 function update_berth(k, v)

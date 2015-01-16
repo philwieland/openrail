@@ -1,4 +1,4 @@
-define(`BUILD', `VA18')dnl
+define(`BUILD', `VB19')dnl
 define(`DESCRIBER', `<rect x="$1" y="eval(($2) - 6)" width="32" height="12" class="describer" title="$5"/><text x="eval(($1) + 2)"  y="eval(($2) + 4)" class="describer-text-off" id="$3b$4off" title="$5">$4</text><text x="eval(($1) + 2)"  y="eval(($2) + 4)" class="describer-text" id="$3b$4" title="$5"></text>')dnl
 define(`SIGNALUR', `<polyline points="$1,eval(($2)+2) $1,eval(($2)+7) eval(($1)+7),eval(($2)+7)" class="sig-line"/><circle cx="eval(($1)+9)" cy="eval(($2)+7)" r="4" stroke="black" stroke-width="0" fill="black" id="$3s$4" title="$5"/>')dnl
 define(`SIGNALUL', `<polyline points="$1,eval(($2)-2) $1,eval(($2)-7) eval(($1)+7),eval(($2)-7)" class="sig-line"/><circle cx="eval(($1)+9)" cy="eval(($2)-7)" r="4" stroke="black" stroke-width="0" fill="black" id="$3s$4" title="$5"/>')dnl
@@ -101,7 +101,7 @@ define(`ARROWD', `<line x1="$1" y1="$2" x2="eval(($1)-20)" y2="$2" class="arrow"
     <polyline points="680,145 640,145 600,105 567,105" class="track"/><!-- Dn CM to P2 -->
 <!-- Routes -->
     <polyline points="567,80 600,80 625,105 635,105 655,125 680,125" class="route" id="M1s055"/> <!-- P3 to Up CM -->
-    <!--<polyline points="680,125 655,125 635,105 625,105 600,80 567,80" class="route" id="M1s0xx"/>--> <!-- Up CM to P3 -->
+    <!--<polyline points="680,125 655,125 635,105 625,105 600,80 567,80" class="route" id="M1s0xx"/>--> <!-- Up CM to P2 -->
     <polyline points="567,80 600,80 630,50 640,50" class="route" id="M1s054"/> <!-- P3 to Up St H -->
     <polyline points="690,70 670,70 635,105 567,105" class="route" id="M1s061"/> <!-- Dn StH to P2 -->
     <polyline points="680,145 640,145 620,125 549,125" class="route" id="M1s052"/> <!-- Dn CM to P1 -->
@@ -160,18 +160,17 @@ define(`ARROWD', `<line x1="$1" y1="$2" x2="eval(($1)-20)" y2="$2" class="arrow"
     <polyline points="1120,125 1240,125" class="track-off"/>
     <polyline points="1240,145  680,145" class="track"/>
 
-    <!--Berth 1577 and signal LL1577 No Details Available yet -->
-    <!--DESCRIBER(680, 125, M1, 1577, 1577) SIGNALDR(677, 125, M1, 0xx, `LL1577 Position Light Signal') -->
     <polyline points="680,125 730,125" class="track"/>
+    DESCRIBER(680, 125, M1, 1577, 1577) SIGNALDR(677, 125, M1, 000, `LL1577 Position Light Signal')
     DESCRIBER(680, 145, M1, 3585, 3585) SIGNALDL(677, 145, M1, 015, LL3585)
 
-    DESCRIBER(730,  125, M1, 3584, 3584) SIGNALUL(765, 125, M1, 014, LL3584)
+    DESCRIBER(715,  125, M1, 3584, 3584) SIGNALUL(750, 125, M1, 014, LL3584)
 
     DESCRIBER(780, 125, M1, 3582, 3582) SIGNALUL(815, 125, M1, 013, LL3582)
     DESCRIBER(780, 145, M1, 3581, 3581) SIGNALDL(777, 145, M1, 012, LL3581)
 
-    <text x="700" y="115" class="label-text-small">Up Chat Moss</text>
-    ARROWU(770, 112)
+    <text x="700" y="110" class="label-text-small">Up Chat Moss</text>
+    ARROWU(770, 107)
     <text x="700" y="165" class="label-text-small">Down Chat Moss</text>
     ARROWD(695, 162)
 
@@ -202,11 +201,6 @@ define(`ARROWD', `<line x1="$1" y1="$2" x2="eval(($1)-20)" y2="$2" class="arrow"
     DESCRIBER(1160, 145, M1, W586, W586)
 
     DESCRIBER(1200, 145, M1, W584, W584)
-
-
-<!-- --------------------------------------------------------------------------------- -->
-
-
 
     <text class="caption-text">
       <tspan x="430" y="282" id="caption"></tspan>

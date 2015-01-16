@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2013,2014 Phil Wieland
+    Copyright (C) 2013, 2014 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -56,7 +56,7 @@ static const char * const show_cape_reason(const char * const code);
 static word get_sort_time(const char const * buffer);
 
 #define NAME "Live Rail"
-#define BUILD "VA30"
+#define BUILD "W114"
 
 #define COLUMNS_NORMAL 6
 #define COLUMNS_PANEL 4
@@ -104,6 +104,9 @@ static const char * days_runs[8] = {"runs_su", "runs_mo", "runs_tu", "runs_we", 
 
 // (Hours * 60 + Minutes) * 4
 #define DAY_START  4*60*4
+
+// Message rate average over period (Seconds)
+#define MESSAGE_RATE_PERIOD (5 * 60)
 
 // location name cache
 #define CACHE_SIZE 16
@@ -173,7 +176,7 @@ int main()
          l = j;
       }
    }
-   if(k) parameters[j++][k] - '\0';
+   if(k) parameters[j++][k] = '\0';
 
    while(j < 10) parameters[j++][0] = '\0';
 
@@ -365,9 +368,10 @@ static void display_control_panel(const char * const location, const time_t when
 
    printf("&nbsp;</td><td width=\"4%%\"></td><td class=\"control-panel-row\">&nbsp;Auto-refresh&nbsp;<input type=\"checkbox\" id=\"ar\" onclick=\"ar_onclick();\"%s>&nbsp;\n", refresh?" checked":"");
    
-   printf("</td><td id=\"progress\" class=\"control-panel-row\" style=\"display:none;\" width=\"1%%\" valign=\"top\">&nbsp;");
+   //printf("</td><td id=\"progress\" class=\"control-panel-row\" style=\"display:none;\" width=\"1%%\" valign=\"top\">&nbsp;");
+   printf("</td><td id=\"progress\" class=\"control-panel-row\" width=\"1%%\" valign=\"top\">&nbsp;");
 
-   printf("</td></tr></table>");
+   printf("</td></tr></table>\n");
 }
 
 
@@ -962,7 +966,13 @@ static void depsheet(void)
             report_train_summary(call_sequence[index], when, cif_schedule_count);
          }
       }
-      if(mode == SUMMARY) printf("</table>\n");
+
+      // If no trains at all, tail won't get printed.
+      if(!cif_schedule_count)
+      {
+         if(mode == SUMMARY || mode == DEPART || mode == PANEL) printf("</tr></table>\n");
+      }
+      //if(mode == SUMMARY || mode == DEPART|| mode == PANEL) printf("</table>\n");
       break;
 
    case FULL:
@@ -1058,7 +1068,7 @@ static void report_train(const word index, const time_t when, const word huyton_
          // TRUST
          {
             char query[512], zs[128], zs1[128], report[1024], class[32];
-            word deduced;
+            word deduced = false;
             MYSQL_RES * result2;
             MYSQL_ROW row2;
             report[0] = class[0] = '\0';
@@ -1196,10 +1206,10 @@ static void report_train_summary(const word index, const time_t when, const word
    char query[1024];
    static word trains, rows, train, row, bus, shown;
    static word nlate, ncape, nbus, ndeduced, narrival;
-   word vstp, status, mobile_sched, mobile_sched_unmung, mobile_act;
+   word status, mobile_sched, mobile_sched_unmung, mobile_act;
    char actual[16];
    word deviation, deduced, late;
-   char train_details[256], train_time[16], destination[128], analysis[64], mobile_analysis[32];
+   char train_details[256], train_time[16], destination[128], analysis_text[32], analysis_class[32], mobile_analysis[32];
    struct tm * broken;
 
    word terminates = false;
@@ -1229,7 +1239,7 @@ static void report_train_summary(const word index, const time_t when, const word
       else if(modef[mode] & 0x0008) // Supports smart updates.
       {
          printf("\n<input type=\"hidden\" id=\"display_handle\" value=\"%d%02d%s\">", trains, broken->tm_mday, BUILD);
-         printf("<table><tr>");
+         printf("<table><tr>"); // Start of outer table
       }
       return;
    }
@@ -1237,12 +1247,12 @@ static void report_train_summary(const word index, const time_t when, const word
    // Before print
    if(row && (!(row % rows)))
    {
-      if(mode == SUMMARY || mode == DEPART || mode == PANEL) printf("</table></td>\n");
+      if(mode == SUMMARY || mode == DEPART || mode == PANEL) printf("</table></td>\n"); // end of inner table, end of outer td
    }
 
    if((!(row % rows)) && row < trains)
    {
-      if(mode == SUMMARY || mode == DEPART || mode == PANEL) printf("<td><table class=\"summ-table\"><tr class=\"summ-table-head\"><th colspan=2>&nbsp;</th><th>Report</th></tr>\n");
+      if(mode == SUMMARY || mode == DEPART || mode == PANEL) printf("<td><table class=\"summ-table\"><tr class=\"summ-table-head\"><th colspan=2>&nbsp;</th><th>Report</th></tr>\n"); // start of outer td, start of inner table
    }
  
    //                     0             1                    2                  3              4              5                  6           
@@ -1254,7 +1264,7 @@ static void report_train_summary(const word index, const time_t when, const word
 
       if((row0 = mysql_fetch_row(result0)))
       {
-         vstp = (row0[6][0] == '0' && row0[6][1] == 0);
+         // vstp = (row0[6][0] == '0' && row0[6][1] == 0);
          bus = (row0[0][0] == 'B' || row0[0][0] == '5');
 
          // To
@@ -1293,15 +1303,23 @@ static void report_train_summary(const word index, const time_t when, const word
          switch(mode)
          {
          case DEPART:
-         case PANEL:
          case DEPARTU:
+            if(calls[index].public_departure[0])
+               strcpy(train_time, calls[index].public_departure);
+            else
+               strcpy(train_time, calls[index].departure);
+            // Link and destination
+            sprintf(train_details, "<a class=\"linkbutton-summary\" href=\"%strain/%ld/%s\">%s</a>", URL_BASE, calls[index].cif_schedule_id, show_date(start_date, false), destination);
+            break;
+
+         case PANEL:
          case PANELU:
             if(calls[index].public_departure[0])
                strcpy(train_time, calls[index].public_departure);
             else
                strcpy(train_time, calls[index].departure);
-            // Link and time and destination
-            sprintf(train_details, "<a class=\"linkbutton-summary\" href=\"%strain/%ld/%s\">%s</a>", URL_BASE, calls[index].cif_schedule_id, show_date(start_date, false), destination);
+            // NO LINK, destination
+            sprintf(train_details, "%s", destination);
             break;
 
          case SUMMARY:
@@ -1415,7 +1433,7 @@ static void report_train_summary(const word index, const time_t when, const word
                                        time_t planned_timestamp = atol(row1[5]);
                                        struct tm * broken = localtime(&planned_timestamp);
                                        word planned = broken->tm_hour * 60 + broken->tm_min;
-                                       if(planned > sched - 3 && planned < sched + 3) // This might fail close to midnight!
+                                       if(planned > sched - 8 && planned < sched + 8) // This might fail close to midnight!
                                        {
                                           // Near enough!
                                           status = Departed;
@@ -1437,7 +1455,7 @@ static void report_train_summary(const word index, const time_t when, const word
                                     time_t planned_timestamp = atol(row1[5]);
                                     struct tm * broken = localtime(&planned_timestamp);
                                     word planned = broken->tm_hour * 60 + broken->tm_min;
-                                    if(planned > sched - 6 && planned < sched + 6) // This might fail close to midnight!
+                                    if(planned > sched - 8 && planned < sched + 8) // This might fail close to midnight!
                                     {
                                        // Near enough!
                                        status = Arrived;
@@ -1473,30 +1491,33 @@ static void report_train_summary(const word index, const time_t when, const word
    case NoReport: 
       if(bus) 
       {
-         sprintf(analysis, "<td>(Bus)");
+         strcpy(analysis_text, "(Bus)");
+         strcpy(analysis_class, "");
          strcpy(mobile_analysis, "Bus");
          nbus++;
       }
       else 
       {
-         sprintf(analysis, "<td>&nbsp"); 
+         strcpy(analysis_text, "&nbsp"); 
+         strcpy(analysis_class, "");
          strcpy(mobile_analysis, "");
       }
       strcpy(row_class, "summ-table-idle");
       break;
 
    case Activated:
-      sprintf(analysis, "<td>Activated");
+      strcpy(analysis_text, "Activated");
+      strcpy(analysis_class, "");
       strcpy(mobile_analysis, "Act");
       strcpy(row_class, "summ-table-act");
       break;
 
    case Moving:
       strcpy(row_class, "summ-table-move");
-      if(!deviation ) sprintf(analysis, "<td class=\"summ-table-good\">Exp. On time");
-      else if(deviation < 3) sprintf(analysis, "<td class=\"summ-table-good\">Exp. %s %d%s",  show_expected_time(train_time, deviation, late), deviation, late?"L":"E");
-      else if(deviation < 6) sprintf(analysis, "<td class=\"summ-table-minor\">Exp. %s %d%s", show_expected_time(train_time, deviation, late), deviation, late?"L":"E");
-      else                   sprintf(analysis, "<td class=\"summ-table-major\">Exp. %s %d%s", show_expected_time(train_time, deviation, late), deviation, late?"L":"E");
+      if(!deviation )        { sprintf(analysis_text, "Exp. On time"); strcpy(analysis_class, "summ-table-good"); }
+      else if(deviation < 3) { sprintf(analysis_text, "Exp. %s %d%s",  show_expected_time(train_time, deviation, late), deviation, late?"L":"E"); strcpy(analysis_class, "summ-table-good"); }
+      else if(deviation < 6) { sprintf(analysis_text, "Exp. %s %d%s", show_expected_time(train_time, deviation, late), deviation, late?"L":"E"); strcpy(analysis_class, "summ-table-minor"); }
+      else                   { sprintf(analysis_text, "Exp. %s %d%s", show_expected_time(train_time, deviation, late), deviation, late?"L":"E"); strcpy(analysis_class, "summ-table-major"); }
       sprintf(mobile_analysis, "%d%s", deviation, late?"L":"E");
       if(deviation >= 3) nlate++;
       mobile_act = mobile_sched + (late?deviation:(-deviation));
@@ -1504,7 +1525,8 @@ static void report_train_summary(const word index, const time_t when, const word
 
    case Cancelled:
       strcpy(row_class, "summ-table-cape");
-      sprintf(analysis, "<td class=\"small-table-crit\">Cancelled");
+      sprintf(analysis_text, "Cancelled");
+      strcpy(analysis_class, "small-table-crit");
       strcpy(mobile_analysis, "Can");
       ncape++;
       break;
@@ -1512,10 +1534,10 @@ static void report_train_summary(const word index, const time_t when, const word
    case Arrived:
    case Departed:
       strcpy(row_class, "summ-table-gone");
-      if(!deviation ) sprintf(analysis, "<td class=\"summ-table-good\">On time");
-      else if(deviation < 3) sprintf(analysis, "<td class=\"summ-table-good\">%s %d%s",  show_trust_time_nocolon(actual, true), deviation, late?"L":"E");
-      else if(deviation < 6) sprintf(analysis, "<td class=\"summ-table-minor\">%s %d%s", show_trust_time_nocolon(actual, true), deviation, late?"L":"E");
-      else                   sprintf(analysis, "<td class=\"summ-table-major\">%s %d%s", show_trust_time_nocolon(actual, true), deviation, late?"L":"E");
+      if(!deviation )        { sprintf(analysis_text, "On time"); strcpy(analysis_class, "summ-table-good"); }
+      else if(deviation < 3) { sprintf(analysis_text, "%s %d%s",  show_trust_time_nocolon(actual, true), deviation, late?"L":"E"); strcpy(analysis_class, "summ-table-good"); }
+      else if(deviation < 6) { sprintf(analysis_text, "%s %d%s", show_trust_time_nocolon(actual, true), deviation, late?"L":"E"); strcpy(analysis_class, "summ-table-minor"); }
+      else                   { sprintf(analysis_text, "%s %d%s", show_trust_time_nocolon(actual, true), deviation, late?"L":"E"); strcpy(analysis_class, "summ-table-major"); }
       sprintf(mobile_analysis, "%d%s", deviation, late?"L":"E");
       if(deviation >= 3) nlate++;
       mobile_act = mobile_sched + (late?deviation:(-deviation));
@@ -1538,7 +1560,8 @@ static void report_train_summary(const word index, const time_t when, const word
    case SUMMARYU:
    case DEPARTU:
    case PANELU:
-      printf("tr%d%d|%s|<td>%s</td><td>%s</td>%s", row/rows, row%rows, row_class, train_time, train_details, analysis );
+      //printf("tr%d%d|%s|<td>%s</td><td>%s</td>%s", row/rows, row%rows, row_class, train_time, train_details, analysis );
+      printf("tr%d%d|%s|%s|%s", row/rows, row%rows, row_class, analysis_class, analysis_text);
       if(deduced || (status == Arrived && !terminates))
       {
          printf("&nbsp;<span class=\"symbols\">");
@@ -1546,13 +1569,13 @@ static void report_train_summary(const word index, const time_t when, const word
          if(status == Arrived && !terminates) printf("&alpha;");
          printf("</span>");
       }
-      printf("</td>\n");
+      printf("\n");
       break;
 
    case SUMMARY:
    case DEPART:
    case PANEL:
-      printf("<tr id=\"tr%d%d\" class=\"%s\"><td>%s</td><td>%s</td>%s", row/rows, row%rows, row_class, train_time, train_details, analysis);
+      printf("<tr id=\"tr%d%d\" class=\"%s\"><td>%s</td><td>%s</td><td id=\"tr%d%dr\" class=\"%s\">%s", row/rows, row%rows, row_class, train_time, train_details, row/rows, row%rows, analysis_class, analysis_text);
       
       // Symbols
       if(deduced || (status == Arrived && !terminates))
@@ -1599,15 +1622,15 @@ static void report_train_summary(const word index, const time_t when, const word
       // Last column of outer table - Key
       if(modef[mode] & 0x0002) // Update
       {
-         printf("tr%d9|summ-table-idle|<td>%d trains.</td>\n", COLUMNS, trains - nbus);
-         printf("tr%d10|summ-table-idle|<td%s>%d not on time.</td>\n", COLUMNS, nlate?" class=\"summ-table-minor\"":"", nlate);
-         printf("tr%d11|summ-table-idle|<td%s>%d cancelled.</td>\n", COLUMNS, ncape?" class=\"summ-table-cape\"":"", ncape);
-         printf("tr%d12|summ-table-idle|<td>%d buses.</td>\n", COLUMNS, nbus);
-         printf("tr%d13|summ-table-idle|<td>%d activation deduced.</td>\n", COLUMNS, ndeduced);
-         printf("tr%d14|summ-table-idle|<td>%d departure not reported.</td>\n", COLUMNS, narrival);
+         printf("tr%d9|summ-table-idle||%d trains.\n", COLUMNS, trains - nbus);
+         printf("tr%d10|summ-table-idle|%s|%d not on time.\n", COLUMNS, nlate?"summ-table-minor":"", nlate);
+         printf("tr%d11|summ-table-idle|%s|%d cancelled.\n", COLUMNS, ncape?"summ-table-cape":"", ncape);
+         printf("tr%d12|summ-table-idle||%d buses.\n", COLUMNS, nbus);
+         printf("tr%d13|summ-table-idle||%d activation deduced.\n", COLUMNS, ndeduced);
+         printf("tr%d14|summ-table-idle||%d departure not reported.\n", COLUMNS, narrival);
          if(mode == PANELU)
          {
-            printf("tr%d19|summ-table-idle|<td>%s</td>\n", COLUMNS, time_text(time(NULL), 1));
+            printf("tr%d19|summ-table-idle||%s\n", COLUMNS, time_text(time(NULL), 1));
             display_status_panel(COLUMNS);
          }
       }
@@ -1623,12 +1646,12 @@ static void report_train_summary(const word index, const time_t when, const word
          printf("<tr class=\"summ-table-idle\"><td>&nbsp;</td></tr>");
          printf("<tr class=\"summ-table-idle\"><td>&nbsp;</td></tr>");
          printf("<tr class=\"summ-table-head\"><th>Statistics</th></tr>\n");
-         printf("<tr id=\"tr%d9\" class=\"summ-table-idle\"><td>%d trains.</td></tr>", COLUMNS, trains - nbus);
-         printf("<tr id=\"tr%d10\" class=\"summ-table-idle\"><td%s>%d not on time.</td></tr>", COLUMNS, nlate?" class=\"summ-table-minor\"":"", nlate);
-         printf("<tr id=\"tr%d11\" class=\"summ-table-idle\"><td%s>%d cancelled.</td></tr>", COLUMNS, ncape?" class=\"summ-table-cape\"":"", ncape);
-         printf("<tr id=\"tr%d12\" class=\"summ-table-idle\"><td>%d buses.</td></tr>", COLUMNS, nbus);
-         printf("<tr id=\"tr%d13\" class=\"summ-table-idle\"><td>%d activation deduced.</td></tr>", COLUMNS, ndeduced);
-         printf("<tr id=\"tr%d14\" class=\"summ-table-idle\"><td>%d departure not reported.</td></tr>", COLUMNS, narrival);
+         printf("<tr id=\"tr%d9\" class=\"summ-table-idle\"><td id=\"tr%d9r\">%d trains.</td></tr>", COLUMNS, COLUMNS, trains - nbus);
+         printf("<tr id=\"tr%d10\" class=\"summ-table-idle\"><td id=\"tr%d10r\"%s>%d not on time.</td></tr>", COLUMNS, COLUMNS, nlate?" class=\"summ-table-minor\"":"", nlate);
+         printf("<tr id=\"tr%d11\" class=\"summ-table-idle\"><td id=\"tr%d11r\"%s>%d cancelled.</td></tr>", COLUMNS, COLUMNS, ncape?" class=\"summ-table-cape\"":"", ncape);
+         printf("<tr id=\"tr%d12\" class=\"summ-table-idle\"><td id=\"tr%d12r\">%d buses.</td></tr>", COLUMNS, COLUMNS, nbus);
+         printf("<tr id=\"tr%d13\" class=\"summ-table-idle\"><td id=\"tr%d13r\">%d activation deduced.</td></tr>", COLUMNS, COLUMNS, ndeduced);
+         printf("<tr id=\"tr%d14\" class=\"summ-table-idle\"><td id=\"tr%d14r\">%d departure not reported.</td></tr>", COLUMNS, COLUMNS, narrival);
          if(mode != PANEL)
          {
             row = 14;
@@ -1639,28 +1662,30 @@ static void report_train_summary(const word index, const time_t when, const word
             printf("<tr class=\"summ-table-idle\"><td>&nbsp;</td></tr>"); //16
             printf("<tr class=\"summ-table-head\"><th>System Status</th></tr>\n"); // 17
             printf("<tr class=\"summ-table-idle\"><td>Display updated:</td></tr>"); // 18
-            printf("<tr id=\"tr%d19\" class=\"summ-table-idle\"><td>&nbsp;</td></tr>", COLUMNS); // 19
+            printf("<tr id=\"tr%d19\" class=\"summ-table-idle\"><td id=\"tr%d19r\">&nbsp;</td></tr>", COLUMNS, COLUMNS); // 19
             printf("<tr class=\"summ-table-idle\"><td>Timetable updated:</td></tr>"); // 20
-            printf("<tr id=\"tr%d21\" class=\"summ-table-idle\"><td>&nbsp;</td></tr>", COLUMNS); // 21
+            printf("<tr id=\"tr%d21\" class=\"summ-table-idle\"><td id=\"tr%d21r\">&nbsp;</td></tr>", COLUMNS, COLUMNS); // 21
             printf("<tr class=\"summ-table-idle\"><td>VSTP updated:</td></tr>"); // 22
-            printf("<tr id=\"tr%d23\" class=\"summ-table-idle\"><td>&nbsp;</td></tr>", COLUMNS); // 23
+            printf("<tr id=\"tr%d23\" class=\"summ-table-idle\"><td id=\"tr%d23r\">&nbsp;</td></tr>", COLUMNS, COLUMNS); // 23
             printf("<tr class=\"summ-table-idle\"><td>TRUST updated:</td></tr>"); // 24
-            printf("<tr id=\"tr%d25\" class=\"summ-table-idle\"><td>&nbsp;</td></tr>", COLUMNS); // 25
-            printf("<tr class=\"summ-table-idle\"><td>TD updated:</td></tr>"); // 26
-            printf("<tr id=\"tr%d27\" class=\"summ-table-idle\"><td>&nbsp;</td></tr>", COLUMNS); // 27
-            printf("<tr class=\"summ-table-idle\"><td>Disc free space:</td></tr>"); // 28
-            printf("<tr id=\"tr%d29\" class=\"summ-table-idle\"><td>&nbsp;</td></tr>", COLUMNS); // 29
+            printf("<tr id=\"tr%d25\" class=\"summ-table-idle\"><td id=\"tr%d25r\">&nbsp;</td></tr>", COLUMNS, COLUMNS); // 25
+            printf("<tr id=\"tr%d26\" class=\"summ-table-idle\"><td id=\"tr%d26r\">&nbsp;</td></tr>", COLUMNS, COLUMNS); // 26
+            printf("<tr class=\"summ-table-idle\"><td>TD updated:</td></tr>"); // 27
+            printf("<tr id=\"tr%d28\" class=\"summ-table-idle\"><td id=\"tr%d28r\">&nbsp;</td></tr>", COLUMNS, COLUMNS); // 28
+            printf("<tr id=\"tr%d29\" class=\"summ-table-idle\"><td id=\"tr%d29r\">&nbsp;</td></tr>", COLUMNS, COLUMNS); // 29
+            printf("<tr class=\"summ-table-idle\"><td>Disc free space:</td></tr>"); // 30
+            printf("<tr id=\"tr%d31\" class=\"summ-table-idle\"><td id=\"tr%d31r\">&nbsp;</td></tr>", COLUMNS, COLUMNS); // 31
 
-            row = 29;
+            row = 31;
          }
 
          while((row++) % rows)
          {
             printf("<tr class=\"summ-table-idle\" id=\"tr%d%d\"><td>&nbsp;</td></tr>\n", COLUMNS, row);
          }
-         printf("</table>");
+         printf("</table>");// End of inner table
             
-         printf("</td></tr></table>\n");
+         printf("</td></tr></table>\n"); // End of last column, end of outer table
       }
    }
    return;
@@ -2942,7 +2967,7 @@ static void display_status(void)
          strcpy(status_text, time_text(when, true));
       }
    }
-   printf("<tr><td class=\"status-head\"colspan=2><br>Timetable feed</td></tr>");
+   printf("<tr><td class=\"status-head\" colspan=2><br>Timetable feed</td></tr>");
    printf("<tr><td class=\"status-text\">Last update timestamp </td>");
    printf("<td class=\"status%d\"> %s </td>\n", status, status_text);
    printf("</tr>\n");
@@ -2974,7 +2999,7 @@ static void display_status(void)
          }
       }
    }
-   printf("<tr><td class=\"status-head\"colspan=2><br>VSTP feed</td></tr>");
+   printf("<tr><td class=\"status-head\" colspan=2><br>VSTP feed</td></tr>");
    printf("<tr><td class=\"status-text\">Last message processed </td>");
    printf("<td class=\"status%d\"> %s </td>\n", status, status_text);
    printf("</tr>\n");
@@ -3006,8 +3031,8 @@ static void display_status(void)
          }
       }
    }
-   printf("<tr><td class=\"status-head\"colspan=2><br>Train movement feed</td></tr>");
-   printf("<tr><td class=\"status-text\">Most recent movement </td>");
+   printf("<tr><td class=\"status-head\" colspan=2><br>Train movement feed</td></tr>");
+   printf("<tr><td class=\"status-text\">Most recent timestamp </td>");
    printf("<td class=\"status%d\"> %s </td>\n", status, status_text);
    printf("</tr>\n");
 
@@ -3036,15 +3061,50 @@ static void display_status(void)
             }
          }
       }
+      mysql_free_result(result);
    }
    printf("<tr><td class=\"status-text\">Last message processed </td>");
+   printf("<td class=\"status%d\"> %s </td>\n", status, status_text);
+   printf("</tr>\n");
+
+   status = 3;
+   strcpy(status_text, "Failed to read database.");
+
+   sprintf(q, "SELECT time, count from message_count WHERE application = 'trustdb' and time >= %ld ORDER BY time", now - MESSAGE_RATE_PERIOD);
+   if(!db_query(q))
+   {
+      strcpy(status_text, "Unknown.");
+      status = 2;
+      result = db_store_result();
+      if((row = mysql_fetch_row(result))) 
+      {
+         time_t start = atol(row[0]);
+         dword count = 0;
+         time_t end = 0;
+         while((row = mysql_fetch_row(result)))
+         {
+            end = atol(row[0]);
+            count += atol(row[1]);
+         }
+
+         if(end > start)
+         {
+            dword rate = count * 60 / (end - start);
+            if(rate < 10) status = 2;
+            else if(rate < 100) status = 1;
+            else status = 0;
+            sprintf(status_text, "%ld per minute.", rate);
+         }
+      }
+   }
+   printf("<tr><td class=\"status-text\">Message process rate </td>");
    printf("<td class=\"status%d\"> %s </td>\n", status, status_text);
    printf("</tr>\n");
 
    // TD feed
    status = 3;
    strcpy(status_text, "Failed to read database.");
-   sprintf(q, "SELECT last_td_actual FROM status");
+   sprintf(q, "SELECT last_timestamp FROM td_status ORDER BY last_timestamp DESC");
    if(!db_query(q))
    {
       result = db_store_result();
@@ -3067,7 +3127,7 @@ static void display_status(void)
          }
       }
    }
-   printf("<tr><td class=\"status-head\"colspan=2><br>Train describer feed</td></tr>");
+   printf("<tr><td class=\"status-head\" colspan=2><br>Train describer feed</td></tr>");
    printf("<tr><td class=\"status-text\">Most recent timestamp </td>");
    printf("<td class=\"status%d\"> %s </td>\n", status, status_text);
    printf("</tr>\n");
@@ -3101,6 +3161,73 @@ static void display_status(void)
    printf("<td class=\"status%d\"> %s </td>\n", status, status_text);
    printf("</tr>\n");
 
+   status = 3;
+   strcpy(status_text, "Failed to read database.");
+
+   sprintf(q, "SELECT time, count from message_count WHERE application = 'tddb' and time >= %ld ORDER BY time", now - MESSAGE_RATE_PERIOD);
+   if(!db_query(q))
+   {
+      strcpy(status_text, "Unknown.");
+      status = 2;
+      result = db_store_result();
+      if((row = mysql_fetch_row(result))) 
+      {
+         time_t start = atol(row[0]);
+         dword count = 0;
+         time_t end = 0;
+         while((row = mysql_fetch_row(result)))
+         {
+            end = atol(row[0]);
+            count += atol(row[1]);
+         }
+
+         if(end > start)
+         {
+            dword rate = count * 60 / (end - start);
+            if(rate < 10) status = 2;
+            else if(rate < 100) status = 1;
+            else status = 0;
+            sprintf(status_text, "%ld per minute.", rate);
+         }
+      }
+   }
+   printf("<tr><td class=\"status-text\">Message process rate </td>");
+   printf("<td class=\"status%d\"> %s </td>\n", status, status_text);
+   printf("</tr>\n");
+
+   status = 3;
+   strcpy(status_text, "Failed to read database.");
+
+   sprintf(q, "SELECT time, count from message_count WHERE application = 'tddbrel' and time >= %ld ORDER BY time", now - MESSAGE_RATE_PERIOD);
+   if(!db_query(q))
+   {
+      strcpy(status_text, "Unknown.");
+      status = 2;
+      result = db_store_result();
+      if((row = mysql_fetch_row(result))) 
+      {
+         time_t start = atol(row[0]);
+         dword count = 0;
+         time_t end = 0;
+         while((row = mysql_fetch_row(result)))
+         {
+            end = atol(row[0]);
+            count += atol(row[1]);
+         }
+
+         if(end > start)
+         {
+            dword rate = count * 60 / (end - start);
+            if(rate < 2) status = 2;
+            else status = 0;
+            sprintf(status_text, "%ld per minute.", rate);
+         }
+      }
+   }
+   printf("<tr><td class=\"status-text\">Relevant message process rate </td>");
+   printf("<td class=\"status%d\"> %s </td>\n", status, status_text);
+   printf("</tr>\n");
+
    // Disc space
    status = 3;
    strcpy(status_text, "Failed to read disc data.");
@@ -3111,13 +3238,13 @@ static void display_status(void)
          qword free = fstatus.f_bavail * fstatus.f_bsize;
          qword total = fstatus.f_blocks * fstatus.f_bsize;
          qword perc = total?(free*100/total):0;
-         if(perc < 10) status = 2;
-         else if (perc < 25) status = 1;
+         if(perc < 5) status = 2;
+         else if (perc < 10) status = 1;
          else status = 0;
          sprintf(status_text, "%s bytes (%lld%%)", commas_q(free), perc);
       }
    }
-   printf("<tr><td class=\"status-head\"colspan=2><br>Disc</td></tr>");
+   printf("<tr><td class=\"status-head\" colspan=2><br>Disc</td></tr>");
    printf("<tr><td class=\"status-text\">Free space </td>");
    printf("<td class=\"status%d\"> %s</td>\n", status, status_text);
    printf("</tr>\n");
@@ -3150,7 +3277,7 @@ static void display_status_panel(const word column)
          strcpy(status_text, time_text(when, true));
       }
    }
-   printf("tr%d21|status%d|<td>%s</td>\n", column, status, status_text);
+   printf("tr%d21|status%d||%s\n", column, status, status_text);
 
    // VSTP
    status = 3;
@@ -3179,7 +3306,7 @@ static void display_status_panel(const word column)
          }
       }
    }
-   printf("tr%d23|status%d|<td>%s</td>\n", column, status, status_text);
+   printf("tr%d23|status%d||%s\n", column, status, status_text);
 
    // Train movement feed
    status = 3;
@@ -3208,12 +3335,44 @@ static void display_status_panel(const word column)
          }
       }
    }
-   printf("tr%d25|status%d|<td>%s</td>\n", column, status, status_text);
+   printf("tr%d25|status%d||%s\n", column, status, status_text);
+
+   status = 3;
+   strcpy(status_text, "DB Error.");
+
+   sprintf(q, "SELECT time, count from message_count WHERE application = 'trustdb' and time >= %ld ORDER BY time", now - MESSAGE_RATE_PERIOD);
+   if(!db_query(q))
+   {
+      strcpy(status_text, "Unknown.");
+      status = 2;
+      result = db_store_result();
+      if((row = mysql_fetch_row(result))) 
+      {
+         time_t start = atol(row[0]);
+         dword count = 0;
+         time_t end = 0;
+         while((row = mysql_fetch_row(result)))
+         {
+            end = atol(row[0]);
+            count += atol(row[1]);
+         }
+
+         if(end > start)
+         {
+            dword rate = count * 60 / (end - start);
+            if(rate < 10) status = 2;
+            else if(rate < 100) status = 1;
+            else status = 0;
+            sprintf(status_text, "(%ld per minute.)", rate);
+         }
+      }
+   }
+   printf("tr%d26|status%d||%s\n", column, status, status_text);
 
    // TD feed
    status = 3;
    strcpy(status_text, "DB error.");
-   sprintf(q, "SELECT last_td_actual FROM status");
+   sprintf(q, "SELECT last_timestamp FROM td_status ORDER BY last_timestamp DESC");
    if(!db_query(q))
    {
       result = db_store_result();
@@ -3236,7 +3395,39 @@ static void display_status_panel(const word column)
          }
       }
    }
-   printf("tr%d27|status%d|<td>%s</td>\n", column, status, status_text);
+   printf("tr%d28|status%d||%s\n", column, status, status_text);
+
+   status = 3;
+   strcpy(status_text, "DB Error.");
+
+   sprintf(q, "SELECT time, count from message_count WHERE application = 'tddb' and time >= %ld ORDER BY time", now - MESSAGE_RATE_PERIOD);
+   if(!db_query(q))
+   {
+      strcpy(status_text, "Unknown.");
+      status = 2;
+      result = db_store_result();
+      if((row = mysql_fetch_row(result))) 
+      {
+         time_t start = atol(row[0]);
+         dword count = 0;
+         time_t end = 0;
+         while((row = mysql_fetch_row(result)))
+         {
+            end = atol(row[0]);
+            count += atol(row[1]);
+         }
+
+         if(end > start)
+         {
+            dword rate = count * 60 / (end - start);
+            if(rate < 10) status = 2;
+            else if(rate < 100) status = 1;
+            else status = 0;
+            sprintf(status_text, "(%ld per minute.)", rate);
+         }
+      }
+   }
+   printf("tr%d29|status%d||%s\n", column, status, status_text);
 
    // Disc space
    status = 3;
@@ -3248,13 +3439,13 @@ static void display_status_panel(const word column)
          qword free = fstatus.f_bavail * fstatus.f_bsize;
          qword total = fstatus.f_blocks * fstatus.f_bsize;
          qword perc = total?(free*100/total):0;
-         if(perc < 10) status = 2;
-         else if (perc < 25) status = 1;
+         if(perc < 5) status = 2;
+         else if (perc < 10) status = 1;
          else status = 0;
          sprintf(status_text, "%s B (%lld%%)", commas_q(free), perc);
       }
    }
-   printf("tr%d29|status%d|<td>%s</td>\n", column, status, status_text);
+   printf("tr%d31|status%d||%s\n", column, status, status_text);
 }
 
 static void mobilef(void)

@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2013 Phil Wieland
+    Copyright (C) 2013, 2014 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -35,7 +35,7 @@ static void report_train_day(const dword cif_schedule_id, const time_t when, con
 static char * percentage(const dword num, const dword den);
 
 #define NAME "service-report"
-#define BUILD "V801"
+#define BUILD "VC11"
 
 static word debug;
 static word bus;
@@ -503,7 +503,7 @@ static void report_train_day(const dword cif_schedule_id, const time_t when, con
    MYSQL_ROW row0, row1;
 
    char query[1024];
-   word vstp, status;
+   word status;
    char actual[16], expected[16];
    word deviation, deduced, late;
    word next_day, sort_time;
@@ -548,7 +548,6 @@ static void report_train_day(const dword cif_schedule_id, const time_t when, con
 
       if((row0 = mysql_fetch_row(result0)))
       {
-         vstp = (row0[6][0] == '0' && row0[6][1] == 0);
          bus = (row0[0][0] == 'B' || row0[0][0] == '5');
 
          if(!bus) ntrain++;

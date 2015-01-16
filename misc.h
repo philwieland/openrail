@@ -38,6 +38,7 @@ typedef struct Conf {
    char * report_email;
    char * stomp_topics;
    char * stomp_topic_names;
+   char * stomp_topic_log;
 } conf_t;
 extern conf_t conf;
 

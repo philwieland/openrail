@@ -1,15 +1,18 @@
 #!/usr/bin/perl
 
 use strict;
+use Time::Local;
 
 #
-my $build = 'V125';
+my $build = 'VB26';
 my $name = 'dump-rail';
 
 my $day_file_rotation = 4;
 my $frequency = 1; #          # Number of days between backups - Set in crontab call
 
-my $day_number = int(time() / (24 * 60 * 60));
+my($sec,$min,$hour,$mday,$mon,$year,$wday,$yday,$isdst) = localtime(time);
+my $midday = timelocal(0, 0, 12, $mday, $mon, $year);
+my $day_number = int($midday / (24 * 60 * 60));
 $day_number = int($day_number / $frequency);
 $day_number %= $day_file_rotation;
 

@@ -31,7 +31,7 @@
 #include "misc.h"
 
 static char log_file[512];
-static word debug;
+static word log_mode;
 
 /* Public data */
 conf_t conf;
@@ -120,11 +120,12 @@ void _log(const byte level, const char * text, ...)
    char log[32];
    FILE * fp;
 
-   if(debug == 3) return;
-   if((level == PROC || level == DEBUG) && !debug) return;
+   if(log_mode == 3) return;
+   if((level == PROC || level == DEBUG) && (log_mode == 0 || log_mode == 4)) return;
 
-   va_list vargs;
-   va_start(vargs, text);
+   va_list vargs0, vargs1;
+   va_start(vargs0, text);
+   va_copy(vargs1, vargs0);
 
    time_t now = time(NULL);
    struct tm * broken = gmtime(&now);
@@ -137,7 +138,7 @@ void _log(const byte level, const char * text, ...)
            broken->tm_min,
            broken->tm_sec);
 
-   if(debug)
+   if(log_mode == 1 || log_mode == 2)
    {
       switch(level)
       {
@@ -158,34 +159,25 @@ void _log(const byte level, const char * text, ...)
       if(level == CRITICAL) strcat(log, "CRITICAL: ");
    }
 
-   if(!debug)
+   // Write to log file
+   if(log_file[0] && (fp = fopen(log_file, "a")))
    {
-      if(log_file[0] && (fp = fopen(log_file, "a")))
-      {
-         fprintf(fp, "%s", log);
-         vfprintf(fp, text, vargs);
-         fprintf(fp, "\n");
-         fclose(fp);
-      }
+      fprintf(fp, "%s", log);
+      vfprintf(fp, text, vargs0);
+      fprintf(fp, "\n");
+      fclose(fp);
    }
-   else
+   
+   // Print as well
+   if(log_mode == 1 || log_mode == 4) 
    {
-      if(debug == 1) 
-      {
-         printf("%s", log);
-         vprintf(text, vargs);
-         printf("\n");
-      }
-      if(log_file[0] && (fp = fopen(log_file, "a")))
-      {
-         fprintf(fp, "%s", log);
-         vfprintf(fp, text, vargs);
-         fprintf(fp, "\n");
-         fclose(fp);
-      }
+      printf("%s", log);
+      vprintf(text, vargs1);
+      printf("\n");
    }
 
-   va_end(vargs);
+   va_end(vargs0);
+   va_end(vargs1);
 
    return;
 }
@@ -193,14 +185,15 @@ void _log(const byte level, const char * text, ...)
 
 void _log_init(const char * l, const word d)
 {
-   // d is debug mode. 
+   // d is log_mode mode. 
    // 0 Normal running
    // 1 debug, print as well as log file
    // 2 debug, no print
    // 3 No logging at all.
+   // 4 Normal running plus print.
    if(strlen(l) < 500) strcpy(log_file, l);
    else log_file[0] = '\0';
-   debug = d;
+   log_mode = d;
 }
 
 char * commas(const dword n)
@@ -397,6 +390,14 @@ char * show_time_text(const char * const input)
 #define CONFIG_SIZE 2048
 int load_config(const char * const filepath)
 {
+   // Read config file.
+   // Notes:
+   // Blank lines and lines beginning with # will be ignored.
+   // Other than that, all lines must contain <setting>:<value>  
+   // Spaces either side of the : are optional and will be stripped.
+   // Value may be enclosed in quotes ("), these will be stripped.
+   // A correctly formatted line containing an unrecognised setting (e.g. foo: bar) will be silently ignored.
+   //
    char *line_start, *val_start, *val_end, *line_end, *ic;
    static char buf[CONFIG_SIZE];
 
@@ -412,8 +413,9 @@ int load_config(const char * const filepath)
 
    buf[CONFIG_SIZE - 1] = '\0';
 
+
    conf.db_server = conf.db_name = conf.db_user = conf.db_pass = conf.nr_user = conf.nr_pass = conf.debug = conf.report_email = &buf[CONFIG_SIZE - 1];
-   conf.stomp_topics = conf.stomp_topic_names = &buf[CONFIG_SIZE - 1];
+   conf.stomp_topics = conf.stomp_topic_names = conf.stomp_topic_log = &buf[CONFIG_SIZE - 1];
 
    line_start=buf;
    while(1)
@@ -471,6 +473,8 @@ int load_config(const char * const filepath)
             conf.stomp_topics = val_start;
          else if (strcmp(line_start, "stomp_topic_names") == 0)
             conf.stomp_topic_names = val_start;
+         else if (strcmp(line_start, "stomp_topic_log") == 0)
+            conf.stomp_topic_log = val_start;
       }
       line_start = line_end + 1;
    }
@@ -568,10 +572,11 @@ word read_stompy(void * buffer, const size_t max_size, const word seconds)
    //        3 Timeout.
    //        4 Closed.
    //        5 Message too long.
+   //        6 Timeout on message body.
 
    ssize_t l;
    size_t got = 0;
-   size_t length;
+   ssize_t length;
    word result = 0;
    fd_set active_sockets;
    struct timeval wait_time;
@@ -579,12 +584,12 @@ word read_stompy(void * buffer, const size_t max_size, const word seconds)
 
    if(stompy_socket < 0) return 4;
 
-   wait_time.tv_sec = seconds;
-   wait_time.tv_usec = 0;
 
-   while(got < sizeof(size_t) && !result)
+   while(got < sizeof(ssize_t) && !result)
    {
       active_sockets = sockets;
+      wait_time.tv_sec = seconds;
+      wait_time.tv_usec = 0;
       int r = select(FD_SETSIZE, &active_sockets, NULL, NULL, seconds?(&wait_time):NULL);
       _log(DEBUG, "First select returns %d.", r);
       if(r == 0) result = 3;
@@ -601,11 +606,11 @@ word read_stompy(void * buffer, const size_t max_size, const word seconds)
 
    if(result) return result;
 
-   memcpy(&length, buffer, sizeof(size_t));
-   _log(DEBUG, "Received frame length = 0x%08lx", length);
+   memcpy(&length, buffer, sizeof(ssize_t));
+   _log(DEBUG, "Received frame length = 0x%zx", length);
    if(length > max_size) 
    {
-      _log(MAJOR, "read_stompy() Error 5, received length %x08lx exceeds limit %x08lx.", length, max_size);
+      _log(MAJOR, "read_stompy() Error 5:  Received length 0x%08zx exceeds limit 0x%08zx.", length, max_size);
       return 5;
    }
 
@@ -613,9 +618,11 @@ word read_stompy(void * buffer, const size_t max_size, const word seconds)
    while(got < length && !result)
    {
       active_sockets = sockets;
+      wait_time.tv_sec = seconds;
+      wait_time.tv_usec = 0;
       int r = select(FD_SETSIZE, &active_sockets, NULL, NULL, seconds?(&wait_time):NULL);
       _log(DEBUG, "Second select returns %d.", r);
-      if(r == 0) result = 3;
+      if(r == 0) result = 6;
       if(r <  0) result = 2;
 
       if(!result)
@@ -626,6 +633,8 @@ word read_stompy(void * buffer, const size_t max_size, const word seconds)
          got += l;
       }
    }
+
+   if(result == 6) _log(MAJOR, "read_stompy() Error 6:  Timeout while waiting for message body.  Received 0x%08zx of 0x%08zx bytes.", got, length);
 
    return result;
 }
@@ -653,7 +662,7 @@ void extract_match(const char * const source, const regmatch_t * const matches, 
    if(size > max_length - 1) 
    {
       char zs[128];
-      sprintf(zs, "extract_match():  String length 0x%x truncated to 0x%x.", size, max_length - 1);
+      sprintf(zs, "extract_match():  String length 0x%zx truncated to 0x%zx.", size, max_length - 1);
       _log(MAJOR, zs);
       size = max_length - 1;
    }

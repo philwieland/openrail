@@ -157,7 +157,7 @@ function ar()
             show_progress();
             updating = 1;
             var url = document.URL;
-            if(url.substr(-2,2) != "/r") { url += "/r"; }
+            if(url.substr(url.length - 2, 2) != "/r") { url += "/r"; }
             var url_parts = url.split('/');
             if(url_parts[5] == "sum" || url_parts[5] == "dep" || url_parts[5] == "panel")
             {
@@ -176,7 +176,7 @@ function ar()
             // Update seems to have timed out.  Try a reload.
             refresh_count = refresh_period;
             var url = document.URL;
-            if(url.substr(-2,2) != "/r") { url += "/r"; }
+            if(url.substr(url.length - 2, 2) != "/r") { url += "/r"; }
             window.location = url;
          }
       }
@@ -219,10 +219,11 @@ function smart_update(url)
    while(results.length > index && results[index].length > 2 && results[index].substr(0, 2) == 'tr')
    {
       var parts = results[index].split('|');
-      if(parts.length > 2)
+      if(parts.length > 3)
       {
          document.getElementById(parts[0]).className = parts[1];
-         document.getElementById(parts[0]).innerHTML = parts[2]; // This doesn't work in IE9
+         document.getElementById(parts[0] + 'r').className = parts[2]; 
+         document.getElementById(parts[0] + 'r').innerHTML = parts[3];
       }
       index++;
    }

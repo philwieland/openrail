@@ -31,7 +31,7 @@
 
 
 #define NAME "livesiglog"
-#define BUILD "VA19"
+#define BUILD "VB22"
 
 static word analyse(const char * const filename);
 static word analyse_line(const char * const line);
@@ -39,6 +39,9 @@ static word analyse_line(const char * const line);
 static regex_t match;
 static time_t when;
 static word debug;
+
+// Period in seconds before we consider it a separate visit
+#define VISIT_TIMEOUT 64
 
 #define USERS 512
 static struct {
@@ -130,7 +133,9 @@ int main(int argc, char **argv)
          // Print report
          hours = (database[index].elapsed + 30 * 60)/3600;
          total += database[index].elapsed;
-         printf("%16s  %-6d %ld\n", database[index].name,  database[index].visits, hours);
+         printf("%16s  %-6d %-6ld", database[index].name,  database[index].visits, hours);
+         if(!strcmp(database[index].name, "80.229.14.237")) printf(" (Home)");
+         printf("\n");
       }
       hours = (total + 30 * 60)/3600;
       printf("%d visitors logged, total hours %ld\n", database_next, hours);
@@ -209,7 +214,7 @@ static word analyse_line(const char * const line)
       // Existing visitor
       if(database[index].on_line)
       {
-         if(database[index].last_on < timestamp - 32)
+         if(database[index].last_on < timestamp - VISIT_TIMEOUT)
          {
             off(index);
             on(index, timestamp);

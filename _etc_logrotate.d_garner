@@ -8,3 +8,13 @@
         delaycompress
         dateext
 }
+/var/log/garner/stompy.messagelog {
+        daily
+        missingok
+        rotate 8
+        notifempty
+        nocreate
+        compress
+        delaycompress
+        dateext
+}

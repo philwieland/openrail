@@ -39,7 +39,7 @@
 #include "misc.h"
 
 #define NAME  "stompy"
-#define BUILD "VB04"
+#define BUILD "VC28"
 
 static void perform(void);
 static void set_up_server_sockets(void);
@@ -76,6 +76,7 @@ static int is_a_buffer(const struct dirent *d);
 static word load_queue_from_disc(const word s);
 static int disc_queue_length(const word s);
 static qword disc_queue_oldest(const word s);
+static void log_message(const word s);
 
 static word debug, run, interrupt, sigusr1, controlled_shutdown;
 static char zs[4096];
@@ -115,6 +116,7 @@ static enum {STREAM_DISC, STREAM_RUN, STREAM_LOCK} stream_state[STREAMS];
 
 static char * stomp_topics[STREAMS];
 static char * stomp_topic_names[STREAMS];
+static word stomp_topic_log[STREAMS];
 static char topics[1024];
 
 // Stats
@@ -151,6 +153,9 @@ static word stomp_holdoff;
 
 // Command file
 #define COMMAND_FILE "/tmp/stompy.cmd"
+
+// Message log
+#define MESSAGE_LOG_FILEPATH "/var/log/garner/stompy.messagelog"
 
 // Frame buffers and queues thereof
 #define BUFFERS 32
@@ -255,6 +260,25 @@ int main(int argc, char *argv[])
          {
             stomp_topic_names[i] = p;
             p = e;
+         }
+      }
+      for(i = 0; i < STREAMS; i++)
+      {
+         stomp_topic_log[i] = false;
+      }
+      {
+         char temp[2048];
+         strcpy(temp, conf.stomp_topic_log);
+         p = temp;
+         for(i = 0; i < STREAMS; i++)
+         {
+            q = strchr(p, ';');
+            if(q)
+            {
+               *q = '\0';
+               stomp_topic_log[i] = !strcasecmp(p, "true");
+               p = q + 1;
+            }
          }
       }
    }
@@ -454,7 +478,7 @@ int main(int argc, char *argv[])
       for(stream = 0; stream < STREAMS; stream++)
       if(stomp_topics[stream][0])
       {
-         _log(GENERAL, "%d: \"%s\" (%s)", stream, stomp_topics[stream], stomp_topic_names[stream]);
+         _log(GENERAL, "%d: \"%s\" (%s) Logging %s.", stream, stomp_topics[stream], stomp_topic_names[stream], stomp_topic_log[stream]?"enabled":"disabled");
       }
       else
       {
@@ -556,10 +580,6 @@ static void perform(void)
          // Error
          if(errno == EINTR)
          {
-            if(sigusr1) user_command();
-            sigusr1 = false;
-            if(interrupt) full_shutdown();
-            interrupt = false;
          }
          else
          {
@@ -590,6 +610,10 @@ static void perform(void)
             }
          }
       }
+      if(sigusr1) user_command();
+      sigusr1 = false;
+      if(interrupt) full_shutdown();
+      interrupt = false;
    }
 
    if(interrupt)
@@ -1141,6 +1165,10 @@ static void client_read(const int s)
    }
    FD_CLR(s, &read_sockets);
    client_state[stream] = CLIENT_IDLE;
+
+   // Log message
+   if(stomp_topic_log[stream]) log_message(stream);
+
    if(client_buffer[stream] != dequeue(stream))
    {
       _log(CRITICAL, "Queue end mismatch detected in client_read() on stream %d (%s).  Fatal.", stream, stomp_topic_names[stream]);
@@ -1490,6 +1518,8 @@ static void stomp_manager(const enum stomp_manager_event event, const char * con
       serv_addr.sin_port = htons(STOMP_PORT);
 
       // Now connect to the server
+      // Really, we should do this in non-blocking mode and handle the successful/unsuccessful connection in the main select.
+      // This connect blocks if there's no-one there.
       if (connect(s_stomp, (const struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0) 
       {
          _log(MAJOR, "Unable to connect to STOMP server.  Error %d %s.", errno, strerror(errno));
@@ -2140,3 +2170,27 @@ static qword disc_queue_oldest(const word s)
    }
    return result;
 }
+
+static void log_message(const word s)
+{
+   FILE * fp;
+   
+   time_t now = time(NULL);
+   struct tm * broken = gmtime(&now);
+   
+   
+   if((fp = fopen(MESSAGE_LOG_FILEPATH, "a")))
+   {
+      fprintf(fp, "%02d/%02d/%02d %02d:%02d:%02dZ %s\n",
+              broken->tm_mday, 
+              broken->tm_mon + 1, 
+              broken->tm_year % 100,
+              broken->tm_hour,
+              broken->tm_min,
+              broken->tm_sec,
+              stomp_topic_names[s]);
+      fprintf(fp, "%s\n", client_buffer[s]->frame);
+      fclose(fp);
+   }
+}
+

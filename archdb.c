@@ -34,7 +34,7 @@
 #include "db.h"
 
 #define NAME  "archdb"
-#define BUILD "VA29"
+#define BUILD "W109"
 
 static int smart_loop(const word initial_quantity, int (*f)(word), const word stat);
 static void create_database(void);
@@ -122,6 +122,12 @@ int main(int argc, char **argv)
    if(load_config(config_file_path))
    {
       printf("Failed to read config file \"%s\".\n", config_file_path);
+      usage = true;
+   }
+
+   if(report_only)
+   {
+      printf("Sorry.  Report only mode not implemented.\n");
       usage = true;
    }
 
@@ -247,21 +253,21 @@ static int smart_loop(const word initial_quantity, int (*f)(word), const word st
    {
       if(time(NULL) - last_report > 10*60)
       {
-         _log(GENERAL, "   Archived %lld records so far.  Current batch size is %d.", stats[stat], quantity);
+         _log(GENERAL, "   Archived %s records so far.  Current batch size is %s.", commas_q(stats[stat]), commas(quantity));
          last_report += 10*60;
       }
       elapsed = time_ms();
       reply = f(quantity);
       if(reply) 
       {
-         _log(GENERAL, "   Final batch size was %d.", quantity);
+         _log(GENERAL, "   Final batch size was %s.", commas(quantity));
          return reply;
       }
       elapsed = time_ms() - elapsed;
       if(elapsed < THRESHOLD_VL) quantity = (quantity * 6 / 5) + 1;
       else if(elapsed < THRESHOLD_L) quantity = (quantity * 21 / 20) + 1;
       else if(elapsed < THRESHOLD_H);
-      else if(elapsed < THRESHOLD_VH) quantity = (quantity * 19 / 20) - 1;
+      else if(elapsed < THRESHOLD_VH) { quantity = (quantity * 19 / 20); if(quantity > MIN_QUANTITY) quantity--; }
       else                            quantity = quantity / 2;
       if(quantity > MAX_QUANTITY) quantity = MAX_QUANTITY;
       if(quantity < MIN_QUANTITY) quantity = MIN_QUANTITY;
@@ -574,8 +580,8 @@ static int cif_associations(const word quantity)
    char q[1024];
    int r;
    int count = 0;
-   MYSQL_RES * result, * result_c;
-   MYSQL_ROW row, row_c;
+   MYSQL_RES * result;
+   MYSQL_ROW row;
 
    sprintf(q, "SELECT DISTINCT(concat(created, main_train_uid)), created, main_train_uid FROM cif_associations WHERE deleted < %ld OR assoc_end_date < %ld LIMIT %d", threshold, threshold, quantity);
    r = db_query(q);

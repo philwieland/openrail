@@ -223,18 +223,22 @@ word db_real_escape_string(char * to, const char * const from, const size_t size
    return mysql_real_escape_string(mysql_object, to, from, size);
 }
 
+#define TRANSACTION_LOG_LEVEL DEBUG
+
 word db_start_transaction(void)
 {
    db_errored = false;
 
    word r = db_query("START TRANSACTION");
    if(r) db_errored = true;
+   _log(TRANSACTION_LOG_LEVEL, "db_start_transaction() returns %d", r);
    return r;
 }
 
 word db_commit_transaction(void)
 {
    word r = db_query("COMMIT");
+   _log(TRANSACTION_LOG_LEVEL, "db_commit_transaction() returns %d, db_errored was %d", r, db_errored);
    if(r) db_errored = true;
    return r;
 }
@@ -243,6 +247,7 @@ word db_rollback_transaction(void)
 {
    word r = db_query("ROLLBACK");
    if(r) db_errored = true;
+   _log(TRANSACTION_LOG_LEVEL, "db_rollback_transaction() returns %d", r);
    return r;
 }
 
