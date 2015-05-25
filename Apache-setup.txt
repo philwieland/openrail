@@ -45,8 +45,9 @@ a virtual host if desired.
 
 RewriteEngine   On
 RewriteRule     ^/rail/liverail(.*)$  /usr/lib/cgi-bin/liverail.cgi   [E=PARMS:$1]
+RewriteRule     ^/rail/query(.*)$     /usr/lib/cgi-bin/railquery.cgi  [E=PARMS:$1]
 RewriteRule     ^/rail/livesig(.*)$   /usr/lib/cgi-bin/livesig.cgi    [E=PARMS:$1]
-
+#
 	ErrorLog ${APACHE_LOG_DIR}/error.log
 
 	# Possible values include: debug, info, notice, warn, error, crit,
