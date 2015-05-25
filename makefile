@@ -1,6 +1,6 @@
 CC=gcc -c -g -O2 -Wall -I/usr/include/mysql -DBIG_JOINS=1 -D_GNU_SOURCE -D_FILE_OFFSET_BITS=64 -fno-strict-aliasing -DUNIV_LINUX
 
-all:            cifdb archdb corpusdb vstpdb trustdb stompy tddb liverail.cgi livesig.cgi service-report livesiglog
+all:            cifdb archdb corpusdb vstpdb trustdb stompy tddb liverail.cgi livesig.cgi railquery.cgi service-report livesiglog
 
 jsmn.o:		jsmn.c jsmn.h misc.h
 
@@ -27,6 +27,11 @@ livesig.cgi:	livesig.o misc.o db.o
 		gcc -g -O2 -I./include -L./lib livesig.o misc.o db.o -lmysqlclient -o livesig.cgi 
 
 livesig.o:	livesig.c db.h misc.h
+
+railquery.cgi:	railquery.o misc.o db.o 
+		gcc -g -O2 -I./include -L./lib railquery.o misc.o db.o -lmysqlclient -o railquery.cgi 
+
+railquery.o:	railquery.c db.h misc.h
 
 corpusdb:       corpusdb.o jsmn.o misc.o db.o 
 		gcc -g -O2 -L./lib -I./include corpusdb.o jsmn.o misc.o db.o -lcurl -lmysqlclient -o corpusdb 
@@ -78,6 +83,6 @@ install:
 .PHONY: install
 
 clean:
-		rm -f cifdb archdb liverail.cgi livesig.cgi corpusdb vstpdb trustdb service-report stompy tddb livesiglog *.o 
+		rm -f cifdb archdb liverail.cgi livesig.cgi railquery.cgi corpusdb vstpdb trustdb service-report stompy tddb livesiglog *.o 
 
 

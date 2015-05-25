@@ -129,34 +129,41 @@ void _log(const byte level, const char * text, ...)
 
    time_t now = time(NULL);
    struct tm * broken = gmtime(&now);
-      
-   sprintf(log, "%02d/%02d/%02d %02d:%02d:%02dZ ",
-           broken->tm_mday, 
-           broken->tm_mon + 1, 
-           broken->tm_year % 100,
-           broken->tm_hour,
-           broken->tm_min,
-           broken->tm_sec);
 
-   if(log_mode == 1 || log_mode == 2)
+   if(text[0])
    {
-      switch(level)
+      sprintf(log, "%02d/%02d/%02d %02d:%02d:%02dZ ",
+              broken->tm_mday, 
+              broken->tm_mon + 1, 
+              broken->tm_year % 100,
+              broken->tm_hour,
+              broken->tm_min,
+              broken->tm_sec);
+
+      if(log_mode == 1 || log_mode == 2)
       {
-      case GENERAL: strcat(log, "[GENERAL] "); break;
-      case PROC:    strcat(log, "[PROC   ] "); break;
-      case DEBUG:   strcat(log, "[DEBUG  ] "); break;
-      case MINOR:   strcat(log, "[MINOR  ] "); break;
-      case MAJOR:   strcat(log, "[MAJOR  ] "); break;
-      case CRITICAL:strcat(log, "[CRIT.  ] "); break;
-      default:      strcat(log, "[       ] "); break;
+         switch(level)
+         {
+         case GENERAL: strcat(log, "[GENERAL] "); break;
+         case PROC:    strcat(log, "[PROC   ] "); break;
+         case DEBUG:   strcat(log, "[DEBUG  ] "); break;
+         case MINOR:   strcat(log, "[MINOR  ] "); break;
+         case MAJOR:   strcat(log, "[MAJOR  ] "); break;
+         case CRITICAL:strcat(log, "[CRIT.  ] "); break;
+         default:      strcat(log, "[       ] "); break;
+         }
+      }
+      else
+      {
+         strcat(log, "] ");
+         if(level == MINOR   ) strcat(log, "MINOR: ");
+         if(level == MAJOR   ) strcat(log, "MAJOR: ");
+         if(level == CRITICAL) strcat(log, "CRITICAL: ");
       }
    }
    else
    {
-      strcat(log, "] ");
-      if(level == MINOR   ) strcat(log, "MINOR: ");
-      if(level == MAJOR   ) strcat(log, "MAJOR: ");
-      if(level == CRITICAL) strcat(log, "CRITICAL: ");
+      strcpy(log, "\n");
    }
 
    // Write to log file
@@ -181,7 +188,6 @@ void _log(const byte level, const char * text, ...)
 
    return;
 }
-
 
 void _log_init(const char * l, const word d)
 {
@@ -671,3 +677,61 @@ void extract_match(const char * const source, const regmatch_t * const matches, 
    result[size] = '\0';
 }
 
+char * system_call(const char * const command)
+{
+   // Return error string, or NULL for success.
+   static char result[256];
+   char z[256];
+   char filename[256];
+   int r;
+
+   _log(PROC, "system_call(\"%s\")", command);
+
+   if(strlen(command) > 128)
+   {
+      strcpy(result, "Command too long.");
+      return result;
+   }
+
+   strcpy(filename, "/tmp/or-XXXXXX");
+   if((r = mkstemp(filename)) < 0)
+   {
+      strcpy(result, "Failed to create temporary file.");
+      return result;
+   }
+   close(r);
+
+   sprintf(z, "%s 2>%s", command, filename);
+   _log(DEBUG, "Command string \"%s\".", z);
+
+   r = system(z);
+
+   if(r)
+   {
+      FILE * fp;
+      if((fp = fopen(filename, "r")))
+      {
+         strcpy(result, "");
+         while(fgets(z, 128, fp))
+         {
+            if(z[strlen(z) - 1] == '\n') z[strlen(z) - 1] = '\0';
+            if(z[0])
+            {
+               _log(DEBUG, "Error string \"%s\".", z);
+               strcpy(result, z);
+            }
+         }
+         fclose(fp);
+         unlink(filename);
+         return result;
+      }
+      else
+      {
+         strcpy(result, "Failed to read error message.");
+         return result;
+      }
+   }
+
+   unlink(filename);
+   return NULL;
+}

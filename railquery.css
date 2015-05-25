@@ -1,0 +1,290 @@
+/*
+    Copyright (C) 2013 Phil Wieland
+
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+    phil@philwieland.com
+
+*/
+
+BODY { color:black; background-color:white;
+       font-family: Geneva, Helvetica, Arial, sans-serif;
+     }
+	  
+.mini-button
+	{
+	height:14px;
+	font-size: xx-small;
+        font-weight: bold;
+        border: 0px;
+        background-color: #a0c0ff;
+	}
+.mini-button:hover
+{
+    color:black;
+    background-color: #00ff00;
+}
+.mini-button-location
+{
+    height:14px;
+    font-size: x-small;
+    color: black;
+    border: 0px;
+    background-color: #c0e0ff;
+}
+.mini-button-location:hover
+{
+        background-color: #00ff00;
+}
+.button
+	{
+        font-weight: bold;
+        border: 1px solid #006;
+	}
+
+table.result-table
+{
+    font-size: x-small; 
+    border-spacing: 2px;
+}
+table.result-table td 
+{
+    background:#c0e0ff;
+    padding: 1px 4px;
+}
+table.result-table th 
+{
+    font-size: x-small; 
+    background:#9090ff;
+    font-weight: bold;
+}
+/* Cells in even rows (2,4,6...) are one color */ 
+tr.result-table:nth-child(even) td { background: #dfefff; }
+
+/* Cells in odd rows (1,3,5...) are another (excludes header cells)  */ 
+tr.result-table:nth-child(odd)  td { background: #c0e0ff; } 
+
+.small-table
+{
+font-size: x-small; 
+background-color:#c0e0ff;
+}
+
+.small-table-head
+{
+font-size: x-small;
+font-weight: bold; 
+background-color:#c0e0ff;
+}
+
+.small-table-vstp
+{
+font-family: arial,sans-serif;
+font-size: x-small; 
+color:#ffffff;
+background-color:#0000ff; /* Blue */
+}
+
+.small-table-freight
+{
+font-size: x-small; 
+background-color:#ffbbbb;
+}
+
+.small-table-valid
+{
+font-size: x-small; 
+background-color:#bbffbb;
+}
+
+.small-table-act
+{
+font-family: arial,sans-serif;
+font-size: x-small; 
+background-color:#bbffbb; /* Green */
+}
+
+.small-table-cape
+{
+font-size: x-small; 
+background-color:#ffbbbb; /* Red */
+}
+
+.summ-table
+{
+font-size: xx-small;
+}
+.summ-table-head
+{
+font-weight: bold; 
+background-color:#c0e0ff;
+}
+
+.summ-table-cape
+{
+background-color:#ffbbbb; /* Red */
+}
+
+.summ-table-idle
+{
+    /* height:15px;  */
+    background-color:#eeeeee; /* Grey */
+}
+
+.summ-table-act
+{
+background-color:#c0e0ff; /* Pale blue */
+}
+
+.summ-table-move
+{
+background-color:#bbffbb; /* Pale green */
+}
+
+.summ-table-gone
+{
+/*background-color:#88ff88; /* Green */
+background-color:#eeeeee; /* Grey */
+}
+
+.summ-table-good
+{
+background-color:#77ff77; /* Green */
+}
+
+.summ-table-minor
+{
+background-color:#ffff88; /* yellow*/
+}
+
+.summ-table-major
+{
+background-color:orange; /* Orange */
+}
+
+.summ-table-crit
+{
+background-color:#ff8888; /* Red */
+}
+
+.control-panel
+{
+    color: black;
+    background-color: #ddeedd;
+    vertical-align: top;
+} 
+
+.control-panel-off
+{
+    color: black;
+    background-color: #dddddd;
+    vertical-align: top;
+} 
+
+.control-panel-row
+{
+    color: black;
+    background-color: #ddeedd;
+    height: 26px;
+} 
+
+.cp-button
+{
+    font-weight: bold;
+    background-color: #ddeedd;
+    border: 1px solid #006;
+}
+.cp-button:hover
+{
+    color:black;
+    background-color: #00ff00;
+}
+
+.plaintext
+{
+font-family: "courier","monospace";
+}
+
+.linkbutton
+{
+    height:14px;
+    color: black;
+    border: 0px;
+    background-color: #c0e0ff;
+    text-decoration: none;
+}
+.linkbutton-summary
+{
+    height:11px; /* 13 if font is x-small */
+    color: black;
+    border: 0px;
+    text-decoration: none;
+    display:block;
+}
+.linkbutton:hover
+{
+        background-color: #00ff00;
+}
+.linkbutton-summary:hover
+{
+        background-color: #00ff00;
+}
+.linkbutton-cp
+{
+    font-weight: bold;
+    background-color: #ddeedd;
+    border: 1px solid #006;
+    color: black;
+    text-decoration: none;
+    /* display:block; */
+   padding: 2px 6px 2px 6px;
+}
+.linkbutton-cp:hover
+{
+        background-color: #00ff00;
+}
+.symbols
+{
+float: right;
+font-weight: bold;
+text-align:right;
+}
+.status0
+{
+color: black;
+background-color: #00ff00;
+}
+.status1
+{
+color: black;
+background-color: yellow;
+}
+.status2
+{
+color: #ffffff;
+background-color: red;
+}
+.status3
+{
+color: #ffffff;
+background-color: black;
+}
+.status-text
+{
+text-align:right;
+}
+.status-head
+{
+text-align:center;
+}

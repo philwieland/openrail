@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2013, 2014 Phil Wieland
+    Copyright (C) 2013, 2014, 2015 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -19,11 +19,13 @@
 */
 
 var url_base = "/rail/liverail/";
+var query_url_base = "/rail/query/";
 var refresh_tick = 2048; /* ms between ticks */
 //var refresh_tick = 400; /* Testing only */
 var refresh_period = 25; /* Number of ticks before refresh.  If not 25, css styles must be changed */
 var refresh_count = 0;
 var updating = 0;
+var tick_timer;
 
 function search_onclick()
 {
@@ -66,9 +68,7 @@ function as_go_onclick()
 
 function as_rq_onclick()
 {
-   ar_off();
-   result = url_base + "as";
-   window.location = result;
+   window.open(query_url_base, '_blank');
 }
 
 function status_onclick()
@@ -80,7 +80,6 @@ function status_onclick()
 
 function train_date_onclick(schedule_id)
 {
-   // url may already have a date, and may have /r at the end.  Both to be dropped.
    ar_off();
    result = url_base + "train" + '/' + schedule_id + '/' + document.getElementById("train_date").value;
    window.location = result;
@@ -111,7 +110,7 @@ function ar_off()
 
 function startup()
 {
-   setInterval('ar()', refresh_tick);
+   tick_timer = setInterval('ar()', refresh_tick);
    refresh_count = 0;
    updating = 0;
    if(document.getElementById("ar") && document.getElementById("ar").checked)
@@ -142,6 +141,7 @@ function startup()
    }
 }
 
+// Timer tick
 function ar()
 {
    if(document.getElementById("ar") && document.getElementById("ar").checked)
@@ -167,6 +167,7 @@ function ar()
             }
             else
             {
+               clearInterval(tick_timer);
                window.location = url;
             }
             updating = 0;
@@ -177,6 +178,7 @@ function ar()
             refresh_count = refresh_period;
             var url = document.URL;
             if(url.substr(url.length - 2, 2) != "/r") { url += "/r"; }
+            clearInterval(tick_timer);
             window.location = url;
          }
       }
@@ -211,6 +213,15 @@ function smart_update(url)
    if(results.length < index || results[index-1] != document.getElementById('display_handle').value)
    {
       // Fetch has failed or page layout has changed or date has changed or software version has changed.  Reload whole page from scratch.
+      if(req.responseText.substring(0, 8) == '<!DOCTYP')
+      {
+         // Web site shut down.  Just ignore it
+         refresh_count = 0;
+         show_progress();
+         document.getElementById("bottom-line").innerHTML = 'Data feed failed.';
+         return;
+      }
+      clearInterval(tick_timer);
       window.location = url;
       return;
    }

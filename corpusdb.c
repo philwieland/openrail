@@ -32,7 +32,7 @@
 #include "db.h"
 
 #define NAME  "corpusdb"
-#define BUILD "V608"
+#define BUILD "W422"
 
 #define FILEPATH       "/tmp/corpusdb"
 #define FILEPATH_DEBUG "/tmp/corpusdb-debug"
@@ -69,19 +69,28 @@ const char const * create_table_corpus =
 
 dword count_locations, count_fns;
 
+word opt_insecure, used_insecure, opt_verbose;
 
 int main(int argc, char **argv)
 {
    int c;
    char config_file_path[256];
    word usage = false;
+   opt_insecure = opt_verbose = false;
+   used_insecure = false;
    strcpy(config_file_path, "/etc/openrail.conf");
-   while ((c = getopt (argc, argv, ":c:")) != -1)
+   while ((c = getopt (argc, argv, ":c:ip")) != -1)
    {
       switch (c)
       {
       case 'c':
          strcpy(config_file_path, optarg);
+         break;
+      case 'i':
+         opt_insecure = true;
+         break;
+      case 'p':
+         opt_verbose = true;
          break;
       case ':':
          break;
@@ -99,7 +108,7 @@ int main(int argc, char **argv)
    }
    if(usage)
    {
-      printf("\tUsage: %s [-c /path/to/config/file.conf]\n\n", argv[0] );
+      printf("\tUsage: %s [-c /path/to/config/file.conf] [-i] [-p]\n\n", argv[0] );
       exit(1);
    }
 
@@ -128,7 +137,7 @@ int main(int argc, char **argv)
        debug = 0;
      }
 
-   _log_init(debug?"/tmp/corpusdb.log":"/var/log/garner/corpusdb.log", debug?1:0);
+   _log_init(debug?"/tmp/corpusdb.log":"/var/log/garner/corpusdb.log", debug?1:(opt_verbose?4:0));
 
    _log(GENERAL, "");
    sprintf(zs, "%s %s", NAME, BUILD);
@@ -166,6 +175,11 @@ int main(int argc, char **argv)
 
       _log(GENERAL, "End of run:");
       strcpy(report, "Corpus update completed:\n");
+      if(used_insecure)
+      {
+         strcat(report, "*** Warning: Insecure download used.\n");
+         _log(GENERAL, "*** Warning: Insecure download used.");
+      }
       sprintf(zs, "Elapsed time             : %ld minutes", (time(NULL) - start_time + 30) / 60);
       _log(GENERAL, zs);
       strcat(report, zs);
@@ -253,9 +267,24 @@ static word fetch_corpus(void)
       CURLcode res;
       if((res = curl_easy_perform(curlh)))
       {
-         sprintf(zs, "scrapecif(): curl_easy_perform() returned error %d: %s.", res, curl_easy_strerror(res));
-         _log(MAJOR, zs);
-         result = 3;
+         _log(MAJOR, "fetch_corpus(): curl_easy_perform() returned error %d: %s.", res, curl_easy_strerror(res));
+         if(opt_insecure && (res == 51 || res == 60))
+         {
+            _log(MAJOR, "Retrying download in insecure mode.");
+            // SSH failure, retry without
+            curl_easy_setopt(curlh, CURLOPT_SSL_VERIFYPEER, 0);
+            curl_easy_setopt(curlh, CURLOPT_SSL_VERIFYHOST, 0);
+            used_insecure = true;
+            if((res = curl_easy_perform(curlh)))
+            {
+               _log(MAJOR, "fetch_corpus(): In insecure mode curl_easy_perform() returned error %d: %s.", res, curl_easy_strerror(res));
+               result = 3;
+            }
+         }
+         else
+         {
+            result = 3;
+         }
       }
    }
 
@@ -269,10 +298,13 @@ static word fetch_corpus(void)
    if(!result)
    {
       // Uncompress
-      _log(GENERAL, "Uncompressing downloaded data");
+      char * r;
+      _log(GENERAL, "Uncompressing downloaded data.");
       sprintf(zs, "/bin/gunzip -f %s", filepath_z);
-      if(system(zs))
+      if((r = system_call(zs)))
       {
+         _log(MAJOR, "Failed to uncompress file:  %s", r);
+         result = 5;
       }
    }
    return result;
@@ -313,6 +345,8 @@ static word process_corpus(void)
 
    FILE * fp;
    
+   _log(GENERAL, "Processing CORPUS data.");
+
    // Read in json data
    if(!(fp = fopen(filepath, "r")))
    {

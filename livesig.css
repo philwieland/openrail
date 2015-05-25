@@ -39,6 +39,7 @@ BODY { background-color:white;
     stroke-width:3;
     stroke-dasharray:12,12;
     fill:none;
+    opacity:0.0;
 }
 .track-off
 {
@@ -73,6 +74,12 @@ BODY { background-color:white;
     stroke-width:0.5;
     font-family:Helvetica, Arial, sans-serif;
 }
+.key-background
+{
+    fill:#eeeeee;
+    fill-opacity:1;
+    stroke-width:0;
+}
 .describer
 {
     fill:#000000;
@@ -86,6 +93,10 @@ font-size:12px;stroke:#ffff00;stroke-opacity:1;font-family:Courier, monospace;
 .describer-text-off
 {
 font-size:8px;stroke:#909090;stroke-opacity:1;stroke-width:0.5;font-family:Courier, monospace;
+}
+.describer-text-route
+{
+font-size:12px;stroke:#00ff00;stroke-opacity:1;font-family:Courier, monospace;
 }
 .info-text
 {

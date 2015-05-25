@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2013, 2014 Phil Wieland
+    Copyright (C) 2013, 2014, 2015 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -41,7 +41,7 @@
 #include "db.h"
 
 #define NAME  "trustdb"
-#define BUILD "W104"
+#define BUILD "W330"
 
 static void perform(void);
 static void process_frame(const char * const body);
@@ -82,7 +82,8 @@ static time_t status_last_trust_processed, status_last_trust_actual;
 // Stats
 enum stats_categories {ConnectAttempt, GoodMessage, // Don't insert any here
                        Mess1, Mess2, Mess3, Mess4, Mess5, Mess6, Mess7, Mess8,
-                       NotMessage, NotRecog, Mess1Miss, Mess1MissHit, MovtNoAct, DeducedAct, MAXstats};
+                       NotMessage, NotRecog, Mess1Miss, Mess1MissHit, MovtNoAct, DeducedAct, 
+                       DeducedHC, DeducedHCReplaced, MAXstats};
 static qword stats[MAXstats];
 static qword grand_stats[MAXstats];
 static const char * stats_category[MAXstats] = 
@@ -90,6 +91,7 @@ static const char * stats_category[MAXstats] =
       "Stompy connect attempt", "Good message", 
       "Message type 1","Message type 2","Message type 3","Message type 4","Message type 5","Message type 6","Message type 7","Message type 8",
       "Not a message", "Invalid or not recognised", "Activation no schedule", "Found by second search", "Movement without act.", "Deduced activation",
+      "Deduced headcode", "Changed deduced headcode",
    };
 
 // Message count
@@ -467,7 +469,7 @@ static void process_frame(const char * const body)
           _log(DEBUG, "STOMP message contains a single TRUST message.");
       }
 
-      for(i=0; i < messages && run; i++)
+      for(i=0; i < messages; i++)
       {
          char message_name[128];
          jsmn_find_extract_token(body, tokens, index, "msg_type", message_name, sizeof(message_name));
@@ -521,7 +523,7 @@ static void process_trust_0001(const char * const string, const jsmntok_t * cons
    char zs[128], zs1[128], report[1024];
    char train_id[64], train_uid[64];
    char query[1024];
-   dword cif_schedule_id;
+   dword cif_schedule_id = 0;
    MYSQL_RES * result0;
    MYSQL_ROW row0;
    
@@ -554,7 +556,7 @@ static void process_trust_0001(const char * const string, const jsmntok_t * cons
    strcat(report, zs1);
 
    // Bodge.  The ORDER BY here will *usually* get the correct one out first!
-   sprintf(query, "select id from cif_schedules where cif_train_uid = '%s' AND schedule_start_date = %ld AND schedule_end_date = %ld AND deleted > %ld ORDER BY LOCATE(CIF_stp_indicator, 'OCPN')", train_uid, schedule_start_date_stamp, schedule_end_date_stamp, time(NULL));
+   sprintf(query, "select id from cif_schedules where cif_train_uid = '%s' AND schedule_start_date = %ld AND schedule_end_date = %ld AND deleted > %ld AND CIF_stp_indicator != 'C' ORDER BY LOCATE(CIF_stp_indicator, 'OCNP')", train_uid, schedule_start_date_stamp, schedule_end_date_stamp, time(NULL));
    if(!db_query(query))
    {
       result0 = db_store_result();
@@ -580,6 +582,7 @@ static void process_trust_0001(const char * const string, const jsmntok_t * cons
                _log(MINOR, "   Second attempt also missed.");
                time_t now = time(NULL);
                sprintf(query, "INSERT INTO trust_activation VALUES(%ld, '%s', %ld, 0)", now, train_id, 0L);
+               cif_schedule_id = 0;
                db_query(query);
                if(debug) jsmn_dump_tokens(string, tokens, index);
             }
@@ -604,6 +607,57 @@ static void process_trust_0001(const char * const string, const jsmntok_t * cons
          db_query(query);
       }
       mysql_free_result(result0);
+
+      // Deduced headcode
+      if(cif_schedule_id &&
+         train_id[2] >= '0' && train_id[2] <= '9' &&
+         train_id[3] >= 'A' && train_id[3] <= 'Z' &&
+         train_id[4] >= '0' && train_id[4] <= '9' &&
+         train_id[5] >= '0' && train_id[5] <= '9')
+      {
+         char act_headcode[16];
+         strcpy(act_headcode, train_id + 2);
+         act_headcode[4] = '\0';
+         sprintf(query, "SELECT signalling_id, deduced_headcode, deduced_headcode_status from cif_schedules where id = %ld", cif_schedule_id);
+         if(!db_query(query))
+         {
+            result0 = db_store_result();
+            if((row0 = mysql_fetch_row(result0)))
+            {
+               _log(DEBUG, "Deduce headcode:  From trust_id \"%s\", sig id \"%s\", deduced (before) \"%s\", deduced status \"%s\", schedule id %ld.",act_headcode, row0[0], row0[1], row0[2], cif_schedule_id);
+               if(row0[0][0] && strcmp(act_headcode, row0[0]))
+               {
+                  _log(MINOR, "Headcode \"%s\" from trust ID does not match schedule headcode \"%s\".", act_headcode, row0[0]);
+               }
+               else if(!row0[0][0])
+               {
+                  // Schedule doesn't have a specified headcode.
+                  if(!row0[1][0])
+                  {
+                     // Not previously deduced
+                     sprintf(query, "UPDATE cif_schedules SET deduced_headcode = '%s', deduced_headcode_status = 'A' WHERE id = %ld", act_headcode, cif_schedule_id);
+                     _log(MINOR, "Deduced headcode \"%s\" for schedule %ld.", act_headcode, cif_schedule_id);
+                     db_query(query);
+                     stats[DeducedHC]++;
+                  }
+                  else if(strcmp(row0[1], act_headcode))
+                  {
+                     // Previously deduced and it doesn't match
+                     sprintf(query, "UPDATE cif_schedules SET deduced_headcode = '%s', deduced_headcode_status = 'A' WHERE id = %ld", act_headcode, cif_schedule_id);
+                     _log(MAJOR, "Previously deduced headcode \"%s\", status \"%s\" replaced by \"%s\" for schedule %ld.", row0[1], row0[2], act_headcode, cif_schedule_id);
+                     db_query(query);
+                     stats[DeducedHCReplaced]++;
+                  }
+                  else
+                  {
+                     // Matches previous
+                     _log(DEBUG, "Previously deduced headcode \"%s\", status \"%s\" confirmed for schedule %ld.", row0[1], row0[2], cif_schedule_id);
+                  }
+               }
+            }
+            mysql_free_result(result0);
+         }
+      }
    }
    return;
 }
@@ -748,8 +802,11 @@ static void process_trust_0003(const char * string, const jsmntok_t * tokens, co
 #ifdef NO_DEDUCE_ACT
          return;
 #endif
-   
-         if(planned_timestamp == 0)
+         if(!run)
+         {
+            strcpy(reason, "Abort received");
+         }
+         else if(planned_timestamp == 0)
          {
             strcpy(reason, "No planned timestamp");
          }
@@ -1050,7 +1107,7 @@ static void create_database(void)
 ") ENGINE = InnoDB"
                );
       db_query(
-"INSERT INTO status VALUES(0, 0, 0, 0, 0)"
+"INSERT INTO status VALUES(0, 0, 0, 0)"
                );
       _log(GENERAL, "Created database table status.");
    }

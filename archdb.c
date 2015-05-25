@@ -34,7 +34,7 @@
 #include "db.h"
 
 #define NAME  "archdb"
-#define BUILD "W109"
+#define BUILD "W429"
 
 static int smart_loop(const word initial_quantity, int (*f)(word), const word stat);
 static void create_database(void);
@@ -49,7 +49,7 @@ static int trust_changeid(const word quantity);
 static int trust_generic(const char * const table, const word quantity, const word stat);
 static word check_space(void);
 
-static word debug, run, report_only;
+static word debug, run, report_only, verbose;
 static time_t start_time, last_reported_time;
 
 #define NONE_FOUND -98
@@ -93,11 +93,12 @@ int main(int argc, char **argv)
 
    age = 0;
    report_only = false;
+   verbose = false;
 
    word usage = false;
    int c;
    strcpy(config_file_path, "/etc/openrail.conf");
-   while ((c = getopt (argc, argv, ":rc:a:")) != -1)
+   while ((c = getopt (argc, argv, ":rc:a:p")) != -1)
    {
       switch (c)
       {
@@ -109,6 +110,9 @@ int main(int argc, char **argv)
          break;
       case 'a':
          age = atoi(optarg);
+         break;
+      case 'p':
+         verbose = true;
          break;
       case ':':
          break;
@@ -134,10 +138,11 @@ int main(int argc, char **argv)
    if(usage) 
    {
       printf(
-             "Usage: %s [-c <file>] [-a <days>]\n"
+             "Usage: %s [-c <file>] [-a <days>] [-p]\n"
              "   -c <file>  Path to config file.\n"
              "   -a <days>  Number of days to retain.  Omit this to skip the archiving.\n"
              "   -r         Report only, do not alter database.\n"
+             "   -p         Print activity as well as logging.\n"
              , argv[0]);
       exit(1);
    }
@@ -158,7 +163,7 @@ int main(int argc, char **argv)
       debug = 0;
    }
    
-   _log_init(debug?"/tmp/archdb.log":"/var/log/garner/archdb.log", debug?1:0);
+   _log_init(debug?"/tmp/archdb.log":"/var/log/garner/archdb.log", (debug?1:(verbose?4:0)));
    
    _log(GENERAL, "");
    _log(GENERAL, "%s %s", NAME, BUILD);
@@ -189,8 +194,6 @@ int main(int argc, char **argv)
    run = true;
 
    perform();
-
-   db_disconnect();
 
    char report[8192];
    char zs[1024];
@@ -227,6 +230,104 @@ int main(int argc, char **argv)
       strcat(report, "\n");
    }
 
+   {
+#define DB_REPORT_FORMAT "%30s: %s"
+      MYSQL_RES * result;
+      MYSQL_ROW row;
+      // Database report
+      _log(GENERAL, "Database size after archiving:");
+      strcat(report, "\nDatabase size after archiving:\n");
+
+      if(!db_query("SELECT COUNT(*) FROM cif_associations"))
+      {
+         result = db_store_result();
+         if((row = mysql_fetch_row(result))) 
+         {
+            sprintf(zs, DB_REPORT_FORMAT, "CIF association records", commas(atol(row[0])));
+            _log(GENERAL, zs);
+            strcat(report, zs);
+            strcat(report, "\n");
+         }
+      }
+      if(!db_query("SELECT COUNT(*) FROM cif_schedules"))
+      {
+         result = db_store_result();
+         if((row = mysql_fetch_row(result))) 
+         {
+            sprintf(zs, DB_REPORT_FORMAT, "CIF schedule records", commas(atol(row[0])));
+            _log(GENERAL, zs);
+            strcat(report, zs);
+            strcat(report, "\n");
+         }
+      }
+      if(!db_query("SELECT COUNT(*) FROM cif_schedule_locations"))
+      {
+         result = db_store_result();
+         if((row = mysql_fetch_row(result))) 
+         {
+            sprintf(zs, DB_REPORT_FORMAT, "CIF schedule location records", commas(atol(row[0])));
+            _log(GENERAL, zs);
+            strcat(report, zs);
+            strcat(report, "\n");
+         }
+      }
+      if(!db_query("SELECT COUNT(*) FROM trust_activation"))
+      {
+         result = db_store_result();
+         if((row = mysql_fetch_row(result))) 
+         {
+            sprintf(zs, DB_REPORT_FORMAT, "Trust activation records", commas(atol(row[0])));
+            _log(GENERAL, zs);
+            strcat(report, zs);
+            strcat(report, "\n");
+         }
+      }
+      if(!db_query("SELECT COUNT(*) FROM trust_cancellation"))
+      {
+         result = db_store_result();
+         if((row = mysql_fetch_row(result))) 
+         {
+            sprintf(zs, DB_REPORT_FORMAT, "Trust cancellation records", commas(atol(row[0])));
+            _log(GENERAL, zs);
+            strcat(report, zs);
+            strcat(report, "\n");
+         }
+      }
+      if(!db_query("SELECT COUNT(*) FROM trust_movement"))
+      {
+         result = db_store_result();
+         if((row = mysql_fetch_row(result))) 
+         {
+            sprintf(zs, DB_REPORT_FORMAT, "Trust movement records", commas(atol(row[0])));
+            _log(GENERAL, zs);
+            strcat(report, zs);
+            strcat(report, "\n");
+         }
+      }
+      if(!db_query("SELECT COUNT(*) FROM trust_changeid"))
+      {
+         result = db_store_result();
+         if((row = mysql_fetch_row(result))) 
+         {
+            sprintf(zs, DB_REPORT_FORMAT, "Trust change id records", commas(atol(row[0])));
+            _log(GENERAL, zs);
+            strcat(report, zs);
+            strcat(report, "\n");
+         }
+      }
+      if(!db_query("SELECT COUNT(*) FROM trust_changeorigin"))
+      {
+         result = db_store_result();
+         if((row = mysql_fetch_row(result))) 
+         {
+            sprintf(zs, DB_REPORT_FORMAT, "Trust change origin records", commas(atol(row[0])));
+            _log(GENERAL, zs);
+            strcat(report, zs);
+            strcat(report, "\n");
+         }
+      }
+
+   }
    email_alert(NAME, BUILD, "Database Archive Report", report);
 
    exit(0);
@@ -272,14 +373,7 @@ static int smart_loop(const word initial_quantity, int (*f)(word), const word st
       if(quantity > MAX_QUANTITY) quantity = MAX_QUANTITY;
       if(quantity < MIN_QUANTITY) quantity = MIN_QUANTITY;
       _log(DEBUG, "smart_loop():  %lld ms elapsed.  New quantity is %d", elapsed, quantity);
-      if(run) sleep(1);
-      if(run && debug) sleep(1);
-      if(run && debug) sleep(1);
-      if(run && debug) sleep(1);
-      if(run && debug) sleep(1);
-      if(run && debug) sleep(1);
-      if(run && debug) sleep(1);
-      if(run && debug) sleep(1);
+      if(run) sleep(debug?10:1);
    }
    _log(GENERAL, "   Final batch size was %d.", quantity);
    return 0;
@@ -454,7 +548,9 @@ static void create_database(void)
 "CIF_service_branding          CHAR(4) NOT NULL, "
 "schedule_start_date           INT UNSIGNED NOT NULL, "
 "train_status                  CHAR(1) NOT NULL, "
-"id                            INT UNSIGNED NOT NULL "
+"id                            INT UNSIGNED NOT NULL, "
+"deduced_headcode              CHAR(4) NOT NULL DEFAULT '', "
+"deduced_headcode_status       CHAR(1) NOT NULL DEFAULT ''  "
 ") ENGINE = InnoDB"
                );
       _log(GENERAL, "Created database table cif_schedules_arch.");
@@ -925,7 +1021,7 @@ static word check_space(void)
    if(!statfs("/var", &fstatus))
    {
       qword free = fstatus.f_bavail * fstatus.f_bsize;
-      if(free < 5000000000LL)
+      if(free < 2000000000LL)
       {
          _log(CRITICAL, "Disc free space %s bytes is too low.  Terminating run.", commas_q(free));
          return 1;

@@ -69,5 +69,6 @@ extern word read_stompy(void * buffer, const size_t max_size, const word seconds
 extern word ack_stompy(void);
 extern void close_stompy(void);
 extern void extract_match(const char * const source, const regmatch_t * const matches, const unsigned int match, char * result, const size_t max_length);
+extern char * system_call(const char * const command);
 
 #endif

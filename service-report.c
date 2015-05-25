@@ -31,11 +31,11 @@
 
 static void report(const char * const tiploc, const word year, const word month);
 static void report_day(const char * const tiploc, time_t when);
-static void report_train_day(const dword cif_schedule_id, const time_t when, const char * const tiploc);
+static void report_train_day(const word index, const time_t when, const char * const tiploc);
 static char * percentage(const dword num, const dword den);
 
 #define NAME "service-report"
-#define BUILD "VC11"
+#define BUILD "W521"
 
 static word debug;
 static word bus;
@@ -49,6 +49,24 @@ static const char * days_runs[8] = {"runs_su", "runs_mo", "runs_tu", "runs_we", 
 #define DAY_START  4*60*4
 
 static const char * days[] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
+
+#define MAX_CALLS 2048
+   static struct call_details
+   {
+      dword cif_schedule_id;
+      word sort_time;
+      byte next_day;
+      byte valid;
+      byte terminates;
+      char cif_stp_indicator;
+      char cif_train_uid[8];
+      char arrival[6], public_arrival[6], departure[6], public_departure[6], pass[6];
+      char platform[4];
+      char tiploc_code[8];
+   } 
+   calls[MAX_CALLS];
+   static word call_sequence[MAX_CALLS];
+   static word call_count;
 
 int main(int argc, char **argv)
 {
@@ -167,28 +185,13 @@ static void report(const char * const tiploc, const word year, const word month)
 
 static void report_day(const char * const tiploc, time_t when)
 {
-   MYSQL_RES * result0, * result1;
-   MYSQL_ROW row0, row1;
+   MYSQL_RES * result0;
+   MYSQL_ROW row0;
    char query[4096], zs[256];
    // When will be 12:00:00Z on the day in question (Or 11:00 or 13:00 if the clocks have changed)
 
-#define MAX_TRAINS 2048
-   struct train_details
-   {
-      dword cif_schedule_id;
-      byte next_day;
-      byte valid;
-      word sort_time;
-      char cif_train_uid[8];
-      char cif_stp_indicator;
-   } 
-   trains[MAX_TRAINS];
-   word train_sequence[MAX_TRAINS];
-
-   word train_count;
-
    //                    0                          1                      2                             3         4
-   strcpy(query, "SELECT cif_schedules.id, cif_schedules.CIF_train_uid, cif_schedules.CIF_stp_indicator, next_day, sort_time");
+   strcpy(query, "SELECT cif_schedules.id, cif_schedules.CIF_train_uid, cif_schedules.CIF_stp_indicator, next_day, sort_time, record_identity, arrival, public_arrival, departure, public_departure, pass, platform, tiploc_code");
    strcat(query, " FROM cif_schedules INNER JOIN cif_schedule_locations");
    strcat(query, " ON cif_schedules.id = cif_schedule_locations.cif_schedule_id");
    sprintf(zs, " WHERE (cif_schedule_locations.tiploc_code = '%s')", tiploc);
@@ -221,10 +224,9 @@ static void report_day(const char * const tiploc, time_t when)
    strcat(query, " ORDER BY LOCATE(cif_schedules.CIF_stp_indicator, 'NPO'), cif_schedule_id"); 
    
    word index, i;
-   dword cif_schedule_id;
    
-   // 1. Collect a list of unique schedule_id
-   train_count = 0;
+   // 1. Collect a list of calls
+   call_count = 0;
    //printf("<p>[%s]</p>", query);
    
    if(!db_query(query))
@@ -232,43 +234,43 @@ static void report_day(const char * const tiploc, time_t when)
       result0 = db_store_result();
       while((row0 = mysql_fetch_row(result0)))
       {
-         //printf("<br>%s ", row0[0]);
-         if(train_count >= MAX_TRAINS)
+         if(call_count >= MAX_CALLS)
          {
-            printf("<p>Error: MAX_TRAINS exceeded.</p>");
+            printf("Error: MAX_CALLS exceeded.\n");
             return;
          }
-         cif_schedule_id =  atol(row0[0]);
-         for(i=0; i < train_count && trains[i].cif_schedule_id != cif_schedule_id; i++);
-         
-         if(i == train_count)
-         {
-            //printf(" Insert at %d", train_count);
-            // Insert in array
-            trains[train_count].cif_schedule_id = cif_schedule_id;
-            strcpy(trains[train_count].cif_train_uid, row0[1]);
-            trains[train_count].cif_stp_indicator = row0[2][0];
-            trains[train_count].valid = true;
-            trains[train_count].sort_time = atoi(row0[4]);
-            trains[train_count].next_day = atoi(row0[3]);
-            train_count++;
-         }
+
+         // Insert in array
+         calls[call_count].cif_schedule_id        = atol(row0[0]);
+         calls[call_count].sort_time              = atoi(row0[4]);
+         calls[call_count].next_day               = atoi(row0[3]);
+         calls[call_count].valid                  = true;
+         calls[call_count].terminates             = !(strcmp(row0[5], "LT"));;
+         calls[call_count].cif_stp_indicator      = row0[2][0];
+         strcpy(calls[call_count].cif_train_uid,    row0[1]);
+         strcpy(calls[call_count].arrival,          row0[6]);
+         strcpy(calls[call_count].public_arrival,   row0[7]);
+         strcpy(calls[call_count].departure,        row0[8]);
+         strcpy(calls[call_count].public_departure, row0[9]);
+         strcpy(calls[call_count].pass,             row0[10]);
+         strcpy(calls[call_count].platform,         row0[11]);
+         strcpy(calls[call_count].tiploc_code,      row0[12]);
+         call_count++;
       }
       mysql_free_result(result0);
    }
    
    // 2. Cancel any which are overriden
-   for(index = 1; index < train_count; index++)
+   for(index = 1; index < call_count; index++)
    {
-      if(trains[index].valid && trains[index].cif_stp_indicator == 'O')
+      if(calls[index].valid && calls[index].cif_stp_indicator == 'O')
       {
          for(i = 0; i < index; i++)
          {
-            if(!strcmp(trains[i].cif_train_uid, trains[index].cif_train_uid))
+            if(!strcmp(calls[i].cif_train_uid, calls[index].cif_train_uid))
             {
                // Hit
-               trains[i].valid = false;
-               //printf("<br>Step 2 invalidates %d due to %d", i, index);
+               calls[i].valid = false;
             }
          }
       }
@@ -279,37 +281,37 @@ static void report_day(const char * const tiploc, time_t when)
    sprintf(zs, "3. Commencing C and O check.  day = %d", day);
    _log(DEBUG, zs);
    
-   for(index = 0; index < train_count; index++)
+   for(index = 0; index < call_count; index++)
    {
-      if(trains[index].valid)
+      if(calls[index].valid)
       {
-         sprintf(zs, "Testing index %d train \"%s\", sort_time = %d, next_day = %d", index, trains[index].cif_train_uid, trains[index].sort_time, trains[index].next_day );
+         sprintf(zs, "Testing index %d train \"%s\", sort_time = %d, next_day = %d", index, calls[index].cif_train_uid, calls[index].sort_time, calls[index].next_day );
          _log(DEBUG, zs);
          //                    0   1                 2                               3
          strcpy(query, "SELECT id, CIF_stp_indicator ");
          strcat(query, " FROM cif_schedules");
          strcat(query, " WHERE (cif_stp_indicator = 'C' OR cif_stp_indicator = 'O')");
-         sprintf(zs, " AND (CIF_train_uid = '%s')", trains[index].cif_train_uid);
+         sprintf(zs, " AND (CIF_train_uid = '%s')", calls[index].cif_train_uid);
          strcat(query, zs);
          sprintf(zs, " AND (deleted >= %ld)", when);
          strcat(query, zs);
 
-         if(trains[index].next_day && trains[index].sort_time >= DAY_START)
+         if(calls[index].next_day && calls[index].sort_time >= DAY_START)
          {
             sprintf(zs, " AND ((%s) AND (schedule_start_date <= %ld) AND (schedule_end_date >= %ld))",  days_runs[yest], when - 12*60*60, when - 36*60*60);
             strcat(query, zs);
          }
-         else if(trains[index].next_day && trains[index].sort_time < DAY_START)
+         else if(calls[index].next_day && calls[index].sort_time < DAY_START)
          {
             sprintf(zs, " AND ((%s) AND (schedule_start_date <= %ld) AND (schedule_end_date >= %ld))", days_runs[day],  when + 12*60*60, when - 12*60*60);
             strcat(query, zs);
          }
-         else if(!trains[index].next_day && trains[index].sort_time >= DAY_START)
+         else if(!calls[index].next_day && calls[index].sort_time >= DAY_START)
          {
             sprintf(zs, " AND ((%s) AND (schedule_start_date <= %ld) AND (schedule_end_date >= %ld))",  days_runs[day],  when + 12*60*60, when - 12*60*60);
             strcat(query, zs);
          }
-         else if(!trains[index].next_day && trains[index].sort_time < DAY_START)
+         else if(!calls[index].next_day && calls[index].sort_time < DAY_START)
          {
             sprintf(zs, " AND ((%s) AND (schedule_start_date <= %ld) AND (schedule_end_date >= %ld))",  days_runs[tom],  when + 36*60*60, when + 12*60*60); 
             strcat(query, zs);
@@ -323,21 +325,21 @@ static void report_day(const char * const tiploc, time_t when)
                if(row0[1][0] == 'C')
                {
                   // Cancelled
-                  trains[index].valid = false;
+                  calls[index].valid = false;
                   //printf("<br>Step 3:  %d invalidated due to C", index);
-                  sprintf(zs, "Schedule %ld (%s) cancelled by schedule %s.", trains[index].cif_schedule_id, trains[index].cif_train_uid, row0[0]);
-                  _log(DEBUG, zs);
+                  _log(DEBUG, "Schedule %ld (%s) cancelled by schedule %s.", calls[index].cif_schedule_id, calls[index].cif_train_uid, row0[0]);
                }
                else 
                {
                   // Overlay
                   // We will come here with an overlay we already know about OR one which *doesn't come here*
+                  // In either case we invalidate this schedule.  If the overlay comes here it will already be in the list, somewhere.
                   dword overlay_id = atol(row0[0]);
-                  _log(DEBUG, "Overlay id = %ld, train id = %ld", overlay_id, trains[index].cif_schedule_id);
-                  if(overlay_id != trains[index].cif_schedule_id || trains[index].cif_stp_indicator == 'N' || trains[index].cif_stp_indicator == 'P')
+                  _log(DEBUG, "Overlay id = %ld, train id = %ld", overlay_id, calls[index].cif_schedule_id);
+                  if(overlay_id != calls[index].cif_schedule_id || calls[index].cif_stp_indicator == 'N' || calls[index].cif_stp_indicator == 'P')
                   {
-                     // Overlay doesn't come here.
-                     trains[index].valid = false;
+                     // Supercede
+                     calls[index].valid = false;
                      _log(DEBUG, "Step 3:  %d invalidated due to O id = %s", index, row0[0]);
                   }
                }
@@ -347,94 +349,43 @@ static void report_day(const char * const tiploc, time_t when)
       }
    }
 
-   // 4. We now have a list of unique garner schedule ids, all of which call here once OR MORE
-   // in the huyton_special case they may call at huyton or junction or both but will still have only one entry here.
-   // All entries have .cif_schedule_location_id == 0 now, we will set this as we process them,
-   // any still ==0 at the end of step 4 will be huyton_special HUYTJUN-only trains for step 4a to process. 
-   _log(DEBUG, "4. Add any second calls.  Poplulate schedule_location_d field.");
-   word limit = train_count;
-   word instances;
-
-   for(index = 0; index < limit; index++)
-   {
-      if(trains[index].valid)
-      {
-         instances = 0;
-
-         sprintf(query, "SELECT sort_time, next_day from cif_schedule_locations WHERE cif_schedule_id = %ld AND tiploc_code = '%s'", trains[index].cif_schedule_id, tiploc);
-         if(!db_query(query))
-         {
-            result1 = db_store_result();
-            while((row1 = mysql_fetch_row(result1)))
-            {
-               if(instances++)
-               {
-                  // Second or subsequent visit to this location.  Append to end of array
-                  trains[train_count].cif_schedule_id = trains[index].cif_schedule_id;
-                  strcpy(trains[train_count].cif_train_uid, trains[index].cif_train_uid);
-                  trains[train_count].cif_stp_indicator = trains[index].cif_stp_indicator;
-                  trains[train_count].valid = true;
-                  trains[train_count].sort_time = atoi(row1[0]);
-                  trains[train_count].next_day = atoi(row1[1]);
-                  _log(DEBUG, "Step 4:  Second visit for %ld, populated entry %d.", trains[index].cif_schedule_id, train_count);
-                  train_count++;
-               }
-               else
-               {
-                  // First visit.  
-               }
-            }
-            mysql_free_result(result1);
-         }
-      }
-   }
-
-
    // 5. Bubble Sort
    {
       word i,j;
 
       word run = true;
 
-      //printf("<p>Before sort: ");
-      //for(j=0; j < train_count; j++)
-      //{
-      //   printf("<br>%d %ld %s", j, trains[j].cif_schedule_id, trains[j].valid?"":"Invalidated");
-      //}
-      //printf("</p>\n");
-
-      // First, mung the sort_time so that early hours trains come after the others:
-      for(j=0; j< train_count; j++)
+     // First, mung the sort_time so that early hours trains come after the others:
+      for(j=0; j< call_count; j++)
       {
          // Early hours trains come after all the others.
-         if(trains[j].sort_time < DAY_START) trains[j].sort_time += 10000;
-         train_sequence[j] = j;
-         //if(!trains[j].cif_schedule_location_id) printf("<br>Step 5: %d not populated.", j);
+         if(calls[j].sort_time < DAY_START) calls[j].sort_time += 10000;
+         call_sequence[j] = j;
       }
 
-      for(j = train_count; run && j > 1; j--)
+      for(j = call_count; run && j > 1; j--)
       {
          run = false;
          for(i=1; i < j; i++)
          {
-            if(trains[train_sequence[i]].sort_time < trains[train_sequence[i-1]].sort_time)
+            if(calls[call_sequence[i]].sort_time < calls[call_sequence[i-1]].sort_time)
             {
                run = true;
                // Swap
-               word tempo = train_sequence[i];
-               train_sequence[i] = train_sequence[i-1];
-               train_sequence[i-1] = tempo;
+               word tempo = call_sequence[i];
+               call_sequence[i] = call_sequence[i-1];
+               call_sequence[i-1] = tempo;
             }
          }
       }
    }
    
    nlate = nlater = ncape = ntrain = nbus = 0;
-   for(index = 0; index < train_count; index++)
+   for(index = 0; index < call_count; index++)
    {
-      if(trains[train_sequence[index]].valid)
+      if(calls[call_sequence[index]].valid)
       {
-         report_train_day(trains[train_sequence[index]].cif_schedule_id, when, tiploc);
+         report_train_day(call_sequence[index], when, tiploc);
       }
    }
 
@@ -496,7 +447,7 @@ static void report_day(const char * const tiploc, time_t when)
    gbus += nbus;
 }
 
-static void report_train_day(const dword cif_schedule_id, const time_t when, const char * const tiploc)
+static void report_train_day(const word index, const time_t when, const char * const tiploc)
 {
    enum statuses {NoReport, Activated, Moving, Cancelled, Arrived, Departed};
    MYSQL_RES * result0, * result1;
@@ -504,41 +455,15 @@ static void report_train_day(const dword cif_schedule_id, const time_t when, con
 
    char query[1024];
    word status;
-   char actual[16], expected[16];
+   char actual[16];
    word deviation, deduced, late;
-   word next_day, sort_time;
-   char depart[8];
    struct tm * broken;
 
    deviation = late = status = bus = deduced = 0;
+   dword cif_schedule_id = calls[index].cif_schedule_id;
    
    _log(DEBUG, "report_train_day(%ld, %ld, \"%s\")", cif_schedule_id, when, tiploc);
    
-   // N.B.  The following wont work properly for a second call!
-   //                         0         1            2               3
-   sprintf(query, "select next_day, sort_time, public_departure, departure from cif_schedule_locations where cif_schedule_id = %ld AND tiploc_code = '%s'", cif_schedule_id, tiploc);
-   db_query(query);
-   result0 = db_store_result();
-   if((row0 = mysql_fetch_row(result0)))
-   {
-      next_day        = atoi(row0[0]);
-      sort_time       = atoi(row0[1]);
-      strcpy(depart, row0[2]);
-      if(!depart[0]) strcpy(depart, row0[3]);
-      strcpy(expected, row0[2]);
-      _log(DEBUG, "Got schedule id etc.");
-   }
-   else
-   {
-      _log(MAJOR, "report_train() failed to select call details.");
-      return;
-   }
-   mysql_free_result(result0);
-
-   // Calculate start_date from when, deducting 24h if next_day and/or adding 24h if after 00:00.
-   time_t start_date = when - (next_day?(24*60*60):0);
-   if(sort_time < DAY_START) start_date += (24*60*60);
-
    //                     0             1                    2                  3              4              5                  6           
    sprintf(query, "SELECT train_status, schedule_start_date, schedule_end_date, signalling_id, CIF_train_uid, CIF_stp_indicator, update_id FROM cif_schedules WHERE id = %ld", cif_schedule_id);
 
@@ -555,14 +480,10 @@ static void report_train_day(const dword cif_schedule_id, const time_t when, con
          // TRUST
          if(!bus)
          {
-            // TEMPO
-            _log(CRITICAL, "CIF schedule id %ld is a train!", cif_schedule_id);
-            // TEMPO
-
             char query[512], trust_id[16];
             MYSQL_RES * result2;
             MYSQL_ROW row2;
-            broken = gmtime(&start_date);
+            broken = gmtime(&when);
             byte dom = broken->tm_mday;
 
             // Only accept activations where dom matches, and are +- 15 days (To eliminate last month's activation.)  YUK
@@ -603,6 +524,7 @@ static void report_train_day(const dword cif_schedule_id, const time_t when, con
                            {
                               if(!strcasecmp(tiploc, row2[0]))
                               {
+                                 // Bug: For a train which calls twice, we will analyse the first visit twice.
                                  if(!strcasecmp("departure", row1[0]))
                                  {
                                     // Got a departure report at our station

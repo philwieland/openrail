@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2013, 2014 Phil Wieland
+    Copyright (C) 2013, 2014, 2015 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -32,7 +32,7 @@
 #include "db.h"
 
 #define NAME  "cifdb"
-#define BUILD "W105"
+#define BUILD "W501"
 
 static void process_object(const char * object);
 static void process_timetable(const char * string, const jsmntok_t * tokens);
@@ -51,7 +51,7 @@ static word fetch_file(void);
 static size_t cif_write_data(void *buffer, size_t size, size_t nmemb, void *userp);
 static char * tiploc_name(const char * const tiploc);
 
-static word debug, reset_db, fetch_all, run, tiploc_ignored, test_mode, verbose, insecure;
+static word debug, reset_db, fetch_all, run, tiploc_ignored, test_mode, verbose, opt_insecure, used_insecure;
 static char * opt_filename;
 static char * opt_url;
 static dword update_id;
@@ -65,6 +65,7 @@ enum stats_categories {Fetches, Sequence, DBError,
                        ScheduleCreate, ScheduleDeleteHit, ScheduleDeleteMiss,
                        ScheduleLocCreate,
                        AssocCreate, AssocDeleteHit, AssocDeleteMiss,
+                       JSONRecords, CIFRecords,
                        MAXStats };
 static qword stats[MAXStats];
 static const char * stats_category[MAXStats] = 
@@ -73,6 +74,7 @@ static const char * stats_category[MAXStats] =
       "Schedule Create", "Schedule Delete Hit", "Schedule Delete Miss",
       "Schedule Location Create",
       "Association Create", "Association Delete Hit", "Association Delete Miss",
+      "Total JSON Records", "Approx. CIF Records", 
    };
 #define HOME_REPORT_SIZE 512
 static unsigned long home_report_id[HOME_REPORT_SIZE];
@@ -173,6 +175,8 @@ static const char const * create_table_cif_schedules =
 "schedule_start_date           INT UNSIGNED NOT NULL, "
 "train_status                  CHAR(1) NOT NULL, "
 "id                            INT UNSIGNED NOT NULL AUTO_INCREMENT, "
+"deduced_headcode              CHAR(4) NOT NULL DEFAULT '', "
+"deduced_headcode_status       CHAR(1) NOT NULL DEFAULT '', "
 "PRIMARY KEY (id), INDEX(schedule_end_date), INDEX(schedule_start_date), INDEX(CIF_train_uid), INDEX(CIF_stp_indicator) "
 ") ENGINE = InnoDB";
 
@@ -210,7 +214,8 @@ int main(int argc, char **argv)
    fetch_all = false;
    test_mode = false;
    verbose = false;
-   insecure = false;
+   opt_insecure = false;
+   used_insecure = false;
 
    strcpy(config_file_path, "/etc/openrail.conf");
    word usage = false;
@@ -240,7 +245,7 @@ int main(int argc, char **argv)
          verbose = true;
          break;
       case 'i':
-         insecure = true;
+         opt_insecure = true;
          break;
       case 'h':
          usage = true;
@@ -274,7 +279,7 @@ int main(int argc, char **argv)
              "-t         Report datestamp on file, do not apply to database.\n"
              "-r         Reset database.  Do not process any data.\n"
              "Options:\n"
-             "-i         Insecure.  Circumvent certificate checks.\n"
+             "-i         Insecure.  Circumvent certificate checks if necessary.\n"
              "-p         Print activity as well as logging.\n"
              );
       exit(1);
@@ -305,13 +310,6 @@ int main(int argc, char **argv)
    
    _log(GENERAL, "");
    _log(GENERAL, "%s %s", NAME, BUILD);
-   
-
-   if(debug)
-   {
-      _log(GENERAL, "Debug mode selected.  Using TEST database.");
-      _log(GENERAL, "To use live database, change the debug flag in the config file to 'false'");
-   }
    
    if(debug)
    {
@@ -360,7 +358,7 @@ int main(int argc, char **argv)
    // Zero the stats
    {
       word i;
-      for(i=0; i < MAXStats; i++) { stats[i] = 0; }
+      for(i = 0; i < MAXStats; i++) { stats[i] = 0; }
    }
    home_report_index = 0;
 
@@ -415,7 +413,11 @@ int main(int argc, char **argv)
       char c, pc;
       pc = 0;
       // Run through the file splitting off each JSON object and passing it on for processing.
-      while((buf_end = fread(buffer, 1, MAX_BUF, fp_result)) && run)
+
+      // DB may have dropped out due to long delay
+      (void) db_connect();
+      if(db_start_transaction()) _log(CRITICAL, "Failed to initiate database transaction.");
+      while((buf_end = fread(buffer, 1, MAX_BUF, fp_result)) && run && !db_errored)
       {
          // Comfort report
          time_t now = time(NULL);
@@ -431,7 +433,7 @@ int main(int argc, char **argv)
             last_reported_time += (10*60);
          }
          
-         for(ibuf = 0; ibuf < buf_end && run; ibuf++)
+         for(ibuf = 0; ibuf < buf_end && run && !db_errored; ibuf++)
          {
             c = buffer[ibuf];
             if(c != '\r' && c != '\n') 
@@ -456,9 +458,24 @@ int main(int argc, char **argv)
          }
       }
       fclose(fp_result);
+      if(db_errored)
+      {
+         _log(CRITICAL, "Update rolled back due to database error.");
+         (void) db_rollback_transaction();
+      }
+      else
+      {
+         _log(GENERAL, "Committing database updates...");
+         if(db_commit_transaction())
+         {
+            _log(CRITICAL, "Database commit failed.");
+         }
+         else
+         {
+            _log(GENERAL, "Committed.");
+         }
+      }
    }
-
-   db_disconnect();
 
 #define REPORT_SIZE 4096
    char report[REPORT_SIZE];
@@ -467,9 +484,10 @@ int main(int argc, char **argv)
    _log(GENERAL, "");
    _log(GENERAL, "End of run:");
 
-   if(insecure)
+   if(used_insecure)
    {
-      strcat(report, "*** Warning: Insecure mode selected.\n");
+      strcat(report, "*** Warning: Insecure download used.\n");
+      _log(GENERAL, "*** Warning: Insecure download used.");
    }
 
    sprintf(zs, "             Elapsed time: %ld minutes", (time(NULL) - start_time + 30) / 60);
@@ -510,13 +528,14 @@ int main(int argc, char **argv)
          result0 = NULL;
          sprintf(zs, "%ld ", home_report_id[i]);
          
-         sprintf(q, "select CIF_train_UID, signalling_id, schedule_start_date, schedule_end_date FROM cif_schedules WHERE id = %ld", home_report_id[i]);
+         //                       0             1                  2                    3                 4
+         sprintf(q, "select CIF_train_UID, signalling_id, schedule_start_date, schedule_end_date, CIF_stp_indicator FROM cif_schedules WHERE id = %ld", home_report_id[i]);
          if(!db_query(q))
          {
             result0 = db_store_result();
             if((row0 = mysql_fetch_row(result0)))
             {
-               sprintf(train, "(%s) %4s ", row0[0], row0[1]);
+               sprintf(train, "(%s %s) %4s ", row0[0], row0[4], row0[1]);
                strcat(zs, train);
             }
          }
@@ -581,6 +600,8 @@ int main(int argc, char **argv)
       }
    }
 
+   db_disconnect();
+
    email_alert(NAME, BUILD, "Timetable Update Report", report);
 
    exit(0);
@@ -618,6 +639,9 @@ static void process_object(const char * object_string)
    if(tokens[1].type == JSMN_NAME)
    {
       char message_name[128];
+
+      stats[JSONRecords]++; // NB This INCLUDES ones we don't use, like TiplocV1
+      stats[CIFRecords]++;  // NB This INCLUDES ones we don't use, like TiplocV1
       jsmn_extract_token(object_string, tokens, 1, message_name, sizeof(message_name));
       if(!strcmp(message_name, "JsonTimetableV1"))        process_timetable(object_string, tokens);
       else if(!strcmp(message_name, "JsonAssociationV1")) process_association(object_string, tokens);
@@ -629,6 +653,8 @@ static void process_object(const char * object_string)
          sprintf(zs, "Unrecognised message name \"%s\".", message_name);
          _log(MINOR, zs);
          jsmn_dump_tokens(object_string, tokens, 0);
+         stats[JSONRecords]--;
+         stats[CIFRecords]--;
       }
    }
    else
@@ -961,7 +987,7 @@ static void process_create_schedule(const char * string, const jsmntok_t * token
 
    EXTRACT_APPEND_SQL("train_status");
 
-   strcat(query, ", 0)");
+   strcat(query, ", 0, '', '')");
 
    if(db_query(query)) stats[DBError]++;
       
@@ -976,6 +1002,7 @@ static void process_create_schedule(const char * string, const jsmntok_t * token
    for(i = 0; i < locations; i++)
    {
       index = process_schedule_location(string, tokens, index, id);
+      stats[CIFRecords]++;
    }
 }
 
@@ -1224,21 +1251,33 @@ static word fetch_file(void)
       sprintf(zs, "%s:%s", conf.nr_user, conf.nr_pass);
       curl_easy_setopt(curlh, CURLOPT_USERPWD, zs);
       curl_easy_setopt(curlh, CURLOPT_FOLLOWLOCATION,        1);  // On receiving a 3xx response, follow the redirect.
-      if(insecure)
-      {
-         curl_easy_setopt(curlh, CURLOPT_SSL_VERIFYPEER, 0);
-         curl_easy_setopt(curlh, CURLOPT_SSL_VERIFYHOST, 0);
-      }
-
       total_bytes = 0;
 
       CURLcode result;
       if((result = curl_easy_perform(curlh)))
       {
-         sprintf(zs, "fetch_file(): curl_easy_perform() returned error %d: %s.", result, curl_easy_strerror(result));
-         _log(MAJOR, zs);
-         if(fp_result) fclose(fp_result);
-         return 1;
+         _log(MAJOR, "fetch_file(): curl_easy_perform() returned error %d: %s.", result, curl_easy_strerror(result));
+         if(opt_insecure && (result == 51 || result == 60))
+         {
+            _log(MAJOR, "Retrying download in insecure mode.");
+            // SSH failure, retry without
+            curl_easy_setopt(curlh, CURLOPT_SSL_VERIFYPEER, 0);
+            curl_easy_setopt(curlh, CURLOPT_SSL_VERIFYHOST, 0);
+            used_insecure = true;
+            if((result = curl_easy_perform(curlh)))
+            {
+               _log(MAJOR, "fetch_file(): In insecure mode curl_easy_perform() returned error %d: %s.", result, curl_easy_strerror(result));
+               if(fp_result) fclose(fp_result);
+               fp_result = NULL;
+               return 1;
+            }
+         }
+         else
+         {
+            if(fp_result) fclose(fp_result);
+            fp_result = NULL;
+            return 1;
+         }
       }
    
       if(fp_result) fclose(fp_result);
@@ -1254,13 +1293,11 @@ static word fetch_file(void)
       if(total_bytes == 0) return 1;
    
       sprintf(zs, "/bin/gunzip -f %s", filepathz);
-      int rc;
-      if((rc = system(zs)))
+      char * rc;
+      if((rc = system_call(zs)))
       {
-         // Seems to return -1 but work OK when root?????
-         //         sprintf(zs, "gunzip returned error %d", rc);
-         //garner_log(MAJOR, zs);
-         //failed = true;
+         _log(MAJOR, "Failed to uncompress file:  %s", rc);
+         return 1;
       }
    }
    else
@@ -1314,9 +1351,9 @@ static word fetch_file(void)
 
          if(!test_mode && !opt_url && !opt_filename && (now < stamp || now - stamp > 36*60*60))
          {
-            sprintf(zs, "Timestamp %s is incorrect.", time_text(stamp, 0));
-            _log(MAJOR, zs);
+            _log(MAJOR, "Timestamp %s is incorrect.  Received sequence number %d.", time_text(stamp, 0), stats[Sequence]);
             fclose(fp_result);
+            stats[Sequence] = 0;
             return 1;
          }
       }
@@ -1325,7 +1362,6 @@ static word fetch_file(void)
    
    return 0;
 }
-
 
 static size_t cif_write_data(void *buffer, size_t size, size_t nmemb, void *userp)
 {

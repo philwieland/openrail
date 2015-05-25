@@ -52,7 +52,7 @@ word db_init(const char * const s, const char * const u, const char * const p, c
 
 word db_query(const char * const query)
 {
-   if(strlen(query) > 2000)
+   if(strlen(query) > 4000)
    {
       _log(MAJOR, "db_query() called with overlong query.");
       db_errored = true;

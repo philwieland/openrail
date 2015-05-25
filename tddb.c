@@ -41,7 +41,7 @@
 #include "db.h"
 
 #define NAME  "tddb"
-#define BUILD "W115"
+#define BUILD "W415"
 
 static void perform(void);
 static void process_frame(const char * const body);
@@ -76,13 +76,13 @@ static jsmntok_t tokens[NUM_TOKENS];
 static time_t start_time;
 
 // Describers 
-#define DESCRIBERS 2
-static const char * describers[DESCRIBERS] = {"M1", "XZ"};
+#define DESCRIBERS 3
+static const char * describers[DESCRIBERS] = {"M1", "XZ", "WA"};
 
 // Status
-static time_t status_last_td_processed, status_last_td_actual[DESCRIBERS];
+static time_t status_last_td_processed;
 static word timeout_reported[DESCRIBERS];
-static time_t last_td_processed[DESCRIBERS];
+static time_t last_td_processed[DESCRIBERS], status_last_td_actual[DESCRIBERS];
 
 enum data_types {Berth, Signal};
 
@@ -98,7 +98,7 @@ static const char * stats_category[MAXstats] =
 
 // Signalling
 #define SIG_BYTES 256
-static word no_of_sig_address[DESCRIBERS] = {8, 0};
+static word no_of_sig_address[DESCRIBERS] = {8, 0, 14};
 static word signalling[DESCRIBERS][SIG_BYTES];
 
 // Update handle.  MAX_HANDLE must be < 32767
@@ -474,7 +474,7 @@ static void perform(void)
       if(run) check_timeout();
       {      
          word i;
-         if(holdoff < 128) holdoff += 15;
+         if(holdoff < 128) holdoff += 17;
          else holdoff = 128;
          for(i = 0; i < holdoff && run; i++) sleep(1);
       }

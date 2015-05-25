@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2014 Phil Wieland
+    Copyright (C) 2014, 2015 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -37,12 +37,14 @@ static void query(void);
 static char * location_name(const char * const tiploc);
 
 #define NAME "livesig"
-#define BUILD "W114"
+#define BUILD "W428"
 
 word debug;
 enum {PageMode, UpdateMode, QueryMode} mode;
 static time_t now;
-static char parameters[10][128];
+#define PARMS 10
+#define PARMSIZE 128
+static char parameters[PARMS][PARMSIZE];
 
 int main()
 {
@@ -53,7 +55,7 @@ int main()
    word i, j, k, l;
    i = j = k = l = 0;
    if(parms && parms[0] == '/') i++;
-   while(j < 10 && parms[i] && k < 128 && parms)
+   while(j < PARMS && parms[i] && k < PARMSIZE - 1 && parms)
    {
       if(parms[i] == '/')
       {
@@ -73,7 +75,7 @@ int main()
    }
    if(k) parameters[j++][k] = '\0';
 
-   while(j < 10) parameters[j++][0] = '\0';
+   while(j < PARMS) parameters[j++][0] = '\0';
 
    if(load_config("/etc/openrail.conf"))
    {
@@ -82,9 +84,6 @@ int main()
    }
 
    debug = !strcasecmp(conf.debug,"true");
-
-   // TEMPO
-   debug = true;
 
    // Set up log
    {
@@ -107,7 +106,6 @@ int main()
    if(!strcasecmp(parameters[0], "u")) 
    {
       // Update
-      // parameters[1] is map designator, parameters[2] = handle
       printf("Content-Type: text/plain\nCache-Control: no-cache\n\n");
       mode = UpdateMode;
    }
@@ -120,18 +118,8 @@ int main()
    else
    {
       // Page
-      // parameters[0] is map designator (Or blank)
+      // parameters[0] is map number
       mode = PageMode;
-      printf("Content-Type: text/html; charset=iso-8859-1\n\n");
-      printf("<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.01 Transitional//EN\" \"http://www.w3.org/TR/html4/loose.dtd\">\n");
-      printf("<html xmlns=\"http://www.w3.org/1999/xhtml\" lang=\"en\" xml:lang=\"en\">\n");
-      printf("<head>\n");
-      printf("<title>%s %s</title>\n", NAME, BUILD);
-      printf("<link rel=\"stylesheet\" type=\"text/css\" href=\"/auxy/livesig.css\">\n");
-      printf("</head>\n");
-      printf("<body style=\"font-family: arial,sans-serif; background:#eeeeee\" onload=\"startup('%s');\">\n", parameters[0][0]?parameters[0]:"M1");
-      //printf("<body style=\"font-family: arial,sans-serif; background:#eeeeee\" onload=\"startup();\">\n");
-      printf("<script type=\"text/javascript\" src=\"/auxy/livesig.js\"></script>\n");
    }
 
    // Initialise database
@@ -158,7 +146,8 @@ int main()
          char host[256], query[256];
          if(gethostname(host, sizeof(host))) host[0] = '\0';
          time_t last_actual = 0;
-         sprintf(query, "SELECT last_timestamp FROM td_status WHERE d = '%s'", parameters[2][0]?parameters[2]:"M1");
+         sprintf(query, "SELECT last_timestamp FROM td_status WHERE d = '%s'", parameters[2]);
+         // Bug:  query should have OR d = '%s' for parameters[3..]
          if(!db_query(query))
          {
             MYSQL_RES * result = db_store_result();
@@ -169,7 +158,9 @@ int main()
             }
             mysql_free_result(result);
          }
-         printf("%d|%s|%s|%s|%s\n", ((time(NULL) - last_actual < 64)?0:1), time_text(last_actual, 1), NAME, BUILD, host);
+         strcpy(query, time_text(last_actual, 1));
+         query[14] = '\0';
+         printf("%d|%s|%s|%s|%s\n", ((time(NULL) - last_actual < 64)?0:1), query, NAME, BUILD, host);
       }
       break;
 
@@ -185,17 +176,28 @@ int main()
 
 static void page(void)
 {
-   if(!strcmp(parameters[0], "M1") || !parameters[0][0])
-   {
-      printf("<object id=\"diagram\" width=\"1260\" height=\"290\" type=\"image/svg+xml\" data=\"/auxy/livesig.svg\"></object>\n");
-   }
-   else if(!strcmp(parameters[0], "XZ"))
-   {
-      printf("<object id=\"diagram\" width=\"1260\" height=\"290\" type=\"image/svg+xml\" data=\"/auxy/livesigXZ.svg\"></object>\n");
-   }
+   word map_id = atoi(parameters[0]);
 
+   printf("Content-Type: text/html; charset=iso-8859-1\n\n");
+   printf("<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.01 Transitional//EN\" \"http://www.w3.org/TR/html4/loose.dtd\">\n");
+   printf("<html xmlns=\"http://www.w3.org/1999/xhtml\" lang=\"en\" xml:lang=\"en\">\n");
+   printf("<head>\n");
+   printf("<title>%s %s</title>\n", NAME, BUILD);
+   printf("<link rel=\"stylesheet\" type=\"text/css\" href=\"/auxy/livesig.css\">\n");
+   printf("</head>\n");
+   printf("<body style=\"font-family: arial,sans-serif; background:#eeeeee\" onload=\"startup();\">\n");
+   printf("<script type=\"text/javascript\" src=\"/auxy/livesig.js\"></script>\n");
+
+   if(map_id > 0 && map_id < 4)
+   {
+      printf("<object id=\"diagram\" type=\"image/svg+xml\" data=\"/auxy/livesig%d.svg\"></object>\n", map_id);
+   }
+   else
+   {
+      printf("<p>Map %d not found.  <a href=\"/\">Please select a map from the list on the home page.</a></p>\n", map_id);
+   }
    printf("<table width=\"1260\"><tr><td align=\"left\" id=\"bottom-line\">&copy;2015 Phil Wieland.  Live data from Network Rail under <a href=\"http://www.networkrail.co.uk/data-feeds/terms-and-conditions\">this licence</a>.</td>\n");
-   printf("<td align=\"right\"><a href=\"/\">Home and other maps</a></td><td width=\"10%%\">&nbsp;</td>\n");
+   printf("<td align=\"right\"><a href=\"/\">Home Page and other maps</a></td><td width=\"10%%\">&nbsp;</td>\n");
    printf("<td align=\"right\"><a href=\"/about.html\">About livesig</a></td></tr></table>\n");
 }
 
@@ -207,7 +209,8 @@ static void update(void)
    MYSQL_RES * result;
    MYSQL_ROW row;
 
-   // Map Designator in parameters[2] (or blank => M1)
+   // parameters[1] = handle
+   // Describer(s) in parameters[2..] 
 
    if(!db_query("SELECT MAX(handle) from td_updates"))
    {
@@ -232,7 +235,15 @@ static void update(void)
    {
       // Send all
       printf("%d\n", new_handle);
-      sprintf(query, "SELECT * FROM td_states WHERE k LIKE '%s%%'", parameters[2][0]?parameters[2]:"M1");
+      sprintf(query, "SELECT * FROM td_states WHERE k LIKE '%s%%'", parameters[2]);
+      word p = 3;
+      while(p < PARMS && parameters[p][0])
+      {
+         char q[256];
+         sprintf(q, " OR k LIKE '%s%%'", parameters[p]);
+         strcat(query, q);
+         p++;
+      }
       if(!db_query(query))
       {
          result = db_store_result();
@@ -247,7 +258,16 @@ static void update(void)
    {
       // Send updates
       printf("%d\n", new_handle);
-      sprintf(query, "SELECT * FROM td_updates where handle > %d AND k LIKE '%s%%'", handle, parameters[2][0]?parameters[2]:"M1");
+      sprintf(query, "SELECT * FROM td_updates where handle > %d AND (k LIKE '%s%%'", handle, parameters[2]);
+      word p = 3;
+      while(p < PARMS && parameters[p][0])
+      {
+         char q[256];
+         sprintf(q, " OR k LIKE '%s%%'", parameters[p]);
+         strcat(query, q);
+         p++;
+      }
+      strcat(query, ")");
       if(!db_query(query))
       {
          result = db_store_result();
@@ -262,13 +282,16 @@ static void update(void)
 
 static void query(void)
 {
-   char headcode[8], query[256];
+   char headcode[8], query[256], query1[256];
    MYSQL_RES * result0, * result1;
    MYSQL_ROW row0;
    dword schedule_id;
 
+   // TIPLOCS in parameters[2..]
+
    if(strlen(parameters[1]) != 4)
    {
+      _log(DEBUG, "query() Not found.  Parameter error.");
       printf("Not found.\n");
       return;
    }
@@ -278,7 +301,8 @@ static void query(void)
 
    if(db_query(query))
    {
-      printf("DB error.\n");
+      _log(DEBUG, "query() Database error 1.");
+      printf("Database error 1.\n");
       return;
    }
    result0 = db_store_result();
@@ -286,10 +310,20 @@ static void query(void)
    {
       schedule_id = atol(row0[0]);
 
-      sprintf(query, "SELECT * from cif_schedule_locations WHERE cif_schedule_id = %ld AND (tiploc_code = 'HUYTON' OR tiploc_code = 'HUYTJUN' OR tiploc_code = 'LVRPLSH' OR tiploc_code = 'WVRTTEC' OR tiploc_code = 'LVRPLSH')", schedule_id);
+      sprintf(query, "SELECT * from cif_schedule_locations WHERE cif_schedule_id = %ld AND (0", schedule_id);
+
+      word p = 2;
+      while(p < PARMS && parameters[p][0])
+      {
+         sprintf(query1, " OR tiploc_code = '%s'", parameters[p++]);
+         strcat(query, query1);
+      }
+      strcat(query, ")");
+
       if(db_query(query))
       {
-         printf("DB error.\n");
+         _log(DEBUG, "query() Database error 2.");
+         printf("Database error 2.\n");
          mysql_free_result(result0);
          return;
       }
@@ -308,6 +342,7 @@ static void query(void)
             result0 = db_store_result();
             if((row0 = mysql_fetch_row(result0)))
             {
+               _log(DEBUG, "query() %s %s to ", show_time_text(row0[1]), location_name(row0[0]));
                printf("%s %s to ", show_time_text(row0[1]), location_name(row0[0]));
             }
             mysql_free_result(result0);
@@ -319,6 +354,7 @@ static void query(void)
             result0 = db_store_result();
             if((row0 = mysql_fetch_row(result0)))
             {
+               _log(DEBUG, "query() %s", location_name(row0[0]));
                printf("%s\n", location_name(row0[0]));
             }
             mysql_free_result(result0);
@@ -330,7 +366,8 @@ static void query(void)
          mysql_free_result(result1);
       }
    }
-   
+
+   _log(DEBUG, "query() Not found."); 
    printf("Not found.\n");
 }
 

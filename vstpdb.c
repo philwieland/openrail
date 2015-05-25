@@ -42,7 +42,7 @@
 #include "db.h"
 
 #define NAME  "vstpdb"
-#define BUILD "VC28"
+#define BUILD "W415"
 
 static void perform(void);
 static void process_frame(const char * body);
@@ -382,8 +382,8 @@ static void perform(void)
       close_stompy();
       {      
          word i;
-         if(holdoff < 128) holdoff += 15;
-         else holdoff = 128;
+         if(holdoff < 256) holdoff += 19;
+         else holdoff = 256;
          for(i = 0; i < holdoff && run; i++) sleep(1);
       }
    }  // while(run)
@@ -610,7 +610,7 @@ static void process_create_schedule(const char * string, const jsmntok_t * token
 
    EXTRACT_APPEND_SQL("train_status");
 
-   strcat(query, ", 0)"); // id filled by MySQL
+   strcat(query, ", 0, '', '')"); // id filled by MySQL
 
    if(!db_query(query))
    {
