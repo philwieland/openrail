@@ -4,7 +4,7 @@ use strict;
 use Time::Local;
 
 #
-my $build = 'VB26';
+my $build = 'X328';
 my $name = 'dump-rail';
 
 my $day_file_rotation = 4;
@@ -24,10 +24,10 @@ open(CFG, $ARGV[0]) or die "Failed to read config file \"$ARGV[0]\"";
 while(<CFG>)
 {
    chomp;
-   if($_ =~ m/^db_server:\s*(.*)$/) { $conf_db_server = $1; }
-   if($_ =~ m/^db_name:\s*(.*)$/) { $conf_db_name = $1; }
-   if($_ =~ m/^db_user:\s*(.*)$/) { $conf_db_user = $1; }
-   if($_ =~ m/^db_password:\s*(.*)$/) { $conf_db_pass = $1; }
+   if($_ =~ m/^db_server\s*(.*)$/)   { $conf_db_server = $1; }
+   if($_ =~ m/^db_name\s*(.*)$/)     { $conf_db_name = $1; }
+   if($_ =~ m/^db_user\s*(.*)$/)     { $conf_db_user = $1; }
+   if($_ =~ m/^db_password\s*(.*)$/) { $conf_db_pass = $1; }
 }
 
 

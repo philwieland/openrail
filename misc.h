@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2013 Phil Wieland
+    Copyright (C) 2013, 2016 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -27,24 +27,16 @@ typedef unsigned long long qword;
 typedef unsigned long      dword;
 typedef unsigned short     word;
 typedef unsigned char      byte;
-typedef struct Conf {
-   char * db_server;
-   char * db_pass;
-   char * db_name;
-   char * db_user;
-   char * nr_user;
-   char * nr_pass;
-   char * debug;
-   char * report_email;
-   char * stomp_topics;
-   char * stomp_topic_names;
-   char * stomp_topic_log;
-} conf_t;
-extern conf_t conf;
-
+enum config_keys {conf_db_server, conf_db_name, conf_db_user, conf_db_password, 
+                  conf_nr_user, conf_nr_password, 
+                  conf_report_email,
+                  conf_stomp_topics, conf_stomp_topic_names, conf_stomp_topic_log,
+                  conf_stompy_bin, conf_trustdb_no_deduce_act, conf_huyton_alerts,
+                  conf_debug, MAX_CONF};
+extern char * conf[MAX_CONF];
 #define false 0
 #define true ~0
-enum log_types {GENERAL, PROC, DEBUG, MINOR, MAJOR, CRITICAL};
+enum log_types {GENERAL, PROC, DEBUG, MINOR, MAJOR, CRITICAL, ABEND};
 
 extern char * time_text(const time_t time, const byte local);
 extern char * day_date_text(const time_t time, const byte local);
@@ -60,7 +52,7 @@ extern word email_alert(const char * const name, const char * const build, const
 extern char * abbreviated_host_id(void);
 extern char * show_time(const char * const input);
 extern char * show_time_text(const char * const input);
-extern int load_config(const char * const filepath);
+extern char * load_config(const char * const filepath);
 extern qword time_ms(void);
 extern qword time_us(void);
 extern ssize_t read_all(const int socket, void * buffer, const size_t size);

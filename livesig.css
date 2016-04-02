@@ -88,50 +88,51 @@ BODY { background-color:white;
 }
 .describer-text
 {
-font-size:12px;stroke:#ffff00;stroke-opacity:1;font-family:Courier, monospace;
+font-size:12px;fill:#ffff00;stroke:#ffff00;stroke-opacity:1;stroke-width:0.7;font-family:Courier, monospace;
 }
 .describer-text-off
 {
-font-size:8px;stroke:#909090;stroke-opacity:1;stroke-width:0.5;font-family:Courier, monospace;
+font-size:8px;fill:#ffffff;stroke:#ffffff;stroke-opacity:1;stroke-width:0.2;font-family:Courier, monospace;
 }
 .describer-text-route
 {
-font-size:12px;stroke:#00ff00;stroke-opacity:1;font-family:Courier, monospace;
+font-size:12px;fill:#00ff00;stroke:#00ff00;stroke-opacity:1;stroke-width:0.7;font-family:Courier, monospace;
 }
 .info-text
 {
-font-size:12px;stroke:#ffff00;stroke-opacity:1;font-family:Courier, monospace;
+font-size:12px;fill:#ffff00;stroke:#ffff00;stroke-opacity:1;stroke-width:0.7;font-family:Courier, monospace;
 }
 .title-text
 {
     font-size:18px;
-    stroke:#000000;stroke-opacity:1;stroke-width:0.5;font-family:Helvetica, Arial, sans-serif;
+    fill:#000000;stroke-opacity:1;stroke-width:0;font-family:Helvetica, Arial, sans-serif;
 }
 .label-text
 {
     font-size:14px;
-    stroke:#000000;stroke-opacity:1;stroke-width:0.5;font-family:Helvetica, Arial, sans-serif;
+    fill:#000000;stroke-opacity:1;stroke-width:0;font-family:Helvetica, Arial, sans-serif;
 }
 .label-text-small
 {
     font-size:10px;
-    stroke:#000000;stroke-opacity:1;stroke-width:0.2;font-family:Helvetica, Arial, sans-serif;
+    fill:#000000;stroke-opacity:1;stroke-width:0;font-family:Helvetica, Arial, sans-serif;
 }
 .caption-text
 {
-    font-size:14px;
+    font-size:12px;
+    text-align:start;
+    text-anchor:start;
+    fill: blue;
+    stroke-width:0;
+    font-family:Helvetica, Arial, sans-serif;
+}
+
+.clock
+{
+    font-size:96px;
     text-align:start;
     text-anchor:start;
     stroke:black;
-    stroke-opacity:1;
-    font-family:Courier, monospace;
-}
-.caption-text-alert
-{
-    font-size:14px;
-    text-align:start;
-    text-anchor:start;
-    stroke:red;
     stroke-opacity:1;
     font-family:Courier, monospace;
 }

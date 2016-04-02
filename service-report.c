@@ -35,7 +35,7 @@ static void report_train_day(const word index, const time_t when, const char * c
 static char * percentage(const dword num, const dword den);
 
 #define NAME "service-report"
-#define BUILD "W521"
+#define BUILD "X328"
 
 static word debug;
 static word bus;
@@ -101,6 +101,17 @@ int main(int argc, char **argv)
    {
       usage = true;
    }
+
+   char * config_fail;
+   if((config_fail = load_config(config_file_path)))
+   {
+      printf("Failed to read config file \"%s\":  %s\n", config_file_path, config_fail);
+      usage = true;
+   }
+
+   // Debug is set from command line, not config
+   //debug = *conf[conf_debug];
+
    if(load_config(config_file_path))
    {
       printf("Failed to read config file \"%s\".\n", config_file_path);
@@ -124,7 +135,7 @@ int main(int argc, char **argv)
    _log_init("", debug?1:0);
 
    // Initialise database
-   db_init(conf.db_server, conf.db_user, conf.db_pass, conf.db_name);
+   db_init(conf[conf_db_server], conf[conf_db_user], conf[conf_db_password], conf[conf_db_name]);
 
    report(argv[optind], year, month);
 

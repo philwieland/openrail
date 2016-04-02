@@ -44,7 +44,7 @@ static char * location_name_stanox(const word stanox);
 static char * describe_schedule(const dword id);
 
 #define NAME "Live Rail Query"
-#define BUILD "W507"
+#define BUILD "X328"
 
 #define URL_BASE "/rail/query/"
 #define LIVERAIL_URL_BASE "/rail/liverail/"
@@ -100,13 +100,20 @@ int main()
 
    while(j < PARMS) parameters[j++][0] = '\0';
 
-   if(load_config("/etc/openrail.conf"))
    {
-      printf("Failed to load config.\n");
-      exit(1);
+      char config_file_path[256];
+
+      strcpy(config_file_path, "/etc/openrail.conf");
+
+      char * config_fail;
+      if((config_fail = load_config(config_file_path)))
+      {
+         printf("<p>Failed to read config file \"%s\":  %s</p>\n", config_file_path, config_fail);
+         exit(0);
+      }
    }
 
-   debug = !strcasecmp(conf.debug, "true");
+   debug = *conf[conf_debug];
 
    // Set up log
    {
@@ -141,7 +148,7 @@ int main()
    printf("<script type=\"text/javascript\" src=\"/auxy/railquery.js\"></script>\n");
 
    // Initialise database
-   db_init(conf.db_server, conf.db_user, conf.db_pass, conf.db_name);
+   db_init(conf[conf_db_server], conf[conf_db_user], conf[conf_db_password], conf[conf_db_name]);
 
    _log(GENERAL, "Parameters:  (l = %d)", l);
    for(i=0;i < PARMS; i++)
@@ -205,8 +212,8 @@ static void display_menu(void)
           "<table>"
           "<tr valign=\"top\"><td class=\"control-panel\" colspan=7>"
           "<table><tr><td><h4>Return to Live Trains: </h4></td><td>"
-          "&nbsp;Show trains at <input type=\"text\" id=\"search_loc\" size=\"24\" maxlength=\"64\" value=\"\" onkeydown=\"if(event.keyCode == 13) search_onclick();\">"
-          " on <input type=\"text\" id=\"search_date\" size=\"8\" maxlength=\"8\" value=\"\" onkeydown=\"if(event.keyCode == 13) search_onclick();\">"
+          "&nbsp;Show trains at <input type=\"text\" id=\"search_loc\" size=\"24\" maxlength=\"64\" placeholder=\"Location name / TIPLOC / 3-alpha\" value=\"\" onkeydown=\"if(event.keyCode == 13) search_onclick();\">"
+          " on <input type=\"text\" id=\"search_date\" size=\"8\" maxlength=\"8\" placeholder=\"dd/mm/yy\" value=\"\" onkeydown=\"if(event.keyCode == 13) search_onclick();\">"
           " <button id=\"search\" class=\"cp-button\" onclick=\"search_onclick();\">Full</button>"
           " <button id=\"search\" class=\"cp-button\" onclick=\"summary_onclick();\">Summary</button>"
           " <button id=\"search\" class=\"cp-button\" onclick=\"depart_onclick();\">Departures</button>"
@@ -278,7 +285,7 @@ static void report_b(void)
    char query[1024], q1[1024];
 
    sprintf(query, "SELECT train_status, schedule_start_date, schedule_end_date, signalling_id, CIF_train_uid, CIF_stp_indicator, update_id, id, ");
-   strcat(query, "runs_mo, runs_tu, runs_we, runs_th, runs_fr, runs_sa, runs_su, deleted, created");
+   strcat(query, "runs_mo, runs_tu, runs_we, runs_th, runs_fr, runs_sa, runs_su, deleted, created, deduced_headcode, deduced_headcode_status");
    strcat(query,  " FROM cif_schedules WHERE ");
    // Sanitise
    char safe[256];
@@ -297,7 +304,7 @@ static void report_b(void)
       sprintf(q1, " AND schedule_start_date < %ld AND schedule_end_date > %ld and deleted > %ld", now+(7*24*60*60), now-(7*24*60*60), now-(7*24*60*60));
       strcat(query, q1);
    }
-   strcat(query, " ORDER BY schedule_start_date");
+   strcat(query, " ORDER BY schedule_start_date, created");
    if(db_query(query))
    {
    }
@@ -333,7 +340,7 @@ static void report_be(void)
             dword id = atol(db_row[0][7]);
 
             // Status
-            if(vstp) printf("<td class=\"result-table-vstp\">V");
+            if(vstp) printf("<td class=\"result-table-vstp\">(VSTP) ");
             else if(db_row[0][0][0] == 'F' || db_row[0][0][0] == '2' || db_row[0][0][0] == '3') printf("<td class=\"result-table-freight\">");
             else printf("<td>");
             switch(db_row[0][0][0])
@@ -355,6 +362,8 @@ static void report_be(void)
             printf("<td>");
             if(db_row[0][3][0])
                printf("%s", db_row[0][3]);
+            else if(db_row[0][17][0])
+               printf("%s (%s)", db_row[0][17], db_row[0][18]);
             else
                printf("&nbsp;");
             printf("</td>");
@@ -598,12 +607,12 @@ static void report_e(void)
    char query[1024], q1[1024];
 
    sprintf(query, "SELECT train_status, schedule_start_date, schedule_end_date, signalling_id, CIF_train_uid, CIF_stp_indicator, update_id, id, ");
-   strcat(query, "runs_mo, runs_tu, runs_we, runs_th, runs_fr, runs_sa, runs_su, deleted, created");
+   strcat(query, "runs_mo, runs_tu, runs_we, runs_th, runs_fr, runs_sa, runs_su, deleted, created, deduced_headcode, deduced_headcode_status");
    strcat(query,  " FROM cif_schedules WHERE ");
    // Sanitise
    char safe[256];
    db_real_escape_string(safe, parameters[1], strlen(parameters[1]));
-   sprintf(q1, "signalling_id = '%s'", safe);
+   sprintf(q1, "(signalling_id = '%s' OR deduced_headcode = '%s') ", safe, safe);
 
    strcat(query, q1);
 

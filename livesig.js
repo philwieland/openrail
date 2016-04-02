@@ -19,7 +19,9 @@
 */
 
 var url_base = "/rail/livesig/";
-var refresh_tick = 4096; /* ms between ticks */
+var tick_period = 1024; /* ms between ticks */
+var refresh_tick_limit = 4; /* Ticks between updates */ 
+var refresh_tick_count = refresh_tick_limit;
 var updating_timeout = 0;
 var got_handle = 32767;
 var req;
@@ -31,10 +33,12 @@ var progress = 0;
 var tick_timer;
 var saved_caption = 'livesig';
 var svg_doc;
+var visible = true;
+var hidden_count;
 
-// Coordinates of progress wheel
+// Global items deduced from SVG at startup
 var progress_points;
-
+var clock_object;
 // This contains <describer>/<describer>/<describer> ...
 var describers;
 var tiplocs;
@@ -56,7 +60,6 @@ var lcd = 'None';
 function startup()
 {
    var i;
-   refresh_count = 0;
    updating_timeout = 0;
    req_cache_timeout = 0;
 
@@ -70,6 +73,7 @@ function startup()
    // Get co-ordinates
    var z = svg_doc.getElementById('progress').getAttribute('points').split(' ');
    progress_points = z[0].split(',');
+   clock_object = svg_doc.getElementById('clock');
    // Get describers and tiplocs
    describers = svg_doc.getElementById('info0').textContent;
    tiplocs = svg_doc.getElementById('info1').textContent;
@@ -78,14 +82,60 @@ function startup()
       displayed[i] = '';
       cache_k[i] = '';
    }
-   tick_timer = setInterval('tick()', refresh_tick);
+   tick_timer = setInterval('tick()', tick_period);
 }
 
 function tick()
 {
-   //if ((typeof document.hidden !== "undefined") && (document.hidden)) return;
+   // Check if display is visible
+   if ((typeof document.hidden !== "undefined") && (document.hidden))
+   {
+      if(visible)
+      {
+         // Becoming hidden
+         hidden_count = 0;
+         visible = false;
+      }
+      hidden_count++;
+      if(hidden_count == 4096)
+      {
+         // Been hidden for over an hour.  Clear expired data.
+         var i;
+         for(i=0; i < SLOTS; i++)
+         {
+            displayed[i] = '';
+            cache_k[i] = '';
+            if(svg_doc.getElementById('info' + i))
+            {
+               svg_doc.getElementById('info' + i).textContent = '';
+            }
+         }
+         feed_failed = 0;
+      }
+   }
+   else
+   {
+      if(!visible)
+      {
+         // Becoming visible
+         got_handle = 32767;
+         refresh_tick_count = refresh_tick_limit;
+         visible = true;
+      }
+   }
+
    display_debug();
 
+   if(++refresh_tick_count < refresh_tick_limit) return;
+   refresh_tick_count = 0;
+
+   // Update clock
+   if(visible && clock_object)
+   {
+      var now = new Date();
+      clock_object.textContent = now.toTimeString().substring(0, 5);
+   }
+   
    if(req_cache_timeout)
    {
       if(req_cache_timeout++ > 10)
@@ -107,12 +157,12 @@ function tick()
          if(req) req.abort();
          req = null;
          updating_timeout = 0;
-         svg_doc.getElementById('caption').style.stroke = 'red';
-         svg_doc.getElementById('caption').textContent = " Failed to contact server.";
+         svg_doc.getElementById('caption').style.fill = 'red';
+         svg_doc.getElementById('caption').textContent = " Unable to contact server.";
          got_handle = 32767;
       }
    }
-   else
+   else if(visible)
    {
       updating_timeout = 1;
 
@@ -172,7 +222,7 @@ function process_updates(text)
    {
       feed_failed = 10;
    }
-   else
+   if(caption.length > 4)
    {
       saved_caption = 'Updated to ' + caption[1] + ' by ' + caption[2] + ' ' + caption[3] + ' at ' + caption[4];
    }
@@ -180,12 +230,12 @@ function process_updates(text)
    if(feed_failed)
    {
       feed_failed--;
-      svg_doc.getElementById('caption').style.stroke = 'red';
-      svg_doc.getElementById('caption').textContent = saved_caption + " - Data feed failed.";
+      svg_doc.getElementById('caption').style.fill = 'red';
+      svg_doc.getElementById('caption').textContent = saved_caption + " - Data feed problems.";
    }
    else
    {
-      svg_doc.getElementById('caption').style.stroke = 'black';
+      svg_doc.getElementById('caption').style.fill = 'black';
       svg_doc.getElementById('caption').textContent = saved_caption;
    }
    updating_timeout = 0;
@@ -355,6 +405,7 @@ function cached(k)
                update_cache(req_cache_k,req_cache.responseText);
                req_cache = null;
                req_cache_timeout = 0;
+               if(visible) update_panel();
             }
             else
             {
@@ -424,13 +475,13 @@ function update_cache(k, v)
    }
    if(results[0] == 'Not found.')
    {
-      cache_e[chosen] = now + 16*60*1000; // 16 minutes
+      cache_e[chosen] = now + 8*60*1000; // 8 minutes.
    }
    else
    {
-      cache_e[chosen] = now + 64*60*1000; // 64 minutes
+      cache_e[chosen] = now + 64*60*1000; // 64 minutes.
    }
-   cache_e[chosen] += Math.floor(Math.random() * 128 * 1000);
+   cache_e[chosen] += Math.floor(Math.random() * 256 * 1000); // Up to 256 seconds.
 }
 
 function display_debug()

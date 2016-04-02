@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2013, 2014, 2015 Phil Wieland
+    Copyright (C) 2013, 2014, 2015, 2016 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -39,9 +39,10 @@
 #include "jsmn.h"
 #include "misc.h"
 #include "db.h"
+#include "database.h"
 
 #define NAME  "trustdb"
-#define BUILD "W330"
+#define BUILD "X328"
 
 static void perform(void);
 static void process_frame(const char * const body);
@@ -51,12 +52,14 @@ static void process_trust_0003(const char * const string, const jsmntok_t * cons
 static void process_trust_0005(const char * const string, const jsmntok_t * const tokens, const int index);
 static void process_trust_0006(const char * const string, const jsmntok_t * const tokens, const int index);
 static void process_trust_0007(const char * const string, const jsmntok_t * const tokens, const int index);
-static void create_database(void);
-
 static void jsmn_dump_tokens(const char * const string, const jsmntok_t * const tokens, const word object_index);
 static void report_stats(void);
 #define INVALID_SORT_TIME 9999
 static time_t correct_trust_timestamp(const time_t in);
+static void init_deferred_activations(void);
+static void defer_activation(const char * const uid, const time_t schedule_start_date, const time_t schedule_end_date, const char * const trust_id);
+static void process_deferred_activations(void);
+static word count_deferred_activations(void);
 
 static word debug, run, interrupt, holdoff;
 static char zs[4096];
@@ -82,7 +85,7 @@ static time_t status_last_trust_processed, status_last_trust_actual;
 // Stats
 enum stats_categories {ConnectAttempt, GoodMessage, // Don't insert any here
                        Mess1, Mess2, Mess3, Mess4, Mess5, Mess6, Mess7, Mess8,
-                       NotMessage, NotRecog, Mess1Miss, Mess1MissHit, MovtNoAct, DeducedAct, 
+                       NotMessage, NotRecog, Mess1Miss, Mess1MissHit, Mess1Cape, MovtNoAct, DeducedAct, 
                        DeducedHC, DeducedHCReplaced, MAXstats};
 static qword stats[MAXstats];
 static qword grand_stats[MAXstats];
@@ -90,7 +93,7 @@ static const char * stats_category[MAXstats] =
    {
       "Stompy connect attempt", "Good message", 
       "Message type 1","Message type 2","Message type 3","Message type 4","Message type 5","Message type 6","Message type 7","Message type 8",
-      "Not a message", "Invalid or not recognised", "Activation no schedule", "Found by second search", "Movement without act.", "Deduced activation",
+      "Not a message", "Invalid or not recognised", "Activation no schedule", "Found by second search", "Act. cancelled schedule", "Movement without act.", "Deduced activation",
       "Deduced headcode", "Changed deduced headcode",
    };
 
@@ -131,11 +134,14 @@ int main(int argc, char *argv[])
       }
    }
 
-   if(load_config(config_file_path))
+   char * config_fail;
+   if((config_fail = load_config(config_file_path)))
    {
-      printf("Failed to read config file \"%s\".\n", config_file_path);
+      printf("Failed to read config file \"%s\":  %s\n", config_file_path, config_fail);
       usage = true;
    }
+
+   debug = *conf[conf_debug];
 
    if(usage)
    {
@@ -145,36 +151,8 @@ int main(int argc, char *argv[])
 
    int lfp = 0;
 
-     /* Determine debug mode
-     
-     We don't always want to run in production mode, so we
-     read the content of the debug config variable and act 
-     on it accordingly.
-     
-     If we do not have a variable set, we assume production 
-     mode */
-     if ( strcmp(conf.debug,"true") == 0  )
-     {
-       debug = 1;
-     }
-     else
-     {
-       debug = 0;
-     }
-
    // Set up log
    _log_init(debug?"/tmp/trustdb.log":"/var/log/garner/trustdb.log", debug?1:0);
-
-   if(debug)
-   {
-      _log(DEBUG, "db_server = \"%s\"", conf.db_server);
-      _log(DEBUG, "db_name = \"%s\"", conf.db_name);
-      _log(DEBUG, "db_user = \"%s\"", conf.db_user);
-      _log(DEBUG, "db_pass = \"%s\"", conf.db_pass);
-      _log(DEBUG, "nr_user = \"%s\"", conf.nr_user);
-      _log(DEBUG, "nr_pass = \"%s\"", conf.nr_pass);
-      _log(DEBUG, "debug = \"%s\"", conf.debug);
-   }
 
    // Enable core dumps
    struct rlimit limit;
@@ -301,13 +279,19 @@ int main(int argc, char *argv[])
       word i;
       for(i=0; i < MAXstats; i++) { stats[i] = 0; grand_stats[i] = 0; }
    }
+   init_deferred_activations();
 
    // Startup delay
-   if(!debug)
    {
-      _log(GENERAL, "Startup delay...");
+      struct sysinfo info;
+      word logged = false;
       word i;
-      for(i = 0; i < 180 && run; i++) sleep(1);
+      while(run && !debug && (sysinfo(&info) || info.uptime < (512 + 0)))
+      {
+         if(!logged) _log(GENERAL, "Startup delay...");
+         logged = true;
+         for(i = 0; i < 8 && run; i++) sleep(1);
+      }
    }
 
    if(run) perform();
@@ -320,16 +304,21 @@ int main(int argc, char *argv[])
 static void perform(void)
 {
    word last_report_day = 9;
+   word stompy_timeout = true;
 
    // Initialise database
-   while(db_init(conf.db_server, conf.db_user, conf.db_pass, conf.db_name) && run) 
+   while(db_init(conf[conf_db_server], conf[conf_db_user], conf[conf_db_password], conf[conf_db_name]) && run) 
    {
       _log(CRITICAL, "Failed to initialise database connection.  Will retry...");
       word i;
       for(i = 0; i < 64 && run; i++) sleep(1);
    }
 
-   create_database();
+   if(database_upgrade(trustdb))
+   {
+      _log(CRITICAL, "Failed to upgrade database.  Aborting.");
+      exit(1);
+   }
 
    {
       time_t now = time(NULL);
@@ -359,6 +348,11 @@ static void perform(void)
             {
                last_report_day = broken->tm_wday;
                report_stats();
+               {
+                  char query[256];
+                  sprintf(query, "DELETE FROM message_count WHERE time < %ld", now - (24*60*60));
+                  db_query(query);
+               }
             }
             if(now - last_message_count_report > MESSAGE_COUNT_REPORT_INTERVAL)
             {
@@ -377,11 +371,17 @@ static void perform(void)
          _log(DEBUG, "read_stompy() returned %d.", r);
          if(!r && run && run_receive)
          {
+            if(stompy_timeout)
+            {
+               _log(MINOR, "TRUST message stream - Receive OK.");
+               stompy_timeout = false;
+            }
             if(db_start_transaction())
             {
                run_receive = false;
             }
-            if(run_receive) process_frame(body);
+            if(run_receive) process_deferred_activations();
+            if(run_receive && !db_errored) process_frame(body);
 
             if(!db_errored)
             {
@@ -416,16 +416,17 @@ static void perform(void)
             }
             else
             {
-               _log(MINOR, "Receive timeout on stompy connection."); 
+               if(!stompy_timeout) _log(MINOR, "Receive timeout on stompy connection."); 
+               stompy_timeout = true;
             }
          }
       } // while(run_receive && run)
       close_stompy();
       {      
          word i;
-         if(holdoff < 128) holdoff += 15;
-         else holdoff = 128;
-         for(i = 0; i < holdoff && run; i++) sleep(1);
+         if(holdoff < 256) holdoff += 30;
+         else holdoff = 256;
+         for(i = 0; i < holdoff + 64 && run; i++) sleep(1);
       }
    }  // while(run)
 
@@ -435,6 +436,8 @@ static void perform(void)
    }
 
    db_disconnect();
+   word lost = count_deferred_activations();
+   if(lost) _log(MINOR, "%d deferred activation%s discarded.", lost, (lost == 1)?"":"s");
    report_stats();
 }
 
@@ -469,7 +472,7 @@ static void process_frame(const char * const body)
           _log(DEBUG, "STOMP message contains a single TRUST message.");
       }
 
-      for(i=0; i < messages; i++)
+      for(i=0; i < messages && !db_errored; i++)
       {
          char message_name[128];
          jsmn_find_extract_token(body, tokens, index, "msg_type", message_name, sizeof(message_name));
@@ -527,6 +530,10 @@ static void process_trust_0001(const char * const string, const jsmntok_t * cons
    MYSQL_RES * result0;
    MYSQL_ROW row0;
    
+   time_t now = time(NULL);
+
+   status_last_trust_processed = now;
+
    sprintf(report, "Activation message:");
 
    jsmn_find_extract_token(string, tokens, index, "train_id", train_id, sizeof(train_id));
@@ -555,61 +562,81 @@ static void process_trust_0001(const char * const string, const jsmntok_t * cons
    sprintf(zs1, " schedule_wtt_id=\"%s\"", zs);
    strcat(report, zs1);
 
-   // Bodge.  The ORDER BY here will *usually* get the correct one out first!
-   sprintf(query, "select id from cif_schedules where cif_train_uid = '%s' AND schedule_start_date = %ld AND schedule_end_date = %ld AND deleted > %ld AND CIF_stp_indicator != 'C' ORDER BY LOCATE(CIF_stp_indicator, 'OCNP')", train_uid, schedule_start_date_stamp, schedule_end_date_stamp, time(NULL));
+   sprintf(query, "select id, CIF_stp_indicator from cif_schedules where cif_train_uid = '%s' AND schedule_start_date = %ld AND schedule_end_date = %ld AND deleted > %ld ORDER BY LOCATE(CIF_stp_indicator, 'ONPC')", train_uid, schedule_start_date_stamp, schedule_end_date_stamp, now);
    if(!db_query(query))
    {
+      word cancelled = false;
       result0 = db_store_result();
       word num_rows = mysql_num_rows(result0);
       if(num_rows < 1) 
       {
-         strcat(report, "  No schedules found.");
+         mysql_free_result(result0);
          stats[Mess1Miss]++;
          _log(MINOR, report);
-         // Wait and see!
-         // There is a race condition where a VSTP schedule is published and activated simultaneously.  Hopefully two seconds later the 
-         // schedule will be in the database.
-         // TODO We need a smarter way of doing this, with a queue of deferred transactions, rather than freezing for two seconds.
-         if(run) sleep(1);
-         if(run) sleep(1);
-         if(!db_query(query))
-         {
-            mysql_free_result(result0);
-            result0 = db_store_result();
-            num_rows = mysql_num_rows(result0);
-            if(num_rows < 1)
-            {
-               _log(MINOR, "   Second attempt also missed.");
-               time_t now = time(NULL);
-               sprintf(query, "INSERT INTO trust_activation VALUES(%ld, '%s', %ld, 0)", now, train_id, 0L);
-               cif_schedule_id = 0;
-               db_query(query);
-               if(debug) jsmn_dump_tokens(string, tokens, index);
-            }
-            else
-            {
-               stats[Mess1MissHit]++;
-               row0 = mysql_fetch_row(result0);
-               cif_schedule_id = atol(row0[0]);
-               _log(MINOR, "   Second attempt found schedule %ld.", cif_schedule_id);
-               time_t now = time(NULL);
-               sprintf(query, "INSERT INTO trust_activation VALUES(%ld, '%s', %ld, 0)", now, train_id, cif_schedule_id);
-               db_query(query);
-            }
-         }
+         _log(MINOR, "   No schedules found.  Deferring activation.");
+         defer_activation(train_uid, schedule_start_date_stamp, schedule_end_date_stamp, train_id);
       }
       else
       {
          row0 = mysql_fetch_row(result0);
          cif_schedule_id = atol(row0[0]);
-         time_t now = time(NULL);
+         if(row0[1][0] == 'C')
+         {
+            // Activation matches cancelled schedule.  This is BAU so don't log it
+            _log(DEBUG, report);
+            _log(DEBUG, "   Matches cancelled schedule %ld.", cif_schedule_id);
+            stats[Mess1Cape]++;
+            cancelled = true;
+         }
          sprintf(query, "INSERT INTO trust_activation VALUES(%ld, '%s', %ld, 0)", now, train_id, cif_schedule_id);
          db_query(query);
+         mysql_free_result(result0);
       }
-      mysql_free_result(result0);
+
+      if(cif_schedule_id && !cancelled &&
+         train_id[2] >= '0' && train_id[2] <= '9' &&
+         (train_id[3] < 'A' || train_id[3] > 'Z'  ||
+          train_id[4] < '0' || train_id[4] > '9'  ||
+          train_id[5] < '0' || train_id[5] > '9'))
+      {
+         // This has an obfuscated headcode.
+         char obfus_hc[16], true_hc[8];
+         strcpy(obfus_hc, train_id + 2);
+         obfus_hc[4] = '\0';
+         sprintf(query, "SELECT signalling_id, deduced_headcode, deduced_headcode_status from cif_schedules where id = %ld", cif_schedule_id);
+         if(!db_query(query))
+         {
+            result0 = db_store_result();
+            if((row0 = mysql_fetch_row(result0)))
+            {
+               char status[32];
+               true_hc[0] = '\0';
+               if(row0[0][0])
+               {
+                  strcpy(true_hc, row0[0]);
+                  strcpy(status, "From schedule");
+               }
+               else if(row0[1][0])
+               {
+                  strcpy(true_hc, row0[1]);
+                  strcpy(status, "Status ");
+                  strcat(status, row0[2]);
+               }
+               if(true_hc[0])
+               {
+                  sprintf(query, "INSERT INTO obfus_lookup VALUES(%ld, '%s', '%s')", now, true_hc, obfus_hc);
+                  db_query(query);
+                  _log(MINOR, "Added obfuscated headcode \"%s\", true headcode \"%s\" (%s) to obfuscation lookup table.  TRUST id \"%s\", garner schedule id %ld.",obfus_hc, true_hc, status, train_id, cif_schedule_id);
+                  sprintf(query, "DELETE FROM obfus_lookup WHERE created < %ld", now - 86400L); // 24 hours.
+                  db_query(query);
+               }
+            }
+            mysql_free_result(result0);
+         }
+      }
 
       // Deduced headcode
-      if(cif_schedule_id &&
+      if(cif_schedule_id && !cancelled &&
          train_id[2] >= '0' && train_id[2] <= '9' &&
          train_id[3] >= 'A' && train_id[3] <= 'Z' &&
          train_id[4] >= '0' && train_id[4] <= '9' &&
@@ -624,7 +651,7 @@ static void process_trust_0001(const char * const string, const jsmntok_t * cons
             result0 = db_store_result();
             if((row0 = mysql_fetch_row(result0)))
             {
-               _log(DEBUG, "Deduce headcode:  From trust_id \"%s\", sig id \"%s\", deduced (before) \"%s\", deduced status \"%s\", schedule id %ld.",act_headcode, row0[0], row0[1], row0[2], cif_schedule_id);
+               _log(DEBUG, "Deduce headcode:  From trust id \"%s\", sig id \"%s\", deduced (before) \"%s\", deduced status \"%s\", garner schedule id %ld.",act_headcode, row0[0], row0[1], row0[2], cif_schedule_id);
                if(row0[0][0] && strcmp(act_headcode, row0[0]))
                {
                   _log(MINOR, "Headcode \"%s\" from trust ID does not match schedule headcode \"%s\".", act_headcode, row0[0]);
@@ -640,18 +667,22 @@ static void process_trust_0001(const char * const string, const jsmntok_t * cons
                      db_query(query);
                      stats[DeducedHC]++;
                   }
-                  else if(strcmp(row0[1], act_headcode))
+                  else if(strcmp(row0[1], act_headcode) && row0[2][0] == 'A')
                   {
-                     // Previously deduced and it doesn't match
+                     // Previously automatically deduced and it doesn't match
                      sprintf(query, "UPDATE cif_schedules SET deduced_headcode = '%s', deduced_headcode_status = 'A' WHERE id = %ld", act_headcode, cif_schedule_id);
                      _log(MAJOR, "Previously deduced headcode \"%s\", status \"%s\" replaced by \"%s\" for schedule %ld.", row0[1], row0[2], act_headcode, cif_schedule_id);
                      db_query(query);
                      stats[DeducedHCReplaced]++;
                   }
+                  else if(strcmp(row0[1], act_headcode))
+                  {
+                     _log(MINOR, "Previously deduced headcode \"%s\", status \"%s\" not replaced by \"%s\" for schedule %ld.", row0[1], row0[2], act_headcode, cif_schedule_id);
+                  }
                   else
                   {
-                     // Matches previous
-                     _log(DEBUG, "Previously deduced headcode \"%s\", status \"%s\" confirmed for schedule %ld.", row0[1], row0[2], cif_schedule_id);
+                     // Matches previous headcode.
+                     _log(DEBUG, "Previously deduced headcode \"%s\", status \"%s\" unchanged for schedule %ld, headcode \"%s\".", row0[1], row0[2], cif_schedule_id, act_headcode);
                   }
                }
             }
@@ -681,7 +712,7 @@ static void process_trust_0002(const char * string, const jsmntok_t * tokens, co
 
 static void process_trust_0003(const char * string, const jsmntok_t * tokens, const int index)
 {
-   char query[1024], zs[32], zs1[32], train_id[16], loc_stanox[16];
+   char query[1024], zs[32], zs1[32], train_id[16], loc_stanox[16], event_type;
    time_t planned_timestamp, actual_timestamp, timestamp;
 
    time_t now = time(NULL);
@@ -694,6 +725,7 @@ static void process_trust_0003(const char * string, const jsmntok_t * tokens, co
    jsmn_find_extract_token(string, tokens, index, "event_type", zs, sizeof(zs));
    strcat(query, zs);
    strcat(query, "', '");
+   event_type = zs[0];
    jsmn_find_extract_token(string, tokens, index, "planned_event_type", zs, sizeof(zs));
    strcat(query, zs);
    strcat(query, "', '");
@@ -776,16 +808,17 @@ static void process_trust_0003(const char * string, const jsmntok_t * tokens, co
          // Movement no activation.  Attempt to create the missing activation.
          MYSQL_ROW row0;
          char tiploc[128], reason[128];
-         word sort_time = 0;
          time_t now = time(NULL);
          qword elapsed = time_ms();
+         char planned[8];
 
-         strcpy(reason, "");
+         reason[0] = '\0';
+         planned[0] = '\0';
          tiploc[0] = '\0';
 
-         _log(MINOR, "Movement message received with %d matching activations, train_id = \"%s\".", num_rows, train_id);
+         _log(MINOR, "Movement message received with no matching activations, TRUST id = \"%s\".", train_id);
 
-         sprintf(query, "SELECT * from trust_activation where trust_id = '%s' and created > %ld", train_id, actual_timestamp - (4*24*60*60));
+         sprintf(query, "SELECT * from trust_activation where trust_id = '%s' and created > %ld AND cif_schedule_id = 0", train_id, actual_timestamp - (4*24*60*60));
          if(!db_query(query))
          {
             MYSQL_RES * result0 = db_store_result();
@@ -799,16 +832,21 @@ static void process_trust_0003(const char * string, const jsmntok_t * tokens, co
          }
          stats[MovtNoAct]++;
 
-#ifdef NO_DEDUCE_ACT
-         return;
-#endif
          if(!run)
          {
             strcpy(reason, "Abort received");
          }
+         else if(*conf[conf_trustdb_no_deduce_act])
+         {
+            strcpy(reason, "Deduce disabled by option");            
+         }
          else if(planned_timestamp == 0)
          {
             strcpy(reason, "No planned timestamp");
+         }
+         else if(now - actual_timestamp > (8L*60L*60L))
+         {
+            strcpy(reason, "Movement is too old");
          }
 
          if(!reason[0])
@@ -835,7 +873,8 @@ static void process_trust_0003(const char * string, const jsmntok_t * tokens, co
          {
             char query1[256];
             struct tm * broken = localtime(&planned_timestamp);
-            sort_time = broken->tm_hour * 4 * 60 + broken->tm_min * 4;
+            //sort_time = broken->tm_hour * 4 * 60 + broken->tm_min * 4;
+            sprintf(planned, "%02d%02d%s", broken->tm_hour, broken->tm_min, (broken->tm_sec > 29)?"H":"");
             // Select the day
             word day = broken->tm_wday;
             word yest = (day + 6) % 7;
@@ -846,11 +885,28 @@ static void process_trust_0003(const char * string, const jsmntok_t * tokens, co
             time_t when = timegm(broken);
 
             // TODO It is this query which takes ages.  Can we accelerate it?
-            sprintf(query, "SELECT cif_schedules.id, cif_schedules.CIF_train_uid, signalling_id, CIF_stp_indicator FROM cif_schedules INNER JOIN cif_schedule_locations ON cif_schedules.id = cif_schedule_locations.cif_schedule_id WHERE cif_schedule_locations.tiploc_code = '%s'",
+            sprintf(query, "SELECT cif_schedules.id, cif_schedules.CIF_train_uid, signalling_id, CIF_stp_indicator FROM cif_schedules INNER JOIN cif_schedule_locations AS l ON cif_schedules.id = l.cif_schedule_id WHERE l.tiploc_code = '%s'",
                     tiploc);
+
+
+#if 0
             sprintf(query1, " AND cif_schedule_locations.sort_time > %d AND cif_schedule_locations.sort_time < %d",
                     sort_time - 1, sort_time + 4);
             strcat(query, query1);
+#else
+            if(event_type == 'A')
+               sprintf(query1, " AND (l.arrival = '%s' OR l.pass = '%s')", planned, planned);
+            else if(event_type == 'D')
+               sprintf(query1, " AND (l.departure = '%s' OR l.pass = '%s')", planned, planned);
+            else
+            {
+               sprintf(query1, " AND 0");
+               strcpy(reason, "Unrecognised event type");
+            }
+            strcat(query, query1);
+#endif
+
+
             strcat(query, " AND (cif_schedules.CIF_stp_indicator = 'N' OR cif_schedules.CIF_stp_indicator = 'P' OR cif_schedules.CIF_stp_indicator = 'O')");
 
             static const char * days_runs[8] = {"runs_su", "runs_mo", "runs_tu", "runs_we", "runs_th", "runs_fr", "runs_sa", "runs_su"};
@@ -883,7 +939,7 @@ static void process_trust_0003(const char * string, const jsmntok_t * tokens, co
                target_head[4] = '\0';
                for(row_count = 0; row_count < ROWS && (rows[row_count] = mysql_fetch_row(result0)); row_count++)
                {
-                  _log(MINOR, "   Potential match:%8s (%s) %4s STP:%s", rows[row_count][0], rows[row_count][1], rows[row_count][2], rows[row_count][3]);
+                  _log(MINOR, "   Potential match:%8s (%s %s) %4s", rows[row_count][0], rows[row_count][1], rows[row_count][3], rows[row_count][2]);
                   if(!strcmp(rows[row_count][2], target_head))
                   {
                      headcode_match = true;
@@ -924,7 +980,49 @@ static void process_trust_0003(const char * string, const jsmntok_t * tokens, co
                   sprintf(query, "INSERT INTO trust_activation VALUES(%ld, '%s', %ld, 1)", now, train_id, cif_schedule_id);
                   db_query(query);
                   elapsed = time_ms() - elapsed;
-                  _log(MINOR, "   Successfully deduced activation %ld.  Elapsed time %s ms.", cif_schedule_id, commas_q(elapsed));
+                  _log(MINOR, "   Successfully deduced schedule %ld.  Elapsed time %s ms.", cif_schedule_id, commas_q(elapsed));
+
+                  
+                  if(train_id[2] >= '0' && train_id[2] <= '9' &&
+                     (train_id[3] < 'A' || train_id[3] > 'Z'  ||
+                      train_id[4] < '0' || train_id[4] > '9'  ||
+                      train_id[5] < '0' || train_id[5] > '9'))
+                  {
+                     // This has an obfuscated headcode.  Do we know the real one?
+                     char obfus_hc[16], true_hc[8];
+                     strcpy(obfus_hc, train_id + 2);
+                     obfus_hc[4] = '\0';
+                     sprintf(query, "SELECT signalling_id, deduced_headcode, deduced_headcode_status from cif_schedules where id = %ld", cif_schedule_id);
+                     if(!db_query(query))
+                     {
+                        result0 = db_store_result();
+                        if((row0 = mysql_fetch_row(result0)))
+                        {
+                           char status[32];
+                           true_hc[0] = '\0';
+                           if(row0[0][0])
+                           {
+                              strcpy(true_hc, row0[0]);
+                              strcpy(status, "From schedule");
+                           }
+                           else if(row0[1][0])
+                           {
+                              strcpy(true_hc, row0[1]);
+                              strcpy(status, "Status ");
+                              strcat(status, row0[2]);
+                           }
+                           if(true_hc[0])
+                           {
+                              sprintf(query, "INSERT INTO obfus_lookup VALUES(%ld, '%s', '%s')", now, true_hc, obfus_hc);
+                              db_query(query);
+                              _log(MINOR, "   Added obfuscated \"%s\", true \"%s\" (%s) to headcode obfuscation table.  TRUST id \"%s\", garner schedule id %ld.  [Deduced activation]", obfus_hc, true_hc, status, train_id, cif_schedule_id);
+                              sprintf(query, "DELETE FROM obfus_lookup WHERE created < %ld", now - 86400L); // 24 hours.
+                              db_query(query);
+                           }
+                        }
+                        mysql_free_result(result0);
+                     }
+                  }
                }
             }
          }
@@ -937,7 +1035,7 @@ static void process_trust_0003(const char * string, const jsmntok_t * tokens, co
          {
             elapsed = time_ms() - elapsed;
             _log(MINOR, "   Failed to deduce an activation.  Reason:  %s.   Elapsed time %s ms.", reason, commas_q(elapsed));
-            _log(MINOR, "      stanox = %s, tiploc = \"%s\", planned_timestamp %s, derived sort time = %d,", loc_stanox, tiploc, time_text(planned_timestamp, true), sort_time);
+            _log(MINOR, "      stanox = %s, tiploc = \"%s\", planned_timestamp %s (%s)", loc_stanox, tiploc, time_text(planned_timestamp, true), planned);
             _log(MINOR, "      actual_timestamp %s.", time_text(actual_timestamp, true));
          }
       }
@@ -989,140 +1087,6 @@ static void process_trust_0007(const char * const string, const jsmntok_t * cons
    db_query(query);
    
    return;
-}
-
-static void create_database(void)
-{
-   MYSQL_RES * result0;
-   MYSQL_ROW row0;
-   word create_trust_activation, create_trust_cancellation, create_trust_movement;
-   word create_trust_changeorigin, create_trust_changeid, create_status, create_message_count;
-
-   _log(PROC, "create_database()");
-
-   create_trust_activation = create_trust_cancellation = create_trust_movement = true;
-   create_trust_changeorigin = create_trust_changeid = create_status = create_message_count = true;
-
-   if(db_query("show tables")) return;
-   
-   result0 = db_store_result();
-   while((row0 = mysql_fetch_row(result0))) 
-   {
-      if(!strcasecmp(row0[0], "trust_activation")) create_trust_activation = false;
-      if(!strcasecmp(row0[0], "trust_cancellation")) create_trust_cancellation = false;
-      if(!strcasecmp(row0[0], "trust_movement")) create_trust_movement = false;
-      if(!strcasecmp(row0[0], "trust_changeorigin")) create_trust_changeorigin = false;
-      if(!strcasecmp(row0[0], "trust_changeid")) create_trust_changeid = false;
-      if(!strcasecmp(row0[0], "status")) create_status = false;
-      if(!strcasecmp(row0[0], "message_count")) create_message_count = false;
-   }
-   mysql_free_result(result0);
-
-   if(create_trust_activation)
-   {
-      db_query(
-"CREATE TABLE trust_activation "
-"(created INT UNSIGNED NOT NULL, "
-"trust_id VARCHAR(16) NOT NULL, "
-"cif_schedule_id INT UNSIGNED NOT NULL, "
-"deduced         TINYINT UNSIGNED NOT NULL, "
-"INDEX(cif_schedule_id), INDEX(trust_id), INDEX(created)"
-") ENGINE = InnoDB"
-               );
-      _log(GENERAL, "Created database table trust_activation.");
-   }
-   if(create_trust_cancellation)
-   {
-      db_query(
-"CREATE TABLE trust_cancellation "
-"(created INT UNSIGNED NOT NULL, "
-"trust_id VARCHAR(16) NOT NULL, "
-"reason VARCHAR(8) NOT NULL, "
-"type   VARCHAR(32) NOT NULL, "
-"loc_stanox VARCHAR(8) NOT NULL, "
-"reinstate TINYINT UNSIGNED NOT NULL, "
-"INDEX(trust_id), INDEX(created) "
-") ENGINE = InnoDB"
-               );
-      _log(GENERAL, "Created database table trust_cancellation.");
-   }
-   if(create_trust_movement)
-   {
-      db_query(
-"CREATE TABLE trust_movement "
-"(created            INT UNSIGNED NOT NULL, "
-"trust_id            VARCHAR(16) NOT NULL, "
-"event_type          VARCHAR(16) NOT NULL, "
-"planned_event_type  VARCHAR(16) NOT NULL, "
-"platform            VARCHAR(8) NOT NULL, "
-"loc_stanox          VARCHAR(8) NOT NULL, "
-"actual_timestamp    INT UNSIGNED NOT NULL, "
-"gbtt_timestamp      INT UNSIGNED NOT NULL, "
-"planned_timestamp   INT UNSIGNED NOT NULL, "
-"timetable_variation INT NOT NULL, "
-"event_source        VARCHAR(16) NOT NULL, "
-"offroute_ind        BOOLEAN NOT NULL, "
-"train_terminated    BOOLEAN NOT NULL, "
-"variation_status    VARCHAR(16) NOT NULL, "
-"next_report_stanox  VARCHAR(8) NOT NULL, "
-"next_report_run_time INT UNSIGNED NOT NULL, "
-"INDEX(trust_id), INDEX(created) "
-") ENGINE = InnoDB"
-               );
-      _log(GENERAL, "Created database table trust_movement.");
-   }
-   if(create_trust_changeorigin)
-   {
-      db_query(
-"CREATE TABLE trust_changeorigin "
-"(created INT UNSIGNED NOT NULL, "
-"trust_id VARCHAR(16) NOT NULL, "
-"reason VARCHAR(8) NOT NULL, "
-"loc_stanox VARCHAR(8) NOT NULL, "
-"INDEX(trust_id), INDEX(created) "
-") ENGINE = InnoDB"
-               );
-      _log(GENERAL, "Created database table trust_changeorigin.");
-   }
-   if(create_trust_changeid)
-   {
-      db_query(
-"CREATE TABLE trust_changeid "
-"(created INT UNSIGNED NOT NULL, "
-"trust_id VARCHAR(16) NOT NULL, "
-"new_trust_id VARCHAR(16) NOT NULL, "
-"INDEX(trust_id), INDEX(new_trust_id), INDEX(created) "
-") ENGINE = InnoDB"
-               );
-      _log(GENERAL, "Created database table trust_changeid.");
-   }
-   if(create_status)
-   {
-      db_query(
-"CREATE TABLE status "
-"(last_trust_processed INT UNSIGNED NOT NULL, "
-"last_trust_actual     INT UNSIGNED NOT NULL, "
-"last_vstp_processed   INT UNSIGNED NOT NULL, "
-"last_td_processed     INT UNSIGNED NOT NULL  "
-") ENGINE = InnoDB"
-               );
-      db_query(
-"INSERT INTO status VALUES(0, 0, 0, 0)"
-               );
-      _log(GENERAL, "Created database table status.");
-   }
-   if(create_message_count)
-   {
-      db_query(
-"CREATE TABLE message_count "
-"(application          CHAR(16) NOT NULL,     "
-"time                  INT UNSIGNED NOT NULL, "
-"count                 INT UNSIGNED NOT NULL, "
-"INDEX(time)                                  "
-") ENGINE = InnoDB"
-               );
-      _log(GENERAL, "Created database table message_count.");
-   }
 }
 
 static void jsmn_dump_tokens(const char * const string, const jsmntok_t * const tokens, const word object_index)
@@ -1196,4 +1160,104 @@ static time_t correct_trust_timestamp(const time_t in)
 
    if(in && broken->tm_isdst) return in - 60*60;
    return in;
+}
+
+// Deferred activation engine
+#define DEFERRED_ACTIVATIONS 16
+static struct deferred_activation_detail
+{
+   char uid[8], trust_id[16];
+   time_t due,schedule_start_date, schedule_end_date;
+   word active;
+}
+   deferred_activations[DEFERRED_ACTIVATIONS];
+
+static void init_deferred_activations(void)
+{
+   word i;
+   for(i = 0; i < DEFERRED_ACTIVATIONS; i++)
+      deferred_activations[i].active = false;
+}
+
+static void defer_activation(const char * const uid, const time_t schedule_start_date, const time_t schedule_end_date, const char * const trust_id)
+{
+   _log(PROC, "defer_activation(\"%s\", %ld, %ld, \"%s\")", uid, schedule_start_date, schedule_end_date, trust_id);
+   if(strlen(uid) > 7 || strlen(trust_id) > 15)
+   {
+      _log(CRITICAL, "defer_activation() Overlong uid \"%s\" or trust_id \"%s\".  Activation discarded.", uid, trust_id);
+      return;
+   }
+   
+   time_t now = time(NULL);
+   
+   word i;
+   for(i = 0; i < DEFERRED_ACTIVATIONS && deferred_activations[i].active; i++);
+
+   if(i < DEFERRED_ACTIVATIONS)
+   {
+      strcpy(deferred_activations[i].uid, uid);
+      strcpy(deferred_activations[i].trust_id, trust_id);
+      deferred_activations[i].due = now + 32;
+      deferred_activations[i].schedule_start_date = schedule_start_date;
+      deferred_activations[i].schedule_end_date = schedule_end_date;
+      deferred_activations[i].active = true;
+   }
+   else
+   {
+      _log(MINOR, "      Activation discarded - Defer queue full.");
+   }
+}
+
+static void process_deferred_activations(void)
+{
+   word i;
+   time_t now = time(NULL);
+   MYSQL_RES * db_result;
+   MYSQL_ROW db_row;
+
+   for(i = 0; i < DEFERRED_ACTIVATIONS; i++)
+   {
+      if(deferred_activations[i].active && deferred_activations[i].due < now)
+      {
+         char query[1024];
+         sprintf(query, "select id from cif_schedules where cif_train_uid = '%s' AND schedule_start_date = %ld AND schedule_end_date = %ld AND deleted > %ld AND CIF_stp_indicator != 'C' ORDER BY LOCATE(CIF_stp_indicator, 'OCNP')", deferred_activations[i].uid, deferred_activations[i].schedule_start_date, deferred_activations[i].schedule_end_date, now);
+         if(!db_query(query))
+         {
+            db_result = db_store_result();
+            word num_rows = mysql_num_rows(db_result);
+            if(num_rows < 1) 
+            {
+               _log(MINOR, "No schedules found for deferred activation \"%s\".  Activation recorded without schedule.", deferred_activations[i].trust_id);
+
+               sprintf(query, "INSERT INTO trust_activation VALUES(%ld, '%s', %ld, 0)", now, deferred_activations[i].trust_id, 0L);
+               db_query(query);
+            }
+            else
+            {
+               db_row = mysql_fetch_row(db_result);
+               dword cif_schedule_id = atol(db_row[0]);
+               _log(MINOR, "Found schedule %ld for deferred activation \"%s\".", cif_schedule_id, deferred_activations[i].trust_id);
+               stats[Mess1MissHit]++;
+               sprintf(query, "INSERT INTO trust_activation VALUES(%ld, '%s', %ld, 0)", now, deferred_activations[i].trust_id, cif_schedule_id);
+               db_query(query);
+               // Bug:  We should do the 'deduced headcode' processing here.
+            }
+            mysql_free_result(db_result);
+         }
+         deferred_activations[i].active = false;
+      }
+   }
+}               
+
+static word count_deferred_activations(void)
+{
+   word i, result;
+   result = 0;
+
+   for(i = 0; i < DEFERRED_ACTIVATIONS; i++)
+   {
+      if(deferred_activations[i].active) result++;
+   }
+
+   return result;
 }

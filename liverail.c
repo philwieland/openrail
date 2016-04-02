@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2013, 2014, 2015 Phil Wieland
+    Copyright (C) 2013, 2014, 2015, 2016 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -34,7 +34,7 @@
 static void depsheet(void);
 static void display_choice(MYSQL_RES * result0, const char * const view, const time_t when);
 static void display_control_panel(const char * const location, const time_t when);
-static void report_train(const word index, const time_t when, const word huyton_special);
+static void report_train(const word index, const time_t when);
 static void report_train_summary(const word index, const time_t when, const word ntrains);
 static char * show_date(const time_t time, const byte local);
 static void train(void);
@@ -56,9 +56,9 @@ static const char * const show_cape_reason(const char * const code);
 static word get_sort_time(const char const * buffer);
 
 #define NAME "Live Rail"
-#define BUILD "W524"
+#define BUILD "X328"
 
-#define COLUMNS_NORMAL 6
+#define COLUMNS_NORMAL 5
 #define COLUMNS_PANEL 4
 #define COLUMNS ((mode == PANEL || mode == PANELU)?COLUMNS_PANEL:COLUMNS_NORMAL)
 
@@ -83,7 +83,7 @@ static const char * categories[CATEGORIES] = {
    "BSBus WTT",
    "EEEmpty Coaching Stock",
    "ESECS and staff",
-   "ZZLight Locomotove",
+   "ZZLight Locomotive",
 };
 
 #define POWER_TYPES 10
@@ -98,6 +98,35 @@ static const char * power_types[POWER_TYPES] = {
    "EPUElectric Parcels Unit",
    "HSTHigh Speed Train",
    "LDSDiesel Shunting Locomotive",
+};
+
+#define ACTIVITIES 25
+static const char * activities[ACTIVITIES] = {
+   "A Stops or shunts for other trains to pass",
+   "AEAttach/detach assisting locomotive",
+   "BLStops for banking locomotive",
+   "C Stops to change trainmen",
+   "D Stops to set down passengers",
+   "-DStops to detach vehicles",
+   "E Stops for examination",
+   "L Stops to change locomotoves",
+   "N Stop not advertised",
+   "OPStops for other operating reasons",
+   "ORTRain locomotive on rear",
+   "PRPropelling between points shown",
+   "R Stops when required",
+   "RMReversing movement or driver changes ends",
+   "RRStops for locomotive to run round",
+   "S Stops for railway personnel only",
+   "T Stops to take up and set down passengers",
+   "-TStops to attach and detach vehicles",
+   "TBTrain begins",
+   "TFTrain finishes",
+   "TWStops (or at pass) for tablet, staff or token",
+   "U Stops to take up passengers",
+   "-UStops to attach vehicles",
+   "W Stops for watering of coaches",
+   "X Passes another train at crossing point on single line",
 };
 
 static const char * days[] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
@@ -124,15 +153,14 @@ enum modes        { FULL, SUMMARY, DEPART, PANEL, PANELU, SUMMARYU, DEPARTU, MOB
 // 0x0002 Update
 // 0x0004 Sort using: 0 = sort_time database field. 1 = Prefer departure time
 // 0x0008 Updateable - Supports smart updates.
-// 0x0010 Huyton_special is HUYTON.
-word modef[MODES] = {0x0001,0x000d,0x001d, 0x001d, 0x0016, 0x0006  , 0x0016 , 0x0014, 0x0000, 0x0001 , 0x0001, 0x0001, 0x0001};
+word modef[MODES] = {0x0001,0x000d,0x000d, 0x000d, 0x0006, 0x0006  , 0x0006 , 0x0004, 0x0000, 0x0001 , 0x0001, 0x0001, 0x0001};
 
 static word mobile_trains, mobile_time;
 
 #define MAX_CALLS 2048
 static struct call_details
    {
-      dword cif_schedule_id;
+      dword garner_schedule_id;
       word sort_time;
       byte next_day;
       byte valid;
@@ -186,13 +214,30 @@ int main()
 
    refresh = !strcasecmp(parameters[l], "r");
 
-   if(load_config("/etc/openrail.conf"))
    {
-      printf("Failed to load config.\n");
-      exit(1);
+      char config_file_path[256];
+      word p;
+
+      strcpy(config_file_path, "/etc/openrail.conf");
+
+      for(p = 0; p <= l; p++)
+      {
+         if(!strncasecmp(parameters[p], "_conf", 5))
+         {
+            strcpy(config_file_path, "/etc/");
+            strcat(config_file_path, parameters[p] + 5);
+         }
+      } 
+
+      char * config_fail;
+      if((config_fail = load_config(config_file_path)))
+      {
+         printf("<p>Failed to read config file \"%s\":  %s</p>\n", config_file_path, config_fail);
+         exit(0);
+      }
    }
 
-   debug = !strcasecmp(conf.debug, "true");
+   debug = *conf[conf_debug];
 
    // Set up log
    {
@@ -238,7 +283,10 @@ int main()
       printf("<title>%s %s</title>\n", NAME, BUILD);
       printf("<link rel=\"stylesheet\" type=\"text/css\" href=\"/auxy/liverail.css\">\n");
       printf("</head>\n");
-      printf("<body style=\"font-family: arial,sans-serif;\" onload=\"startup();\">\n");
+      if(mode == PANEL)
+         printf("<body class=\"panel-body\" onload=\"startup();\">\n");
+      else
+         printf("<body onload=\"startup();\">\n");
       printf("<script type=\"text/javascript\" src=\"/auxy/liverail.js\"></script>\n");
    }
    else
@@ -249,7 +297,7 @@ int main()
    location_name(NULL, false);
 
    // Initialise database
-   db_init(conf.db_server, conf.db_user, conf.db_pass, conf.db_name);
+   db_init(conf[conf_db_server], conf[conf_db_user], conf[conf_db_password], conf[conf_db_name]);
 
    sprintf(zs, "Parameters:  (l = %d)", l);
    _log(GENERAL, zs);
@@ -307,13 +355,17 @@ int main()
       {
          printf("Updated at %s by %s %s at %s.  Elapsed time %s ms.\n", time_text(time(NULL), 1), NAME, BUILD, host, commas_q(elapsed));
       }
-      else
+      else 
       {
          if(mode == PANEL)
-         printf("<p id=\"bottom-line\" style=\"display:none;\">Completed at %s by %s %s at %s.  Elapsed time %s ms.</p>\n", time_text(time(NULL), 1), NAME, BUILD, host, commas_q(elapsed));
+         {
+            //printf("<p id=\"bottom-line\" style=\"display:none;\">Completed at %s by %s %s at %s.  Elapsed time %s ms.</p>\n", time_text(time(NULL), 1), NAME, BUILD, host, commas_q(elapsed));
+            printf("<p id=\"bottom-line\">Completed at %s by %s %s at %s.  Elapsed time %s ms.</p>\n", time_text(time(NULL), 1), NAME, BUILD, host, commas_q(elapsed));
+         }
          else
-         printf("<p id=\"bottom-line\">Completed at %s by %s %s at %s.  Elapsed time %s ms.</p>\n", time_text(time(NULL), 1), NAME, BUILD, host, commas_q(elapsed));
-
+         {
+            printf("<p id=\"bottom-line\">Completed at %s by %s %s at %s.  Elapsed time %s ms.</p>\n", time_text(time(NULL), 1), NAME, BUILD, host, commas_q(elapsed));
+         }
          printf("</body></html>\n\n");
       }
    }
@@ -340,7 +392,7 @@ static void display_control_panel(const char * const location, const time_t when
 {
    printf("<table><tr><td class=\"control-panel-row\">\n");
    
-   printf("&nbsp;Show trains at <input type=\"text\" id=\"search_loc\" size=\"24\" maxlength=\"64\" value=\"%s\" onkeydown=\"if(event.keyCode == 13) search_onclick(); else ar_off();\">\n", location);
+   printf("&nbsp;Show trains at <input type=\"text\" id=\"search_loc\" size=\"26\" maxlength=\"64\" placeholder=\"Location name / TIPLOC / 3-alpha\" value=\"%s\" onkeydown=\"if(event.keyCode == 13) search_onclick(); else ar_off();\">\n", location);
 
    time_t x = now - (DAY_START * 15);
    struct tm * broken = localtime(&x);
@@ -348,7 +400,7 @@ static void display_control_panel(const char * const location, const time_t when
    word m = broken->tm_mon;
    word y = broken->tm_year;
    broken = localtime(&when);
-   printf("on <input type=\"text\" id=\"search_date\" size=\"8\" maxlength=\"8\" value=\"");
+   printf("on <input type=\"text\" id=\"search_date\" size=\"8\" maxlength=\"8\" placeholder=\"dd/mm/yy\" value=\"");
    if(!when || (d == broken->tm_mday && m == broken->tm_mon && y == broken->tm_year))
    {
    }
@@ -377,13 +429,14 @@ static void display_control_panel(const char * const location, const time_t when
 static void depsheet(void)
 {
    word cif_schedule_count;
-   word huyton_special;
 
    MYSQL_RES * result0;
    MYSQL_ROW row0;
    char query[4096], zs[256];
 
    time_t when;
+
+   qword start_us = time_us();
 
    // Process parameters
    // DATE
@@ -414,7 +467,6 @@ static void depsheet(void)
    if(parameters[1][0])
    {
       db_real_escape_string(location, parameters[1], strlen(parameters[1]));
-      huyton_special = false;
       {
          MYSQL_ROW row0;
          char query[1024];
@@ -485,21 +537,31 @@ static void depsheet(void)
    }
    else
    {
-      huyton_special = true;
-      location[0] = '\0';
-   }
-   
-   struct tm broken = *localtime(&when);
-
-   // Pre-report differences 
-   if(modef[mode] & 0x0010)
-   {
-      if(huyton_special)
-      {
-         huyton_special = false;
+      // Set up default locations
+      switch(mode)
+      {   
+      case FULL:
+      case DEPART:
+      case PANEL:
+      case DEPARTU:
+      case PANELU:
+      case MOBILE:
          strcpy(location, "HUYTON");
+         break;
+
+      case SUMMARY:
+      case SUMMARYU:
+         strcpy(location, "HUYTJUN");
+         break;
+
+      default:
+         strcpy(location, "");
       }
    }
+   
+   _log(DEBUG, "%10s us ] Determined location \"%s\".", commas_q(time_us() - start_us), location);
+
+   struct tm broken = *localtime(&when);
 
    // Additional parameters for mobile
    if(mode == MOBILE)
@@ -525,7 +587,7 @@ static void depsheet(void)
       printf("<h2>");
       if(mode == DEPART) printf ("Passenger departures from ");
       else printf("Services at ");
-      printf("%s on %s %02d/%02d/%02d</h2>", (huyton_special?"Huyton and Huyton Junction" : location_name_and_codes(location)), days[broken.tm_wday % 7], broken.tm_mday, broken.tm_mon + 1, broken.tm_year % 100);
+      printf("%s on %s %02d/%02d/%02d</h2>", location_name_and_codes(location), days[broken.tm_wday % 7], broken.tm_mday, broken.tm_mon + 1, broken.tm_year % 100);
       break;
 
    case PANEL:
@@ -541,15 +603,8 @@ static void depsheet(void)
    strcpy(query, "SELECT cif_schedules.id, cif_schedules.CIF_train_uid, cif_schedules.CIF_stp_indicator, next_day, sort_time, record_identity, arrival, public_arrival, departure, public_departure, pass, platform, tiploc_code");
    strcat(query, " FROM cif_schedules INNER JOIN cif_schedule_locations");
    strcat(query, " ON cif_schedules.id = cif_schedule_locations.cif_schedule_id");
-   if(huyton_special)
-   {
-      strcat(query, " WHERE ((cif_schedule_locations.tiploc_code = 'HUYTON') OR (cif_schedule_locations.tiploc_code = 'HUYTJUN'))");
-   }
-   else
-   {
       sprintf(zs, " WHERE (cif_schedule_locations.tiploc_code = '%s')", location);
       strcat(query, zs);
-   }
    
    strcat(query, " AND (cif_schedules.CIF_stp_indicator = 'N' OR cif_schedules.CIF_stp_indicator = 'P' OR cif_schedules.CIF_stp_indicator = 'O')");
    
@@ -565,7 +620,8 @@ static void depsheet(void)
    word tom = (day + 1) % 7;
    when = timegm(&broken);
    
-   sprintf(zs, " AND ((((%s) AND (schedule_start_date <= %ld) AND (schedule_end_date >= %ld) AND (NOT next_day)) AND (sort_time >= %d))",  days_runs[day],  when + 12*60*60, when - 12*60*60, DAY_START);
+   sprintf(zs, " AND ((((%s) AND (schedule_start_date <= %ld) AND (schedule_end_date >= %ld) AND (NOT next_day)) AND (sort_time >= %d))",  days_runs
+[day],  when + 12*60*60, when - 12*60*60, DAY_START);
    strcat(query, zs);
    sprintf(zs, " OR   (((%s) AND (schedule_start_date <= %ld) AND (schedule_end_date >= %ld) AND (    next_day)) AND (sort_time >= %d))",  days_runs[yest], when - 12*60*60, when - 36*60*60, DAY_START);
    strcat(query, zs);
@@ -584,16 +640,20 @@ static void depsheet(void)
       strcat(query, zs);
    }
    
-   strcat(query, " ORDER BY LOCATE(cif_schedules.CIF_stp_indicator, 'NPO'), cif_schedule_id"); 
+   //strcat(query, " ORDER BY LOCATE(cif_schedules.CIF_stp_indicator, 'NPO'), cif_schedule_id"); 
    
+
    word index, i;
    
    // 1. Collect a list of visits
    _log(DEBUG, "Step 1:  Collect a list of visits.");
    call_count = 0;
    
+   _log(DEBUG, "%10s us ] Prepared Step 1 initial query.", commas_q(time_us() - start_us));
    if(!db_query(query))
    {
+      _log(DEBUG, "%10s us ] Completed Step 1 initial query.", commas_q(time_us() - start_us));
+
       result0 = db_store_result();
       while((row0 = mysql_fetch_row(result0)))
       {
@@ -604,7 +664,7 @@ static void depsheet(void)
          }
 
          // Insert in array
-         calls[call_count].cif_schedule_id        = atol(row0[0]);
+         calls[call_count].garner_schedule_id        = atol(row0[0]);
          calls[call_count].sort_time              = atoi(row0[4]);
          calls[call_count].next_day               = atoi(row0[3]);
          calls[call_count].valid                  = true;
@@ -629,13 +689,14 @@ static void depsheet(void)
       }
       mysql_free_result(result0);
    }
+   _log(DEBUG, "%10s us ] Completed Step 1.", commas_q(time_us() - start_us));
    
    // 2. Cancel any which are overriden
-   for(index = 1; index < call_count; index++)
+   for(index = 0; index < call_count; index++)
    {
       if(calls[index].valid && calls[index].cif_stp_indicator == 'O')
       {
-         for(i = 0; i < index; i++)
+         for(i = 0; i < call_count; i++)
          {
             if(!strcmp(calls[i].cif_train_uid, calls[index].cif_train_uid) && calls[i].cif_stp_indicator != 'O')
             {
@@ -646,6 +707,7 @@ static void depsheet(void)
          }
       }
    }
+   _log(DEBUG, "%10s us ] Completed Step 2.", commas_q(time_us() - start_us));
    
    // 3. Next, remove those which are cancelled, and remove those overriden by overlays that don't call
    // NOTE:  Overlay may not call at this station!
@@ -696,7 +758,7 @@ static void depsheet(void)
                   // Cancelled
                   calls[index].valid = false;
                   //printf("<br>Step 3:  %d invalidated due to C", index);
-                  _log(DEBUG, "Schedule %ld (%s) cancelled by schedule %s.", calls[index].cif_schedule_id, calls[index].cif_train_uid, row0[0]);
+                  _log(DEBUG, "Schedule %ld (%s) cancelled by schedule %s.", calls[index].garner_schedule_id, calls[index].cif_train_uid, row0[0]);
                }
                else 
                {
@@ -705,7 +767,7 @@ static void depsheet(void)
                   // In either case we invalidate this schedule.  If the overlay comes here it will already be in the list, somewhere.
                   _log(DEBUG, "Examining overlay.");
                   dword overlay_id = atol(row0[0]);
-                  if(overlay_id != calls[index].cif_schedule_id || calls[index].cif_stp_indicator == 'N' || calls[index].cif_stp_indicator == 'P')
+                  if(overlay_id != calls[index].garner_schedule_id || calls[index].cif_stp_indicator == 'N' || calls[index].cif_stp_indicator == 'P')
                   {
                      // Supercede
                      calls[index].valid = false;
@@ -718,40 +780,7 @@ static void depsheet(void)
       }
    }
 
-   // 4. In huyton_special mode some trains will be in then list at both Huyton and Junction.  In these cases,
-   //    drop the junction entry.
-   if(huyton_special)
-   {
-      _log(DEBUG, "4:  huyton_special - Remove trains which call at both.");
-      for(index = 0; index < call_count; index++)
-      {
-         if(calls[index].valid)
-         {
-            for(i = 0; i < call_count; i++)
-            {
-               if(calls[i].valid && i != index
-                  && calls[index].cif_schedule_id == calls[i].cif_schedule_id
-                  && calls[index].sort_time > calls[i].sort_time - 16
-                  && calls[index].sort_time < calls[i].sort_time + 16
-                  && strcmp(calls[index].tiploc_code, calls[i].tiploc_code))
-               {
-                  // HIT
-                  _log(DEBUG, "Found call %d and call %d for same pass of same train, schedule id %ld", index, i, calls[i].cif_schedule_id);
-                  if(strcmp(calls[index].tiploc_code, "HUYTON"))
-                  {
-                     _log(DEBUG, "   Removing call %d", index);
-                     calls[index].valid = false;
-                  }
-                  else
-                  {
-                     _log(DEBUG, "   Removing call %d", i);
-                     calls[i].valid = false;
-                  }
-               }
-            }
-         }
-      }
-   }
+   _log(DEBUG, "%10s us ] Completed Step 3.", commas_q(time_us() - start_us));
 
    // 5. Bubble Sort
    {
@@ -767,7 +796,7 @@ static void depsheet(void)
          // Early hours trains come after all the others.
          if(calls[j].sort_time < DAY_START) calls[j].sort_time += 10000;
          call_sequence[j] = j;
-         if(calls[j].valid) schedules_key += calls[j].cif_schedule_id; // May wrap.
+         if(calls[j].valid) schedules_key += calls[j].garner_schedule_id; // May wrap.
       }
 
       for(j = call_count; run && j > 1; j--)
@@ -786,6 +815,7 @@ static void depsheet(void)
          }
       }
    }
+   _log(DEBUG, "%10s us ] Completed Step 5.", commas_q(time_us() - start_us));
 
    switch(mode)
    {
@@ -809,6 +839,7 @@ static void depsheet(void)
       {
          if(calls[call_sequence[index]].valid)
          {
+            _log(DEBUG, "%10s us ] Calling report_train_summary( [%d] )", commas_q(time_us() - start_us), index);
             report_train_summary(call_sequence[index], when, cif_schedule_count);
          }
       }
@@ -818,12 +849,12 @@ static void depsheet(void)
       {
          if(mode == SUMMARY || mode == DEPART || mode == PANEL) printf("</tr></table>\n");
       }
-      //if(mode == SUMMARY || mode == DEPART|| mode == PANEL) printf("</table>\n");
       break;
 
    case FULL:
       printf("<table>\n");
-      printf("<tr class=\"small-table\"><th>Detail</th><th>Type</th><th>ID</th><th>CIF ID</th><th>Latest Live Data</th><th>P</th><th>Times WTT(Public)</th><th>From</th><th>To</th></tr>\n");
+      printf("<tr class=\"small-table\"><th colspan=\"8\">Information from Schedule Database</th><th>Information from TRUST feed</tr>\n");
+      printf("<tr class=\"small-table\"><th>Detail</th><th>Type</th><th>ID</th><th>CIF ID</th><th>P</th><th>Times WTT(Public)</th><th>From</th><th>To</th><th>Latest Live Data</th></tr>\n");
       cif_schedule_count = 0;
       for(index = 0; index < call_count; index++)
       {
@@ -831,7 +862,7 @@ static void depsheet(void)
          if(calls[call_sequence[index]].valid)
          {
             cif_schedule_count++;
-            report_train(call_sequence[index], when, huyton_special);
+            report_train(call_sequence[index], when);
          }
       }
       
@@ -841,10 +872,12 @@ static void depsheet(void)
    default:
       break;
    }
+   _log(DEBUG, "%10s us ] End.", commas_q(time_us() - start_us));
 }
 
-static void report_train(const word index, const time_t when, const word huyton_special)
+static void report_train(const word index, const time_t when)
 {
+   // One line describing the specified train in a FULL report.
    MYSQL_RES * result0, * result1;
    MYSQL_ROW row0, row1;
 
@@ -857,8 +890,8 @@ static void report_train(const word index, const time_t when, const word huyton_
    if(calls[index].sort_time >= 10000) start_date += (24*60*60);
 
    _log(DEBUG, "calls[index].sort_time = %d, DAY_START = %d, start_date = %s", calls[index].sort_time, DAY_START, show_date(start_date, false));
-   //                     0             1                    2                  3              4              5                  6           
-   sprintf(query, "SELECT train_status, schedule_start_date, schedule_end_date, signalling_id, CIF_train_uid, CIF_stp_indicator, update_id FROM cif_schedules WHERE id = %ld", calls[index].cif_schedule_id);
+   //                     0             1                    2                  3              4              5                  6          7                8
+   sprintf(query, "SELECT train_status, schedule_start_date, schedule_end_date, signalling_id, CIF_train_uid, CIF_stp_indicator, update_id, deduced_headcode,deduced_headcode_status FROM cif_schedules WHERE id = %ld", calls[index].garner_schedule_id);
 
    if(!db_query(query))
    {
@@ -870,7 +903,7 @@ static void report_train(const word index, const time_t when, const word huyton_
          vstp = (row0[6][0] == '0' && row0[6][1] == 0);
 
          // Link
-         printf("<td><a class=\"linkbutton\" href=\"%strain/%ld/%s\">Details</a></td>\n", URL_BASE, calls[index].cif_schedule_id, show_date(start_date, false));
+         printf("<td><a class=\"linkbutton\" href=\"%strain/%ld/%s\">Details</a></td>\n", URL_BASE, calls[index].garner_schedule_id, show_date(start_date, false));
          
          // Status
          if(vstp) printf("<td class=\"small-table-vstp\">V");
@@ -894,8 +927,10 @@ static void report_train(const word index, const time_t when, const word huyton_
          printf("<td>");
          if(row0[3][0])
             printf("%s", row0[3]);
+         else if(row0[7][0])
+            printf("%s %s", row0[7], row0[8]);
          else
-            printf("%ld", calls[index].cif_schedule_id);
+            printf("%ld", calls[index].garner_schedule_id);
          printf("</td>");
 
          // CIF ID and CIF STP indicator
@@ -911,6 +946,47 @@ static void report_train(const word index, const time_t when, const word huyton_
          }
          printf(")</td>");
 
+
+         // Arrival and departure        
+         printf("<td>%s</td><td>\n", calls[index].platform); 
+         if(calls[index].arrival[0])          printf("a. %s", show_time(calls[index].arrival)); // arrival
+         if(calls[index].public_arrival[0])   printf("(%s)",  show_time(calls[index].public_arrival)); // public arrival
+         if(calls[index].departure[0])        printf(" d. %s",show_time(calls[index].departure)); // dep
+         if(calls[index].public_departure[0]) printf("(%s)",  show_time(calls[index].public_departure)); // public dep
+         if(calls[index].pass[0])             printf("p. %s", show_time(calls[index].pass)); // pass
+         printf("</td>");
+                        
+         // From
+         sprintf(query, "SELECT tiploc_code, departure, public_departure FROM cif_schedule_locations where cif_schedule_id = %ld AND record_identity = 'LO'", calls[index].garner_schedule_id);
+         printf("<td>");
+         if(!db_query(query))
+         {
+            result1 = db_store_result();
+            
+            if((row1 = mysql_fetch_row(result1)))
+            {
+               printf("%s %s", location_name_link(row1[0], true, "full", when), show_time(row1[1]));
+               if(row1[2][0]) printf("(%s)", show_time(row1[2]));
+            }
+            mysql_free_result(result1);
+         }
+         printf("</td>");
+
+         // To
+         sprintf(query, "SELECT tiploc_code, arrival, public_arrival FROM cif_schedule_locations where cif_schedule_id = %ld AND record_identity = 'LT'", calls[index].garner_schedule_id);
+         printf("<td>");
+         if(!db_query(query))
+         {
+            result1 = db_store_result();
+            
+            if((row1 = mysql_fetch_row(result1)))
+            {
+               printf("%s %s", location_name_link(row1[0], true, "full", when), show_time(row1[1]));
+               if(row1[2][0]) printf("(%s)", show_time(row1[2]));
+            }
+            mysql_free_result(result1);
+         }
+         printf("</td>");
          // TRUST
          {
             char query[512], zs[128], zs1[128], report[1024], class[32];
@@ -922,7 +998,7 @@ static void report_train(const word index, const time_t when, const word huyton_
             byte dom = broken->tm_mday; 
 
             // Then, only accept activations where dom matches, and are +- 15 days (To eliminate last month's activation.)  YUK
-            sprintf(query, "SELECT created, trust_id, deduced FROM trust_activation WHERE cif_schedule_id = %ld AND substring(trust_id FROM 9) = '%02d' AND created > %ld AND created < %ld order by deduced", calls[index].cif_schedule_id, dom, when - 15*24*60*60, when + 15*24*60*60);
+            sprintf(query, "SELECT created, trust_id, deduced FROM trust_activation WHERE cif_schedule_id = %ld AND substring(trust_id FROM 9) = '%02d' AND created > %ld AND created < %ld order by deduced", calls[index].garner_schedule_id, dom, when - 15*24*60*60, when + 15*24*60*60);
             if(!db_query(query))
             {
                result1 = db_store_result();
@@ -991,48 +1067,6 @@ static void report_train(const word index, const time_t when, const word huyton_
             if(deduced) printf("Deduced activation.<br>");
             printf("%s</td>", report);
          }
-
-         // Arrival and departure        
-         printf("<td>%s</td><td>\n", calls[index].platform); 
-         if(huyton_special && !strcmp(calls[index].tiploc_code, "HUYTJUN")) printf("Junction: ");
-         if(calls[index].arrival[0])          printf("a: %s", show_time(calls[index].arrival)); // arrival
-         if(calls[index].public_arrival[0])   printf("(%s)",  show_time(calls[index].public_arrival)); // public arrival
-         if(calls[index].departure[0])        printf(" d: %s",show_time(calls[index].departure)); // dep
-         if(calls[index].public_departure[0]) printf("(%s)",  show_time(calls[index].public_departure)); // public dep
-         if(calls[index].pass[0])             printf("p: %s", show_time(calls[index].pass)); // pass
-         printf("</td>");
-                        
-         // From
-         sprintf(query, "SELECT tiploc_code, departure, public_departure FROM cif_schedule_locations where cif_schedule_id = %ld AND record_identity = 'LO'", calls[index].cif_schedule_id);
-         printf("<td>");
-         if(!db_query(query))
-         {
-            result1 = db_store_result();
-            
-            if((row1 = mysql_fetch_row(result1)))
-            {
-               printf("%s %s", location_name_link(row1[0], true, "full", when), show_time(row1[1]));
-               if(row1[2][0]) printf("(%s)", show_time(row1[2]));
-            }
-            mysql_free_result(result1);
-         }
-         printf("</td>");
-
-         // To
-         sprintf(query, "SELECT tiploc_code, arrival, public_arrival FROM cif_schedule_locations where cif_schedule_id = %ld AND record_identity = 'LT'", calls[index].cif_schedule_id);
-         printf("<td>");
-         if(!db_query(query))
-         {
-            result1 = db_store_result();
-            
-            if((row1 = mysql_fetch_row(result1)))
-            {
-               printf("%s %s", location_name_link(row1[0], true, "full", when), show_time(row1[1]));
-               if(row1[2][0]) printf("(%s)", show_time(row1[2]));
-            }
-            mysql_free_result(result1);
-         }
-         printf("</td>");
          printf("</tr>\n");
 
       }
@@ -1046,7 +1080,7 @@ static void report_train(const word index, const time_t when, const word huyton_
 static void report_train_summary(const word index, const time_t when, const word ntrains)
 // Despite its name, also used for SUMMARYU, DEPART, DEPARTU, PANEL, PANELU and MOBILE modes.
 {
-   enum statuses {NoReport, Activated, Moving, Cancelled, Arrived, Departed};
+   enum statuses {NoReport, Activated, Moving, Cancelled, Arrived, Departed, DepartedDeduced};
    MYSQL_RES * result0, * result1;
    MYSQL_ROW row0, row1;
 
@@ -1054,16 +1088,17 @@ static void report_train_summary(const word index, const time_t when, const word
    static word trains, rows, train, row, bus, shown;
    static word nlate, ncape, nbus, ndeduced, narrival;
    word status, mobile_sched, mobile_sched_unmung, mobile_act;
-   char actual[16];
-   word deviation, deduced, late;
-   char train_details[256], train_time[16], destination[128], analysis_text[32], analysis_class[32], mobile_analysis[32];
+   char actual[16], deduced_actual[8];
+   word deviation, deduced, late, off_route;
+   char train_details[256], train_time[16], train_time_prefix[4], destination[128], analysis_text[32], analysis_class[32], mobile_analysis[32], headcode[16];
    struct tm * broken;
 
    // Calculate start_date from when, deducting 24h if next_day and/or adding 24h if after 00:00.
    time_t start_date = when - (calls[index].next_day?(24*60*60):0);
    if(calls[index].sort_time >= 10000) start_date += (24*60*60);
 
-   deviation = late = status = bus = deduced = 0;
+   deviation = late = status = bus = deduced = off_route = 0;
+   strcpy(headcode, "");
 
    _log(PROC, "report_train_summary(%d, %ld, %d)", index, when, ntrains);
 
@@ -1079,11 +1114,11 @@ static void report_train_summary(const word index, const time_t when, const word
       broken = localtime(&when);
       if(modef[mode] & 0x0002) // Update
       {
-         printf("%02d%s%ld\n", broken->tm_mday, BUILD, schedules_key);
+         printf("%x%s%lx\n", broken->tm_mday, BUILD, schedules_key);
       }
       else if(modef[mode] & 0x0008) // Supports smart updates.
       {
-         printf("\n<input type=\"hidden\" id=\"display_handle\" value=\"%02d%s%ld\">", broken->tm_mday, BUILD, schedules_key);
+         printf("\n<input type=\"hidden\" id=\"display_handle\" value=\"%x%s%lx\">", broken->tm_mday, BUILD, schedules_key);
          printf("<table><tr>"); // Start of outer table
       }
       return;
@@ -1097,11 +1132,12 @@ static void report_train_summary(const word index, const time_t when, const word
 
    if((!(row % rows)) && row < trains)
    {
-      if(mode == SUMMARY || mode == DEPART || mode == PANEL) printf("<td><table class=\"summ-table\"><tr class=\"summ-table-head\"><th colspan=2>&nbsp;</th><th>Report</th></tr>\n"); // start of outer td, start of inner table
+      if(mode == SUMMARY || mode == DEPART) printf("<td><table class=\"summ-table\"><tr class=\"summ-table-head\"><th colspan=3>&nbsp;</th><th>Report</th></tr>\n"); // start of outer td, start of inner table
+      if(mode == PANEL)                     printf("<td><table class=\"summ-table\"><tr class=\"summ-table-head\"><th colspan=3>&nbsp;</th><th>Report</th></tr>\n"); // start of outer td, start of inner table
    }
  
-   //                     0             1                    2                  3              4              5                  6           
-   sprintf(query, "SELECT train_status, schedule_start_date, schedule_end_date, signalling_id, CIF_train_uid, CIF_stp_indicator, update_id FROM cif_schedules WHERE id = %ld", calls[index].cif_schedule_id);
+   //                     0             1                    2                  3              4              5                  6          7
+   sprintf(query, "SELECT train_status, schedule_start_date, schedule_end_date, signalling_id, CIF_train_uid, CIF_stp_indicator, update_id, deduced_headcode FROM cif_schedules WHERE id = %ld", calls[index].garner_schedule_id);
 
    if(!db_query(query))
    {
@@ -1113,7 +1149,7 @@ static void report_train_summary(const word index, const time_t when, const word
          bus = (row0[0][0] == 'B' || row0[0][0] == '5');
 
          // To
-         sprintf(query, "SELECT tiploc_code FROM cif_schedule_locations where cif_schedule_id = %ld AND record_identity = 'LT'", calls[index].cif_schedule_id);
+         sprintf(query, "SELECT tiploc_code FROM cif_schedule_locations where cif_schedule_id = %ld AND record_identity = 'LT'", calls[index].garner_schedule_id);
          if(!db_query(query))
          {
             result1 = db_store_result();
@@ -1128,7 +1164,7 @@ static void report_train_summary(const word index, const time_t when, const word
          if(calls[index].terminates)
          {
             // From
-            sprintf(query, "SELECT tiploc_code FROM cif_schedule_locations where cif_schedule_id = %ld AND record_identity = 'LO'", calls[index].cif_schedule_id);
+            sprintf(query, "SELECT tiploc_code FROM cif_schedule_locations where cif_schedule_id = %ld AND record_identity = 'LO'", calls[index].garner_schedule_id);
             if(!db_query(query))
             {
                result1 = db_store_result();
@@ -1144,6 +1180,9 @@ static void report_train_summary(const word index, const time_t when, const word
 
          _log(DEBUG, "Got destination = \"%s\"", destination);
 
+         if(row0[3][0]) strcpy(headcode, row0[3]);
+         else if(row0[7][0]) strcpy(headcode, row0[7]);
+
          switch(mode)
          {
          case DEPART:
@@ -1153,7 +1192,7 @@ static void report_train_summary(const word index, const time_t when, const word
             else
                strcpy(train_time, calls[index].departure);
             // Link and destination
-            sprintf(train_details, "<a class=\"linkbutton-summary\" href=\"%strain/%ld/%s\">%s</a>", URL_BASE, calls[index].cif_schedule_id, show_date(start_date, false), destination);
+            sprintf(train_details, "<a class=\"linkbutton-summary\" href=\"%strain/%ld/%s\">%s</a>", URL_BASE, calls[index].garner_schedule_id, show_date(start_date, false), destination);
             break;
 
          case PANEL:
@@ -1168,13 +1207,13 @@ static void report_train_summary(const word index, const time_t when, const word
 
          case SUMMARY:
          case SUMMARYU:
-            if(calls[index].departure[0]) strcpy(train_time, calls[index].departure);
-            else if(calls[index].arrival[0]) strcpy(train_time, calls[index].arrival);
-            else if(calls[index].pass[0]) strcpy(train_time, calls[index].pass);
-            else strcpy(train_time, "?????");
+            if(calls[index].departure[0])    { strcpy(train_time, calls[index].departure); strcpy(train_time_prefix,"d."); }
+            else if(calls[index].arrival[0]) { strcpy(train_time, calls[index].arrival);   strcpy(train_time_prefix,"a."); }
+            else if(calls[index].pass[0])    { strcpy(train_time, calls[index].pass);      strcpy(train_time_prefix,"p."); }
+            else { strcpy(train_time, "?????");strcpy(train_time_prefix,"??"); }
             if(train_time[4] == 'H') strcpy(train_time + 4, "&half;");
             // Link and time and destination
-            sprintf(train_details, "<a class=\"linkbutton-summary\" href=\"%strain/%ld/%s\">%s</a>", URL_BASE, calls[index].cif_schedule_id, show_date(start_date, false), destination);
+            sprintf(train_details, "<a class=\"linkbutton-summary\" href=\"%strain/%ld/%s\">%s</a>", URL_BASE, calls[index].garner_schedule_id, show_date(start_date, false), destination);
             break;
 
          default:
@@ -1201,7 +1240,7 @@ static void report_train_summary(const word index, const time_t when, const word
 
             // Only accept activations where dom matches, and are +- 15 days (To eliminate last month's activation.)  YUK
             // ORDER BY created DESC means we get the last created one
-            sprintf(query, "SELECT created, trust_id, deduced FROM trust_activation WHERE cif_schedule_id = %ld AND substring(trust_id FROM 9) = '%02d' AND created > %ld AND created < %ld ORDER BY created DESC", calls[index].cif_schedule_id, dom, when - 15*24*60*60, when + 15*24*60*60);
+            sprintf(query, "SELECT created, trust_id, deduced FROM trust_activation WHERE cif_schedule_id = %ld AND substring(trust_id FROM 9) = '%02d' AND created > %ld AND created < %ld ORDER BY created DESC", calls[index].garner_schedule_id, dom, when - 15*24*60*60, when + 15*24*60*60);
             if(!db_query(query))
             {
                result1 = db_store_result();
@@ -1238,8 +1277,8 @@ static void report_train_summary(const word index, const time_t when, const word
 
             if(status)
             {
-               // Look for movements.
-               sprintf(query, "SELECT event_type, loc_stanox, actual_timestamp, timetable_variation, variation_status, planned_timestamp from trust_movement where trust_id='%s' AND created > %ld AND created < %ld order by actual_timestamp, planned_timestamp, created", trust_id, when - 15*24*60*60, when + 15*24*60*60);
+               // Look for movements.     0            1             2                   3                    4               5                   6
+               sprintf(query, "SELECT event_type, loc_stanox, actual_timestamp, timetable_variation, variation_status, planned_timestamp, offroute_ind from trust_movement where trust_id='%s' AND created > %ld AND created < %ld order by actual_timestamp, planned_timestamp, created", trust_id, when - 15*24*60*60, when + 15*24*60*60);
                if(!db_query(query))
                {
                   result1 = db_store_result();
@@ -1248,6 +1287,7 @@ static void report_train_summary(const word index, const time_t when, const word
                      if(status == Activated || status == Moving)
                      {
                         status = Moving;
+                        off_route = (row1[6][0] == '1');
                         strcpy(actual, row1[2]);
                         deviation = atoi(row1[3]);
                         late = !strcasecmp("late", row1[4]);
@@ -1303,7 +1343,32 @@ static void report_train_summary(const word index, const time_t when, const word
                                     {
                                        // Near enough!
                                        status = Arrived;
+                                       strcpy(actual, row1[2]);
+                                       deviation = atoi(row1[3]);
+                                       late = !strcasecmp("late", row1[4]);
                                     }
+                                 }
+                              }
+                              // Check for "gone"
+                              if(status < Departed)
+                              {
+                                 char z[8];
+                                 z[0] = train_time[0]; z[1] = train_time[1]; z[2] = '\0';
+                                 word sched = atoi(z)*60;
+                                 z[0] = train_time[2]; z[1] = train_time[3];
+                                 sched += atoi(z);
+                                 time_t planned_timestamp = atol(row1[5]);
+                                 struct tm * broken = localtime(&planned_timestamp);
+                                 word planned = broken->tm_hour * 60 + broken->tm_min;
+                                 if(planned > sched + 2)
+                                 {
+                                    status = DepartedDeduced;
+                                    strcpy(actual, row1[2]);
+                                    deviation = atoi(row1[3]);
+                                    late = !strcasecmp("late", row1[4]);
+                                    sched += (60*24) + (late?deviation:(-deviation));
+                                    sched %= (60*24);
+                                    sprintf(deduced_actual, "%02d%02d", sched/60, sched%60);
                                  }
                               }
                            }
@@ -1358,10 +1423,11 @@ static void report_train_summary(const word index, const time_t when, const word
 
    case Moving:
       strcpy(row_class, "summ-table-move");
-      if(!deviation )        { sprintf(analysis_text, "Cur. On time"); strcpy(analysis_class, "summ-table-good"); }
-      else if(deviation < 3) { sprintf(analysis_text, "Cur. %s %d%s",  show_expected_time(train_time, deviation, late), deviation, late?"L":"E"); strcpy(analysis_class, "summ-table-good"); }
-      else if(deviation < 6) { sprintf(analysis_text, "Cur. %s %d%s", show_expected_time(train_time, deviation, late), deviation, late?"L":"E"); strcpy(analysis_class, "summ-table-minor"); }
-      else                   { sprintf(analysis_text, "Cur. %s %d%s", show_expected_time(train_time, deviation, late), deviation, late?"L":"E"); strcpy(analysis_class, "summ-table-major"); }
+      if(off_route)          { sprintf(analysis_text, "Off route"); strcpy(analysis_class, "summ-table-crit"); }
+      else if(!deviation )   { sprintf(analysis_text, "Exp. On time"); strcpy(analysis_class, "summ-table-good"); }
+      else if(deviation < 3) { sprintf(analysis_text, "Exp. %s %d%s",  show_expected_time(train_time, deviation, late), deviation, late?"L":"E"); strcpy(analysis_class, "summ-table-good"); }
+      else if(deviation < 6) { sprintf(analysis_text, "Exp. %s %d%s", show_expected_time(train_time, deviation, late), deviation, late?"L":"E"); strcpy(analysis_class, "summ-table-minor"); }
+      else                   { sprintf(analysis_text, "Exp. %s %d%s", show_expected_time(train_time, deviation, late), deviation, late?"L":"E"); strcpy(analysis_class, "summ-table-major"); }
       sprintf(mobile_analysis, "%d%s", deviation, late?"L":"E");
       if(deviation >= 3) nlate++;
       mobile_act = mobile_sched + (late?deviation:(-deviation));
@@ -1376,6 +1442,19 @@ static void report_train_summary(const word index, const time_t when, const word
       break;
 
    case Arrived:
+      if(calls[index].terminates)
+         strcpy(row_class, "summ-table-gone");
+      else
+         strcpy(row_class, "summ-table-move");
+      if(!deviation )        { sprintf(analysis_text, "On time"); strcpy(analysis_class, "summ-table-good"); }
+      else if(deviation < 3) { sprintf(analysis_text, "%s %d%s",  show_trust_time_nocolon(actual, true), deviation, late?"L":"E"); strcpy(analysis_class, "summ-table-good"); }
+      else if(deviation < 6) { sprintf(analysis_text, "%s %d%s", show_trust_time_nocolon(actual, true), deviation, late?"L":"E"); strcpy(analysis_class, "summ-table-minor"); }
+      else                   { sprintf(analysis_text, "%s %d%s", show_trust_time_nocolon(actual, true), deviation, late?"L":"E"); strcpy(analysis_class, "summ-table-major"); }
+      sprintf(mobile_analysis, "%d%s", deviation, late?"L":"E");
+      if(deviation >= 3) nlate++;
+      mobile_act = mobile_sched + (late?deviation:(-deviation));
+      break;
+
    case Departed:
       strcpy(row_class, "summ-table-gone");
       if(!deviation )        { sprintf(analysis_text, "On time"); strcpy(analysis_class, "summ-table-good"); }
@@ -1387,10 +1466,21 @@ static void report_train_summary(const word index, const time_t when, const word
       mobile_act = mobile_sched + (late?deviation:(-deviation));
       break;
 
-   }
+    case DepartedDeduced:
+      strcpy(row_class, "summ-table-gone");
+      if(!deviation )        { sprintf(analysis_text, "On time"); strcpy(analysis_class, "summ-table-good"); }
+      else if(deviation < 3) { sprintf(analysis_text, "%s %d%s", deduced_actual, deviation, late?"L":"E"); strcpy(analysis_class, "summ-table-good"); }
+      else if(deviation < 6) { sprintf(analysis_text, "%s %d%s", deduced_actual, deviation, late?"L":"E"); strcpy(analysis_class, "summ-table-minor"); }
+      else                   { sprintf(analysis_text, "%s %d%s", deduced_actual, deviation, late?"L":"E"); strcpy(analysis_class, "summ-table-major"); }
+      sprintf(mobile_analysis, "%d%s", deviation, late?"L":"E");
+      if(deviation >= 3) nlate++;
+      mobile_act = mobile_sched + (late?deviation:(-deviation));
+      break;
+
+    }
 
    if(deduced) ndeduced++;
-   if(status == Arrived) narrival++;
+   if(status == Arrived || status == DepartedDeduced) narrival++;
 
    // Mung mobile times
    if(mobile_sched < 240) mobile_sched += (24*60);
@@ -1406,27 +1496,57 @@ static void report_train_summary(const word index, const time_t when, const word
    case PANELU:
       //printf("tr%d%d|%s|<td>%s</td><td>%s</td>%s", row/rows, row%rows, row_class, train_time, train_details, analysis );
       printf("tr%d%d|%s|%s|%s", row/rows, row%rows, row_class, analysis_class, analysis_text);
-      if(deduced || (status == Arrived && !calls[index].terminates))
+      if(deduced || (status == Arrived && !calls[index].terminates) || status == DepartedDeduced)
       {
          printf("&nbsp;<span class=\"symbols\">");
          if(deduced) printf("&loz;");
          if(status == Arrived && !calls[index].terminates) printf("&alpha;");
+         if(status == DepartedDeduced) printf("&epsilon;");
          printf("</span>");
       }
       printf("\n");
       break;
 
    case SUMMARY:
-   case DEPART:
-   case PANEL:
-      printf("<tr id=\"tr%d%d\" class=\"%s\"><td>%s</td><td>%s</td><td id=\"tr%d%dr\" class=\"%s\">%s", row/rows, row%rows, row_class, train_time, train_details, row/rows, row%rows, analysis_class, analysis_text);
+      printf("<tr id=\"tr%d%d\" class=\"%s\"><td>%s</td><td>%s %s</td><td>%s</td><td id=\"tr%d%dr\" class=\"%s\">%s", row/rows, row%rows, row_class, headcode, train_time_prefix, train_time, train_details, row/rows, row%rows, analysis_class, analysis_text);
       
       // Symbols
-      if(deduced || (status == Arrived && !calls[index].terminates))
+      if(deduced || (status == Arrived && !calls[index].terminates) || status == DepartedDeduced)
       {
          printf("&nbsp;<span class=\"symbols\">");
          if(deduced) printf("&loz;");
          if(status == Arrived && !calls[index].terminates) printf("&alpha;");
+         if(status == DepartedDeduced) printf("&epsilon;");
+         printf("</span>");
+      }
+      printf("</td></tr>\n");
+      break;
+
+   case DEPART:
+      printf("<tr id=\"tr%d%d\" class=\"%s\"><td>%s</td><td>%s</td><td>%s</td><td id=\"tr%d%dr\" class=\"%s\">%s", row/rows, row%rows, row_class, headcode, train_time, train_details, row/rows, row%rows, analysis_class, analysis_text);
+      
+      // Symbols
+      if(deduced || (status == Arrived && !calls[index].terminates) || status == DepartedDeduced)
+      {
+         printf("&nbsp;<span class=\"symbols\">");
+         if(deduced) printf("&loz;");
+         if(status == Arrived && !calls[index].terminates) printf("&alpha;");
+         if(status == DepartedDeduced) printf("&epsilon;");
+         printf("</span>");
+      }
+      printf("</td></tr>\n");
+      break;
+
+   case PANEL:
+      printf("<tr id=\"tr%d%d\" class=\"%s\"><td>%s</td><td>%s</td><td>%s</td><td id=\"tr%d%dr\" class=\"%s\">%s", row/rows, row%rows, row_class, headcode, train_time, train_details, row/rows, row%rows, analysis_class, analysis_text);
+      
+      // Symbols
+      if(deduced || (status == Arrived && !calls[index].terminates) || status == DepartedDeduced)
+      {
+         printf("&nbsp;<span class=\"symbols\">");
+         if(deduced) printf("&loz;");
+         if(status == Arrived && !calls[index].terminates) printf("&alpha;");
+         if(status == DepartedDeduced) printf("&epsilon;");
          printf("</span>");
       }
       printf("</td></tr>\n");
@@ -1437,7 +1557,7 @@ static void report_train_summary(const word index, const time_t when, const word
       {
          if(mobile_sched > mobile_time || mobile_act > mobile_time)
          {
-            printf("%04d %s|%d|%s|%ld\n", mobile_sched_unmung, destination, status, mobile_analysis, calls[index].cif_schedule_id);
+            printf("%04d %s|%d|%s|%ld\n", mobile_sched_unmung, destination, status, mobile_analysis, calls[index].garner_schedule_id);
             shown++;
          }
       }
@@ -1456,14 +1576,18 @@ static void report_train_summary(const word index, const time_t when, const word
       // Last one printed, do the tail
       while((row++) % rows)
       {
-         if(mode == SUMMARY || mode == DEPART || mode == PANEL)
+         if(mode == SUMMARY || mode == DEPART)
          {
-            printf("<tr class=\"summ-table-idle\"><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr>\n");
+            printf("<tr class=\"summ-table-idle\"><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr>\n");
+         }
+         if(mode == PANEL)
+         {
+            printf("<tr class=\"summ-table-idle\"><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr>\n");
          }
       }
       if(mode == SUMMARY || mode == DEPART || mode == PANEL) printf("</table></td><td>");
       
-      // Last column of outer table - Key
+      // Last column of outer table - "Key"
       if(modef[mode] & 0x0002) // Update
       {
          printf("tr%d9|summ-table-idle||%d trains.\n", COLUMNS, trains - nbus);
@@ -1483,11 +1607,11 @@ static void report_train_summary(const word index, const time_t when, const word
          printf("<table class=\"summ-table\">");
          printf("<tr class=\"summ-table-head\"><th>Key</th></tr>\n");
          printf("<tr class=\"summ-table-move\"><td>Train moving.</td></tr>");
-         printf("<tr class=\"summ-table-act\"><td>Train activated.</td></tr>");
+         printf("<tr class=\"summ-table-gone\"><td>Train has passed.</td></tr>");
          printf("<tr class=\"summ-table-idle\"><td>&nbsp;</td></tr>");
          printf("<tr class=\"summ-table-idle\"><td>Deduced activation.&nbsp;&nbsp;<span class=\"symbols\">&loz;</span></td></tr>");
          printf("<tr class=\"summ-table-idle\"><td>Departure not reported.&nbsp;&nbsp;<span class=\"symbols\">&alpha;</span></td></tr>");
-         printf("<tr class=\"summ-table-idle\"><td>&nbsp;</td></tr>");
+         printf("<tr class=\"summ-table-idle\"><td>Time estimated.&nbsp;&nbsp;<span class=\"symbols\">&epsilon;</span></td></tr>");
          printf("<tr class=\"summ-table-idle\"><td>&nbsp;</td></tr>");
          printf("<tr class=\"summ-table-head\"><th>Statistics</th></tr>\n");
          printf("<tr id=\"tr%d9\" class=\"summ-table-idle\"><td id=\"tr%d9r\">%d trains.</td></tr>", COLUMNS, COLUMNS, trains - nbus);
@@ -1541,6 +1665,7 @@ static void train(void)
    MYSQL_RES * result0, * result1;
    MYSQL_ROW row0, row1;
    char train[1024];
+   char headcode[8];
 
    // Decode parameters
    dword schedule_id = atol(parameters[1]);
@@ -1615,11 +1740,13 @@ static void train(void)
       }
       else
       {
-         printf("<h2>Train %ld (%s) %s %s</h2>\n", schedule_id, show_spaces(row0[3]), row0[8], train);
+         strcpy(headcode, row0[8]);
+         if(!headcode[0]) strcpy(headcode, row0[34]);
+         printf("<h2>Train %ld (%s) %s %s</h2>\n", schedule_id, show_spaces(row0[3]), headcode, train);
 
          printf("<table><tr><td style=\"vertical-align:top;\">"); // Outer table
-         printf("<table>");
-         printf("<tr bgcolor=\"#eeeeee\"><td>Update ID</td><td>%s</td><td>", row0[0]);
+         printf("<table class=\"train-table\">");
+         printf("<tr><td>Update ID</td><td>%s</td><td>", row0[0]);
          dword up_id = atol(row0[0]);
          if(up_id == 0) printf("VSTP");
          if(up_id == 1) printf("Full");
@@ -1639,7 +1766,7 @@ static void train(void)
          }
          printf("</td></tr>\n");
 
-         printf("<tr bgcolor=\"#eeeeee\"><td>Created</td><td></td><td>%s</td></tr>", time_text(atol(row0[32]), 0));
+         printf("<tr><td>Created</td><td></td><td>%s</td></tr>", time_text(atol(row0[32]), 0));
 
          if(strtoul(row0[33], NULL, 10) < 0xffffffff)
          {
@@ -1649,9 +1776,9 @@ static void train(void)
          {
             zs[0] = '\0';
          }
-         printf("<tr bgcolor=\"#eeeeee\"><td>Deleted</td><td></td><td>%s</td></tr>", zs);
+         printf("<tr><td>Deleted</td><td></td><td>%s</td></tr>", zs);
 
-         printf("<tr bgcolor=\"#eeeeee\"><td>Bank holiday running</td><td>%s</td><td>", row0[1]);
+         printf("<tr><td>Bank holiday running</td><td>%s</td><td>", row0[1]);
          switch(row0[1][0])
          {
          case 'X' : printf("Not on bank holidays."); break;
@@ -1660,7 +1787,7 @@ static void train(void)
          }
          printf("</td></tr>\n");
 
-         printf("<tr bgcolor=\"#eeeeee\"><td>STP Indicator</td><td>%s</td>", row0[2]);
+         printf("<tr><td>STP Indicator</td><td>%s</td>", row0[2]);
          // CIF STP indicator
          switch(row0[2][0])
          {
@@ -1672,13 +1799,13 @@ static void train(void)
          }
          printf("</tr>");
 
-         printf("<tr bgcolor=\"#eeeeee\"><td>Train UID</td><td>%s</td><td></td></tr>\n", show_spaces(row0[3]));
+         printf("<tr><td>Train UID</td><td>%s</td><td></td></tr>\n", show_spaces(row0[3]));
 
-         // printf("<tr bgcolor=\"#eeeeee\"><td>Applicable Timetable</td><td>%s</td>", row0[4]);
-         printf("<tr bgcolor=\"#eeeeee\"><td>ATOC code</td><td>%s</td><td></td></tr>", row0[5]);
-         //printf("<tr bgcolor=\"#eeeeee\"><td>Traction Class</td><td>%s</td>", row0[6]);
-         printf("<tr bgcolor=\"#eeeeee\"><td>UIC code</td><td>%s</td><td></td></tr>", row0[6]);
-         printf("<tr bgcolor=\"#eeeeee\"><td>Days runs</td><td colspan=2>");
+         // printf("<tr><td>Applicable Timetable</td><td>%s</td>", row0[4]);
+         printf("<tr><td>ATOC code</td><td>%s</td><td></td></tr>", row0[5]);
+         //printf("<tr><td>Traction Class</td><td>%s</td>", row0[6]);
+         printf("<tr><td>UIC code</td><td>%s</td><td></td></tr>", row0[6]);
+         printf("<tr><td>Days runs</td><td colspan=2>");
          if(row0[25][0] == '1') printf("Mo ");
          if(row0[26][0] == '1') printf("Tu ");
          if(row0[27][0] == '1') printf("We ");
@@ -1687,13 +1814,13 @@ static void train(void)
          if(row0[30][0] == '1') printf("Sa ");
          if(row0[31][0] == '1') printf("Su ");
          printf("</td></tr>\n");
-         printf("<tr bgcolor=\"#eeeeee\"><td>Schedule Dates</td><td colspan=2>%s", date_text(atol(row0[23]), 0));
+         printf("<tr><td>Schedule Dates</td><td colspan=2>%s", date_text(atol(row0[23]), 0));
          printf(" - %s</td></tr>", date_text(atol(row0[7]), 0));
-         printf("<tr bgcolor=\"#eeeeee\"><td>Signalling ID</td><td>%s</td><td></td></tr>", row0[8]);
-         printf("<tr bgcolor=\"#eeeeee\"><td>Deduced headcode</td><td>%s</td><td>", row0[34]);
+         printf("<tr><td>Signalling ID</td><td>%s</td><td></td></tr>", row0[8]);
+         printf("<tr><td>Deduced headcode</td><td>%s</td><td>", row0[34]);
          if(row0[35][0]) printf("(Status %s)", row0[35]);
          printf("</td></tr>");
-         printf("<tr bgcolor=\"#eeeeee\"><td>Train category</td>");
+         printf("<tr><td>Train category</td>");
          word i;
          for(i=0; i < CATEGORIES && (categories[i][0]!=row0[9][0] || categories[i][1]!=row0[9][1]) ; i++);
          if(i < CATEGORIES)
@@ -1703,12 +1830,12 @@ static void train(void)
          else
             printf("<td>%s</td><td></td></tr>", row0[9]);
 
-         printf("<tr bgcolor=\"#eeeeee\"><td>TOC Headcode</td><td>%s</td><td></td></tr>\n", row0[10]);
-         // "Not used" printf("<tr bgcolor=\"#eeeeee\"><td>CIF course indicator</td><td>%s</td>", row0[13]);
-         printf("<tr bgcolor=\"#eeeeee\"><td>Train service code</td><td>%s</td><td></td></tr>\n", row0[11]);
-         printf("<tr bgcolor=\"#eeeeee\"><td>Business Sector</td><td>%s</td><td></td></tr>\n", row0[12]);
+         printf("<tr><td>TOC Headcode</td><td>%s</td><td></td></tr>\n", row0[10]);
+         // "Not used" printf("<tr><td>CIF course indicator</td><td>%s</td>", row0[13]);
+         printf("<tr><td>Train service code</td><td>%s</td><td></td></tr>\n", row0[11]);
+         printf("<tr><td>Business Sector</td><td>%s</td><td></td></tr>\n", row0[12]);
 
-         printf("<tr bgcolor=\"#eeeeee\"><td>Power type</td><td>%s</td><td>\n", row0[13]);
+         printf("<tr><td>Power type</td><td>%s</td><td>\n", row0[13]);
          sprintf(zs, "%-3s", row0[13]);
          for(i=0; i < POWER_TYPES && strncmp(power_types[i], zs, 3) ; i++);
          if(i < POWER_TYPES)
@@ -1717,7 +1844,7 @@ static void train(void)
             printf("Unrecognised");
          printf("</td></tr>");
 
-           printf("<tr bgcolor=\"#eeeeee\"><td>Timing Load</td><td>%s</td><td>", row0[14]);
+           printf("<tr><td>Timing Load</td><td>%s</td><td>", row0[14]);
          if(!row0[14][1]) switch(row0[14][0])
                          {
                          case 0:   printf("&nbsp;"); break;
@@ -1731,12 +1858,12 @@ static void train(void)
                          default:  printf("Unrecognised"); break;
                          }
          printf("</td></tr>\n");
-         printf("<tr bgcolor=\"#eeeeee\"><td>Speed</td>");
+         printf("<tr><td>Speed</td>");
          if(row0[15][0])
             printf("<td>%s</td><td>mph</td>", row0[15]);
          else
             printf("<td>&nbsp;</td><td>&nbsp;</td>");
-         printf("<tr bgcolor=\"#eeeeee\"><td>Operating Characteristics</td><td>%s</td><td>", row0[16]);
+         printf("<tr><td>Operating Characteristics</td><td>%s</td><td>", row0[16]);
          for(i=0; i<6 && row0[16][i]; i++)
          {
             if(i) printf("<br>");
@@ -1759,7 +1886,7 @@ static void train(void)
          }
          printf("</td></tr>\n");
 
-         printf("<tr bgcolor=\"#eeeeee\"><td>Seating Class</td><td>%s</td><td>", row0[17]);
+         printf("<tr><td>Seating Class</td><td>%s</td><td>", row0[17]);
          switch(row0[17][0])
          {
          case 0:   printf("&nbsp;"); break;
@@ -1770,7 +1897,7 @@ static void train(void)
          }
          printf("</td></tr>\n");
 
-         printf("<tr bgcolor=\"#eeeeee\"><td>Sleepers</td><td>%s</td><td>", row0[18]);
+         printf("<tr><td>Sleepers</td><td>%s</td><td>", row0[18]);
          switch(row0[18][0])
          {
          case 0:   printf("&nbsp;"); break;
@@ -1781,7 +1908,7 @@ static void train(void)
          }
          printf("</td></tr>\n");
 
-         printf("<tr bgcolor=\"#eeeeee\"><td>Reservations</td><td>%s</td><td>", row0[19]);
+         printf("<tr><td>Reservations</td><td>%s</td><td>", row0[19]);
          switch(row0[19][0])
          {
          case 0:
@@ -1793,19 +1920,21 @@ static void train(void)
          default:  printf("Unrecognised"); break;
          }
          printf("</td></tr>\n");
-         printf("<tr bgcolor=\"#eeeeee\"><td>Connection Indicator</td><td></td><td>%s</td></tr>\n", row0[20]);
-         printf("<tr bgcolor=\"#eeeeee\"><td>Catering Code</td><td></td><td>%s</td></tr>\n", row0[21]);
-         printf("<tr bgcolor=\"#eeeeee\"><td>Service Branding</td><td></td><td>%s</td></tr>\n", row0[22]);
-         printf("<tr bgcolor=\"#eeeeee\"><td>Train Status</td><td>%s</td>", row0[24]);
+         printf("<tr><td>Connection Indicator</td><td></td><td>%s</td></tr>\n", row0[20]);
+         printf("<tr><td>Catering Code</td><td></td><td>%s</td></tr>\n", row0[21]);
+         printf("<tr><td>Service Branding</td><td></td><td>%s</td></tr>\n", row0[22]);
+         printf("<tr><td>Train Status</td><td>%s</td>", row0[24]);
          switch(row0[24][0])
          {
          case 'B': printf("<td>Bus</td>");          break;
          case 'F': printf("<td>Freight</td>");      break;
          case 'P': printf("<td>Passenger</td>");    break;
+         case 'S': printf("<td>Ship</td>");    break;
          case 'T': printf("<td>Trip</td>");         break;
          case '1': printf("<td>STP passenger</td>");break;
          case '2': printf("<td>STP freight</td>");  break;
          case '3': printf("<td>STP trip</td>");     break;
+         case '4': printf("<td>STP ship</td>");     break;
          case '5': printf("<td>STP bus</td>");      break;
          default:  printf("<td>Unrecognised</td>"); break;
          }
@@ -1819,23 +1948,23 @@ static void train(void)
 
          if(!db_query(query))
          {
-            printf("<table>");
-            printf("<tr class=\"small-table\"><th>Location</th><th>Times WTT(Public)</th><th>Plat</th><th>Line</th><th>Allowances</th><th>&nbsp;</th>\n");
+            printf("<table class=\"sched-table\">");
+            printf("<tr><th>Location</th><th>Times WTT(Public)</th><th>Plat</th><th>Line</th><th>Allowances</th><th>Activities</th>\n");
             result0 = db_store_result();
             while((row0 = mysql_fetch_row(result0)))
             {
-               printf("<tr class=\"small-table\">\n");
+               printf("<tr>");
                
                printf("<td>%s</td>", location_name_link(row0[2], false, "full", when));
                printf("<td>");
-               if(row0[4][0]) printf("a: %s", show_time(row0[4])); // arrival
+               if(row0[4][0]) printf("a. %s", show_time(row0[4])); // arrival
                if(row0[7][0]) printf("(%s)",  show_time(row0[7])); // public arrival
-               if(row0[5][0]) printf(" d: %s",show_time(row0[5])); // dep
+               if(row0[5][0]) printf(" d. %s",show_time(row0[5])); // dep
                if(row0[8][0]) printf("(%s)",  show_time(row0[8])); // public dep
-               if(row0[6][0]) printf("p: %s", show_time(row0[6])); // pass
+               if(row0[6][0]) printf("p. %s", show_time(row0[6])); // pass
                printf("</td>\n");
 
-               printf("<td>%s</td><td>%s</td>", row0[9], row0[10]);
+               printf("<td>%s</td><td>%s %s</td>", row0[9], row0[11], row0[10]);
 
                printf("<td>");
                if(row0[12][0]) printf("Eng: %s ",  show_time(row0[12]));
@@ -1853,6 +1982,136 @@ static void train(void)
       }
       mysql_free_result(result0);
 
+      // CR Record               0            1                  2                 3               4             5                      6                  7           8                 9                           10                11              12               13                    14                     15               16
+      sprintf(query, "SELECT tiploc_code, tiploc_instance, CIF_train_category, signalling_id, CIF_headcode, CIF_train_service_code, CIF_power_type, CIF_timing_load, CIF_speed, CIF_operating_characteristics, CIF_train_class, CIF_sleepers, CIF_reservations, CIF_connection_indicator, CIF_catering_code, CIF_service_branding, uic_code FROM cif_changes_en_route WHERE cif_schedule_id=%ld", schedule_id);
+      if(!db_query(query))
+      {
+         result0 = db_store_result();
+         while((row0 = mysql_fetch_row(result0)))
+         {
+            printf("<h3>Change en route at %s", location_name(row0[0], true));
+            if(row0[1][0]) printf("[%s]", row0[1]);
+            printf("</h3>\n");
+
+            printf("<table class=\"train-table\">");
+
+            printf("<tr><td>UIC code</td><td>%s</td><td></td></tr>", row0[16]);
+
+            printf("<tr><td>Signalling ID</td><td>%s</td><td></td></tr>", row0[3]);
+
+            printf("<tr><td>Train category</td>");
+            word i;
+            for(i=0; i < CATEGORIES && (categories[i][0]!=row0[2][0] || categories[i][1]!=row0[2][1]) ; i++);
+            if(i < CATEGORIES)
+               printf("<td>%s</td><td>%s</td></tr>", row0[2], categories[i]+2);
+            else if(row0[2][0])
+               printf("<td>%s</td><td>Unrecognised</td></tr>", row0[2]);
+            else
+               printf("<td>%s</td><td></td></tr>", row0[2]);
+
+            printf("<tr><td>TOC Headcode</td><td>%s</td><td></td></tr>\n", row0[16]);
+
+            printf("<tr><td>Train service code</td><td>%s</td><td></td></tr>\n", row0[5]);
+
+            printf("<tr><td>Power type</td><td>%s</td><td>\n", row0[6]);
+            sprintf(zs, "%-3s", row0[6]);
+            for(i=0; i < POWER_TYPES && strncmp(power_types[i], zs, 3) ; i++);
+            if(i < POWER_TYPES)
+               printf("%s", power_types[i]+3);
+            else if(row0[9][0])
+               printf("Unrecognised");
+            printf("</td></tr>");
+
+            printf("<tr><td>Timing Load</td><td>%s</td><td>", row0[7]);
+            if(!row0[7][1]) switch(row0[7][0])
+                            {
+                            case 0:   printf("&nbsp;"); break;
+                            case 'A': printf("Class 14x"); break;
+                            case 'E': printf("Class 158"); break;
+                            case 'N': printf("Class 165/0"); break;
+                            case 'S': printf("Class 150, 153, 155, or 156"); break;
+                            case 'T': printf("Class 165/1 or 166"); break;
+                            case 'V': printf("Class 220/1"); break;
+                            case 'X': printf("Class 159"); break;
+                            default:  printf("Unrecognised"); break;
+                            }
+            printf("</td></tr>\n");
+
+            printf("<tr><td>Speed</td>");
+            if(row0[8][0])
+               printf("<td>%s</td><td>mph</td>", row0[8]);
+            else
+               printf("<td>&nbsp;</td><td>&nbsp;</td>");
+
+            printf("<tr><td>Operating Characteristics</td><td>%s</td><td>", row0[9]);
+            for(i=0; i<6 && row0[9][i]; i++)
+            {
+               if(i) printf("<br>");
+               switch(row0[9][i])
+               {
+               case 'B': printf("Vacuum Braked"); break;
+               case 'C': printf("Timed at 100mph"); break;
+               case 'D': printf("DOO Coaching Stock"); break;
+               case 'E': printf("Mk4 Coaches"); break;
+               case 'G': printf("Trainman (Guard) Required"); break;
+               case 'M': printf("Timed at 110 mph"); break;
+               case 'P': printf("Push/Pull Train"); break;
+               case 'Q': printf("Runs as required"); break;
+               case 'R': printf("Air conditioned with PA"); break;
+               case 'S': printf("Steam heated"); break;
+               case 'Y': printf("Runs to Terminals/Yards as required");  break;
+               case 'Z': printf("SB1C gauge. Not to be diverted w/o authority"); break;
+               default:  printf("Unrecognised"); break;
+               }
+            }
+            printf("</td></tr>\n");
+
+            printf("<tr><td>Seating Class</td><td>%s</td><td>", row0[10]);
+            switch(row0[10][0])
+            {
+            case 0:   printf("&nbsp;"); break;
+            case 'B': printf("First and Standard."); break;
+            case ' ': printf("First and Standard."); break;
+            case 'S': printf("Standard only."); break;
+            default:  printf("Unrecognised"); break;
+            }
+            printf("</td></tr>\n");
+
+            printf("<tr><td>Sleepers</td><td>%s</td><td>", row0[11]);
+            switch(row0[11][0])
+            {
+            case 0:   printf("&nbsp;"); break;
+            case 'B': printf("First and Standard."); break;
+            case 'F': printf("First only."); break;
+            case 'S': printf("Standard only."); break;
+            default:  printf("Unrecognised"); break;
+            }
+            printf("</td></tr>\n");
+
+            printf("<tr><td>Reservations</td><td>%s</td><td>", row0[12]);
+            switch(row0[12][0])
+            {
+            case 0:
+            case '0': printf("&nbsp;"); break;
+            case 'A': printf("Compulsory."); break;
+            case 'E': printf("Bicycles essential."); break;
+            case 'R': printf("Recommended."); break;
+            case 'S': printf("Possible."); break;
+            default:  printf("Unrecognised"); break;
+            }
+            printf("</td></tr>\n");
+
+            printf("<tr><td>Connection Indicator</td><td></td><td>%s</td></tr>\n", row0[13]);
+            
+            printf("<tr><td>Catering Code</td><td></td><td>%s</td></tr>\n", row0[14]);
+
+            printf("<tr><td>Service Branding</td><td></td><td>%s</td></tr>\n", row0[15]);
+
+            printf("</tr></table>\n");
+         }
+         mysql_free_result(result0);
+      }
+
       {
          struct tm * broken;
          broken = localtime(&when);
@@ -1868,7 +2127,7 @@ static void train(void)
          printf("<td>Real Time Data For %s %02d/%02d/%02d</td>\n", days[broken->tm_wday % 7], broken->tm_mday, broken->tm_mon + 1, broken->tm_year % 100);
          printf("<td width = \"10%%\">&nbsp;</td>\n");
          printf("<td class=\"control-panel-row\"> Show real time data for date ");
-         printf("<input type=\"text\" id=\"train_date\" size=\"8\" maxlength=\"8\" value=\"\" onkeydown=\"if(event.keyCode == 13) train_date_onclick(%ld); else ar_off();\">\n", schedule_id);
+         printf("<input type=\"text\" id=\"train_date\" size=\"8\" maxlength=\"8\" placeholder=\"dd/mm/yy\" value=\"\" onkeydown=\"if(event.keyCode == 13) train_date_onclick(%ld); else ar_off();\">\n", schedule_id);
          printf(" <button id=\"search\" class=\"cp-button\" onclick=\"train_date_onclick(%ld);\">Show</button> </td>\n", schedule_id);
          printf("</tr></table>\n");
          printf("<table>");
@@ -1888,6 +2147,7 @@ static void train(void)
          byte dom = broken->tm_mday;
 
          char trust_id[16];
+         // Activations
          // Only accept activations where dom matches, and are +- 15 days (To eliminate last months activation.)  YUK
          sprintf(query, "SELECT created, trust_id, deduced FROM trust_activation WHERE cif_schedule_id = %ld AND substring(trust_id FROM 9) = '%02d' AND created > %ld AND created < %ld order by created", schedule_id, dom, start_date - 15*24*60*60, start_date + 15*24*60*60);
          if(!db_query(query))
@@ -1918,6 +2178,31 @@ static void train(void)
                mysql_free_result(result2);
             }
 
+            // "Other" messages
+            sprintf(query, "SELECT created, reason, loc_stanox FROM trust_changeorigin WHERE trust_id='%s' AND created > %ld AND created < %ld ORDER BY created", trust_id, start_date - 15*24*60*60, start_date + 15*24*60*60);
+            if(!db_query(query))
+            {
+               result2 = db_store_result();
+               while((row2 = mysql_fetch_row(result2)))
+               {
+                  printf("<tr class=\"small-table-other\"><td>%s</td><td>Change Origin</td>", time_text(atol(row2[0]), true));
+                  printf("<td colspan=11>Reason: %s  Location: %s</td></tr>\n", show_cape_reason(row2[1]), show_stanox(row2[2]));
+               }
+               mysql_free_result(result2);
+            } 
+            sprintf(query, "SELECT created, trust_id, new_trust_id FROM trust_changeid WHERE (trust_id='%s' OR new_trust_id = '%s') AND created > %ld AND created < %ld ORDER BY created", trust_id, trust_id, start_date - 15*24*60*60, start_date + 15*24*60*60);
+            if(!db_query(query))
+            {
+               result2 = db_store_result();
+               while((row2 = mysql_fetch_row(result2)))
+               {
+                  printf("<tr class=\"small-table-other\"><td>%s</td><td>Change ID</td>", time_text(atol(row2[0]), true));
+                  printf("<td colspan=11>Old ID: %s  New ID: %s</td></tr>\n", row2[1], row2[2]);
+               }
+               mysql_free_result(result2);
+            } 
+
+            // Movements
             //                       0       1           2                   3         4           5                 6               7                   8                   9             10            11                12                  13                14   
             sprintf(query, "SELECT created, event_type, planned_event_type, platform, loc_stanox, actual_timestamp, gbtt_timestamp, planned_timestamp, timetable_variation, event_source, offroute_ind, train_terminated, variation_status, next_report_stanox, next_report_run_time from trust_movement where trust_id='%s' AND created > %ld AND created < %ld order by actual_timestamp, planned_timestamp, created", trust_id, start_date - 15*24*60*60, start_date + 15*24*60*60);
             if(!db_query(query))
@@ -1943,14 +2228,13 @@ static void train(void)
                }
                mysql_free_result(result2);
             }
-            
-         }
+          }
       }
       else
       {
          printf("<p>\n");
          printf("<table><tr><td class=\"control-panel-row\"> Show real time data for date ");
-         printf("<input type=\"text\" id=\"train_date\" size=\"8\" maxlength=\"8\" value=\"\" onkeydown=\"if(event.keyCode == 13) train_date_onclick(%ld); else ar_off();\">\n", schedule_id);
+         printf("<input type=\"text\" id=\"train_date\" size=\"8\" maxlength=\"8\" placeholder=\"dd/mm/yy\" value=\"\" onkeydown=\"if(event.keyCode == 13) train_date_onclick(%ld); else ar_off();\">\n", schedule_id);
          printf(" <button id=\"search\" class=\"cp-button\" onclick=\"train_date_onclick(%ld);\">Show</button> \n", schedule_id);
          printf("</td></tr></table>\n");
          printf("</p>\n");
@@ -2208,10 +2492,12 @@ static void train_text(void)
          case 'B': printf("Bus");          break;
          case 'F': printf("Freight");      break;
          case 'P': printf("Passenger");    break;
+         case 'S': printf("Ship");    break;
          case 'T': printf("Trip");         break;
          case '1': printf("STP passenger");break;
          case '2': printf("STP freight");  break;
          case '3': printf("STP trip");     break;
+         case '4': printf("STP ship");     break;
          case '5': printf("STP bus");      break;
          default:  printf("Unrecognised"); break;
          }
@@ -2241,7 +2527,7 @@ static void train_text(void)
                   printf("%-6s", pd);
                }
                
-               printf("  %5s   %5s   ", row0[9], row0[10]);
+               printf("  %5s   %5s   %5s   ", row0[9], row0[11], row0[10]);
 
                if(row0[12][0]) printf("Eng: %s ",  show_time_text(row0[12]));
                if(row0[13][0]) printf("Path: %s ", show_time_text(row0[13]));
@@ -2326,7 +2612,6 @@ static void train_text(void)
                }
                mysql_free_result(result2);
             }
-            
          }
       }
       else
@@ -2362,7 +2647,7 @@ static char * location_name_and_codes(const char * const tiploc)
    result0 = db_store_result();
    if((row0 = mysql_fetch_row(result0)) && row0[0][0]) 
    {
-      sprintf(result, "%s (%s %s)", row0[0], tiploc, row0[1]);
+      sprintf(result, "%s (%s%s%s)", row0[0], tiploc, row0[1][0]?" ":"", row0[1]);
    }
    else
    {
@@ -2379,7 +2664,7 @@ static char * location_name(const char * const tiploc, const word use_cache)
    // Not re-entrant
    // Set use_cache to false if hit is not expected, to bypass search.  Cache will still be updated.
    char query[256];
-   MYSQL_RES * result0;
+   MYSQL_RES * result0 = NULL;
    MYSQL_ROW row0;
    static word next_cache;
    word i;
@@ -2406,17 +2691,24 @@ static char * location_name(const char * const tiploc, const word use_cache)
    }
 
    next_cache = (next_cache + 1) % CACHE_SIZE;
-   sprintf(query, "select fn from corpus where tiploc = '%s'", tiploc);
-   db_query(query);
-   result0 = db_store_result();
-   if((row0 = mysql_fetch_row(result0)) && row0[0][0]) 
+   // Special bodges to make Huyton Panel fit on the screen.
+   if(      mode == PANEL && !strcmp(tiploc, "ALERTN"))  strcpy(cache_val[next_cache], "Liverpool South Pwy");
+   else if (mode == PANEL && !strcmp(tiploc, "LVRPLSH")) strcpy(cache_val[next_cache], "Liverpool Lime Street");
+   else if (mode == PANEL && !strcmp(tiploc, "MNCRIAP")) strcpy(cache_val[next_cache], "Manchester Airport");
+   else 
    {
-      strncpy(cache_val[next_cache], row0[0], 127);
-      cache_val[next_cache][127] = '\0';
-   }
-   else
-   {
-      strcpy(cache_val[next_cache], tiploc);
+      sprintf(query, "select fn from corpus where tiploc = '%s'", tiploc);
+      db_query(query);
+      result0 = db_store_result();
+      if((row0 = mysql_fetch_row(result0)) && row0[0][0]) 
+      {
+         strncpy(cache_val[next_cache], row0[0], 127);
+         cache_val[next_cache][127] = '\0';
+      }
+      else
+      {
+         strcpy(cache_val[next_cache], tiploc);
+      }
    }
    strcpy(cache_key[next_cache], tiploc);
    mysql_free_result(result0);
@@ -2480,13 +2772,46 @@ static char * show_date(const time_t time, const byte local)
 
 static char * show_act(const char * const input)
 {
-   static char output[128];
+   static char output[512];
+   char in[16], z[8];
+   word i, j, hit;
 
-   if(input[0] == 'L' && (input[1] == 'I' || input[1] == 'O' || input[1] == 'T'))
-      output[0] = '\0';
-   else
-      strcpy(output, input);
+   if(strlen(input) > 14)
+   {
+      strcpy(output, "ERROR");
+      return output;
+   }
 
+   strcpy(in, input);
+
+   while (strlen(in) < 12) { strcat(in, " "); }
+
+   output[0] = '\0';
+
+   for(i = 0; i < strlen(in) && in[i] != ' '; i+=2)
+   {
+      hit = 999;
+      for(j = 0; j < ACTIVITIES; j++)
+      {
+         if(in[i] == activities[j][0] && in[i+1] == activities[j][1])
+         {
+            hit = j;
+         }
+      }
+      if(i) strcat(output, "<br>");
+      if(hit < 999) 
+      {
+         strcat(output, activities[hit] + 2);
+         strcat(output, ".");
+      }
+      else
+      {
+         z[0] = in[i];
+         z[1] = in[i+1];
+         z[2] = '\0';
+         strcat(output, z);
+      }
+   }
    return output;
 }
 
@@ -2533,10 +2858,6 @@ static char * show_trust_time_text(const char * const s, const word local)
       return result;
    }
 
-   // Summer time compensation - Now performed before database entry
-   // struct tm * broken = localtime(&stamp);
-   // if(broken->tm_isdst) stamp -= 60*60;
-
    strcpy(result, time_text(stamp, local));
 
    // Lose the seconds
@@ -2561,10 +2882,6 @@ static char * show_trust_time_nocolon(const char * const s, const word local)
       result[0] = '\0';
       return result;
    }
-
-   // Summer time compensation - Now performed before database entry
-   // struct tm * broken = localtime(&stamp);
-   // if(broken->tm_isdst) stamp -= 60*60;
 
    strcpy(zs, time_text(stamp, local));
 
@@ -3191,7 +3508,11 @@ static const char * const show_cape_reason(const char * const code)
 
    strcpy(reason, code);
 
-   if(strlen(code) < 2) return reason;
+   if(strlen(code) == 0) 
+   {
+      strcpy(reason, "Unspecified");
+      return reason;
+   }
 
    sprintf(query, "SELECT reason FROM cape_reasons WHERE code = '%s'", code);
    if(!db_query(query))

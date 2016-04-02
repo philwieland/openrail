@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2013, 2014 Phil Wieland
+    Copyright (C) 2013, 2014, 2015 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -78,6 +78,12 @@ word db_query(const char * const query)
 MYSQL_RES * db_store_result(void)
 {
    if(mysql_object) return mysql_store_result(mysql_object);
+   return NULL;
+}
+
+MYSQL_RES * db_use_result(void)
+{
+   if(mysql_object) return mysql_use_result(mysql_object);
    return NULL;
 }
 

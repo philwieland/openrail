@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2013 Phil Wieland
+    Copyright (C) 2013, 2015, 2016 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -19,8 +19,12 @@
 */
 
 BODY { color:black; background-color:white;
-       font-family: Geneva, Helvetica, Arial, sans-serif;
+       font-family: Arial, Geneva, Helvetica, sans-serif;
      }
+
+.panel-body { color:black; background-color:white;
+              font-family: sans-serif;
+            }
 	  
 .mini-button
 	{
@@ -80,6 +84,12 @@ font-size: x-small;
 background-color:#ffbbbb;
 }
 
+.small-table-other
+{
+font-size: x-small; 
+background-color:#ffffbb;
+}
+
 .small-table-valid
 {
 font-size: x-small; 
@@ -116,13 +126,12 @@ background-color:#ffbbbb; /* Red */
 
 .summ-table-idle
 {
-    /* height:15px;  */
     background-color:#eeeeee; /* Grey */
 }
 
 .summ-table-act
 {
-background-color:#c0e0ff; /* Pale blue */
+background-color:#eeeeee; 
 }
 
 .summ-table-move
@@ -132,8 +141,7 @@ background-color:#bbffbb; /* Pale green */
 
 .summ-table-gone
 {
-/*background-color:#88ff88; /* Green */
-background-color:#eeeeee; /* Grey */
+background-color:#c0e0ff; /* Pale blue */
 }
 
 .summ-table-good
@@ -196,7 +204,7 @@ font-family: "courier","monospace";
 }
 .linkbutton-summary
 {
-    height:11px; /* 13 if font is x-small */
+    /* height:11px;  13 if font is x-small */
     color: black;
     border: 0px;
     text-decoration: none;
@@ -258,3 +266,17 @@ text-align:right;
 {
 text-align:center;
 }
+
+/* Train info table on the train page. */
+.train-table tr
+{
+background-color: #eeeeee;
+}
+
+/* Schedule table on the train page. */
+.sched-table tr
+{
+font-size: x-small; 
+background-color:#c0e0ff;
+}
+

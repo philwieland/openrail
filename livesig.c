@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2014, 2015 Phil Wieland
+    Copyright (C) 2014, 2015, 2016 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -37,7 +37,7 @@ static void query(void);
 static char * location_name(const char * const tiploc);
 
 #define NAME "livesig"
-#define BUILD "W428"
+#define BUILD "X328"
 
 word debug;
 enum {PageMode, UpdateMode, QueryMode} mode;
@@ -77,13 +77,30 @@ int main()
 
    while(j < PARMS) parameters[j++][0] = '\0';
 
-   if(load_config("/etc/openrail.conf"))
    {
-      printf("Failed to load config.\n");
-      exit(1);
+      char config_file_path[256];
+      word p;
+
+      strcpy(config_file_path, "/etc/openrail.conf");
+
+      for(p = 0; p <= l; p++)
+      {
+         if(!strncasecmp(parameters[p], "_conf", 5))
+         {
+            strcpy(config_file_path, "/etc/");
+            strcat(config_file_path, parameters[p] + 5);
+         }
+      } 
+
+      char * config_fail;
+      if((config_fail = load_config(config_file_path)))
+      {
+         printf("<p>Failed to read config file \"%s\":  %s</p>\n", config_file_path, config_fail);
+         exit(0);
+      }
    }
 
-   debug = !strcasecmp(conf.debug,"true");
+   debug = *conf[conf_debug];
 
    // Set up log
    {
@@ -123,7 +140,7 @@ int main()
    }
 
    // Initialise database
-   db_init(conf.db_server, conf.db_user, conf.db_pass, conf.db_name);
+   db_init(conf[conf_db_server], conf[conf_db_user], conf[conf_db_password], conf[conf_db_name]);
 
    _log(GENERAL, "Parameters:  (l = %d)", l);
    for(i=0;i <10; i++)
@@ -138,39 +155,6 @@ int main()
    case QueryMode: query(); break;
    }
 
-      
-   switch(mode)
-   {
-   case UpdateMode:
-      {
-         char host[256], query[256];
-         if(gethostname(host, sizeof(host))) host[0] = '\0';
-         time_t last_actual = 0;
-         sprintf(query, "SELECT last_timestamp FROM td_status WHERE d = '%s'", parameters[2]);
-         // Bug:  query should have OR d = '%s' for parameters[3..]
-         if(!db_query(query))
-         {
-            MYSQL_RES * result = db_store_result();
-            MYSQL_ROW row;
-            if((row = mysql_fetch_row(result)))
-            {
-               last_actual = atol(row[0]);
-            }
-            mysql_free_result(result);
-         }
-         strcpy(query, time_text(last_actual, 1));
-         query[14] = '\0';
-         printf("%d|%s|%s|%s|%s\n", ((time(NULL) - last_actual < 64)?0:1), query, NAME, BUILD, host);
-      }
-      break;
-
-   case PageMode:
-      printf("</body></html>\n\n");
-      break;
-
-   case QueryMode:
-      break;
-   }
    exit(0);
 }
 
@@ -188,17 +172,25 @@ static void page(void)
    printf("<body style=\"font-family: arial,sans-serif; background:#eeeeee\" onload=\"startup();\">\n");
    printf("<script type=\"text/javascript\" src=\"/auxy/livesig.js\"></script>\n");
 
-   if(map_id > 0 && map_id < 4)
+   // See if the requested map exists.
+   char filename[2048];
+   FILE * fp;
+
+   sprintf(filename, "%s/auxy/livesig%d.svg", getenv("DOCUMENT_ROOT"), map_id);
+
+   if((fp = fopen(filename, "r")))
    {
+      fclose(fp);
       printf("<object id=\"diagram\" type=\"image/svg+xml\" data=\"/auxy/livesig%d.svg\"></object>\n", map_id);
    }
    else
    {
       printf("<p>Map %d not found.  <a href=\"/\">Please select a map from the list on the home page.</a></p>\n", map_id);
    }
-   printf("<table width=\"1260\"><tr><td align=\"left\" id=\"bottom-line\">&copy;2015 Phil Wieland.  Live data from Network Rail under <a href=\"http://www.networkrail.co.uk/data-feeds/terms-and-conditions\">this licence</a>.</td>\n");
+   printf("<table width=\"1260\"><tr><td align=\"left\" id=\"bottom-line\">&copy;2016 Phil Wieland.  Live data from Network Rail under <a href=\"http://www.networkrail.co.uk/data-feeds/terms-and-conditions\">this licence</a>.</td>\n");
    printf("<td align=\"right\"><a href=\"/\">Home Page and other maps</a></td><td width=\"10%%\">&nbsp;</td>\n");
    printf("<td align=\"right\"><a href=\"/about.html\">About livesig</a></td></tr></table>\n");
+   printf("</body></html>\n\n");
 }
 
 static void update(void)
@@ -278,24 +270,104 @@ static void update(void)
          mysql_free_result(result);
       }  
    }
+
+   // End the output with the data for the status line.
+   {
+      char host[256], query[256], q[256];
+      if(gethostname(host, sizeof(host))) host[0] = '\0';
+      time_t last_actual = 0;
+      sprintf(query, "SELECT min(last_timestamp) FROM td_status WHERE d = '%s'", parameters[2]);
+      word p = 3;
+      while(p < PARMS && parameters[p][0])
+      {
+         sprintf(q, " OR d = '%s'", parameters[p]);
+         strcat(query, q);
+         p++;
+      }
+      if(!db_query(query))
+      {
+         MYSQL_RES * result = db_store_result();
+         MYSQL_ROW row;
+         if((row = mysql_fetch_row(result)))
+         {
+            last_actual = atol(row[0]);
+         }
+         mysql_free_result(result);
+      }
+      strcpy(query, time_text(last_actual, 1));
+      query[14] = '\0'; // Chop off the seconds.
+      // WA14 Changed 64 to 96
+      printf("%d|%s|%s|%s|%s\n", ((time(NULL) - last_actual < 96)?0:1), query, NAME, BUILD, host);
+   }
 }
 
 static void query(void)
 {
-   char headcode[8], query[256], query1[256];
+   char headcode[8], query[512], query1[256];
    MYSQL_RES * result0, * result1;
    MYSQL_ROW row0;
    dword schedule_id;
 
    // TIPLOCS in parameters[2..]
 
-   if(strlen(parameters[1]) != 4)
-   {
+   if(strlen(parameters[1]) > 4)
+   {         
       _log(DEBUG, "query() Not found.  Parameter error.");
       printf("Not found.\n");
       return;
    }
    strcpy(headcode, parameters[1]);
+   while(strlen(headcode) < 4) strcat(headcode, " ");
+
+   if(headcode[0] >= '0' && headcode[0] <= '2' && 
+      headcode[1] >= '0' && headcode[1] <= '9' &&
+      headcode[2] >= '0' && headcode[2] <= '5' &&
+      headcode[3] >= '0' && headcode[3] <= '9')
+   {
+      // Train time, not reporting number.
+      struct tm * broken = localtime(&now);
+      static const char * days_runs[8] = {"runs_su", "runs_mo", "runs_tu", "runs_we", "runs_th", "runs_fr", "runs_sa", "runs_su"};
+      sprintf(query, "SELECT s.id FROM cif_schedules AS s INNER JOIN cif_schedule_locations AS l ON s.id = l.cif_schedule_id WHERE l.tiploc_code = 'LVRPLSH' AND l.departure = '%s' AND s.deleted > %ld AND (s.%s) AND (s.schedule_start_date <= %ld) AND (s.schedule_end_date >= %ld) ORDER BY LOCATE(s.CIF_stp_indicator, 'ONPC')",
+           headcode, now + (12*60*60), days_runs[broken->tm_wday], now + (12*60*60), now - (12*60*60));
+      if(!db_query(query))
+      {
+         result0 = db_store_result();
+         if((row0 = mysql_fetch_row(result0))) 
+         {
+            schedule_id = atol(row0[0]);
+            mysql_free_result(result0);
+
+            printf("Allocated to %c%c:%c%c", headcode[0], headcode[1], headcode[2], headcode[3]);
+
+            sprintf(query, "SELECT tiploc_code FROM cif_schedule_locations WHERE record_identity = 'LT' AND cif_schedule_id = %ld", schedule_id);
+            if(!db_query(query))
+            {
+               result0 = db_store_result();
+               if((row0 = mysql_fetch_row(result0)))
+               {
+                  printf(" to %s", location_name(row0[0]));
+               }
+               mysql_free_result(result0);
+            }
+            printf("\n");
+            return;
+         }
+         mysql_free_result(result0);
+      }
+   }
+
+   // Reverse the de-obfuscation process
+   sprintf(query, "SELECT obfus_hc FROM obfus_lookup WHERE true_hc = '%s' ORDER BY created DESC LIMIT 1", headcode);
+   if(!db_query(query))
+   {
+      result0 = db_store_result();
+      if((row0 = mysql_fetch_row(result0)) && row0[0][0]) 
+      {
+         _log(DEBUG, "query() Real headcode \"%s\", obfuscated headcode \"%s\" found in obfuscation lookup table.", headcode, row0[0]);
+         strcpy(headcode, row0[0]);
+      }
+      mysql_free_result(result0);
+   }
 
    sprintf(query, "SELECT cif_schedule_id FROM trust_activation WHERE created > %ld AND SUBSTR(trust_id,3,4) = '%s' ORDER BY created DESC", now-(24*60*60), headcode);
 
@@ -367,8 +439,31 @@ static void query(void)
       }
    }
 
-   _log(DEBUG, "query() Not found."); 
-   printf("Not found.\n");
+   _log(DEBUG, "query() Not found in database."); 
+   // Translate some non-train ones.
+   if(headcode[0] >= '0' && headcode[0] <= '2' && 
+      headcode[1] >= '0' && headcode[1] <= '9' &&
+      headcode[2] >= '0' && headcode[2] <= '5' &&
+      headcode[3] >= '0' && headcode[3] <= '9')
+      printf("Train allocated to %c%c:%c%c departure.\n", headcode[0], headcode[1], headcode[2], headcode[3]);
+   else if(!strcmp(headcode, "142 "))
+      printf("Stabled Class 142 unit.\n");
+   else if(!strcmp(headcode, "156 "))
+      printf("Stabled Class 156 unit.\n");
+   else if(!strcmp(headcode, "185 "))
+      printf("Stabled Class 185 unit.\n");
+   else if(!strcmp(headcode, "319 "))
+      printf("Stabled Class 319 unit.\n");
+   else if(!strcmp(headcode, "BLOK"))
+      printf("Line blocked.\n");
+   else if((!strcmp(headcode, "DEMC")) || (!strcmp(headcode, "DEMI")))
+      printf("Failed train.\n");
+   else if(!strcmp(headcode, "1SET"))
+      printf("Stabled unit.\n");
+   else if(!strcmp(headcode, "2SET"))
+      printf("Two stabled units.\n");
+   else
+      printf("Not found.\n");
 }
 
 static char * location_name(const char * const tiploc)

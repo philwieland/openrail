@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2013, 2014 Phil Wieland
+    Copyright (C) 2013, 2014, 2015, 2016 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -34,7 +34,7 @@ static char log_file[512];
 static word log_mode;
 
 /* Public data */
-conf_t conf;
+char * conf[MAX_CONF];
 
 char * time_text(const time_t time, const byte local)
 {
@@ -156,9 +156,14 @@ void _log(const byte level, const char * text, ...)
       else
       {
          strcat(log, "] ");
-         if(level == MINOR   ) strcat(log, "MINOR: ");
-         if(level == MAJOR   ) strcat(log, "MAJOR: ");
-         if(level == CRITICAL) strcat(log, "CRITICAL: ");
+         switch(level)
+         {
+         case MINOR:    strcat(log, "MINOR: "); break;
+         case MAJOR:    strcat(log, "MAJOR: "); break;
+         case CRITICAL: strcat(log, "CRITICAL: "); break;
+         case ABEND:    strcat(log, "ABEND: "); break;
+         default: break;
+         }
       }
    }
    else
@@ -277,8 +282,9 @@ word email_alert(const char * const name, const char * const build, const char *
 
    _log(PROC, "email_alert()");
 
-   if(!conf.report_email[0]) return 0;
-
+   
+   if(!conf[conf_report_email][0]) return 0;
+   
    sprintf(tmp_file, "/tmp/email-%lld", time_us());
 
    if(gethostname(host, sizeof(host))) strcpy(host, "(unknown host)");
@@ -293,10 +299,10 @@ word email_alert(const char * const name, const char * const build, const char *
       }
    }
 
-   fprintf(fp, "Report from %s build %s at %s\n\n%s\n", name, build, host, message);
+   fprintf(fp, "Report from %s build %s at %s.\n\n%s\n", name, build, host, message);
    fclose(fp);
    sprintf(command, "/bin/cat %s | /usr/bin/mail -s \"[openrail-%s] %s\" %s >>/tmp/email_alert.log 2>&1", 
-           tmp_file, name, title, conf.report_email);
+           tmp_file, name, title, conf[conf_report_email]);
    i = system(command);
    
    _log(DEBUG, "email_alert():  system(\"%s\") returned %d", command, i);
@@ -393,7 +399,8 @@ char * show_time_text(const char * const input)
    return output;
 }
 
-#define CONFIG_SIZE 2048
+#if 0
+#define CONFIG_SIZE 4096
 int load_config(const char * const filepath)
 {
    // Read config file.
@@ -406,8 +413,8 @@ int load_config(const char * const filepath)
    //
    char *line_start, *val_start, *val_end, *line_end, *ic;
    static char buf[CONFIG_SIZE];
-
-   FILE *cfg;
+   char * options;
+   FILE * cfg;
    if((cfg = fopen(filepath, "r")))
    {
       ssize_t z = fread(buf, 1, CONFIG_SIZE, cfg);
@@ -419,9 +426,8 @@ int load_config(const char * const filepath)
 
    buf[CONFIG_SIZE - 1] = '\0';
 
-
    conf.db_server = conf.db_name = conf.db_user = conf.db_pass = conf.nr_user = conf.nr_pass = conf.debug = conf.report_email = &buf[CONFIG_SIZE - 1];
-   conf.stomp_topics = conf.stomp_topic_names = conf.stomp_topic_log = &buf[CONFIG_SIZE - 1];
+   conf.stomp_topics = conf.stomp_topic_names = conf.stomp_topic_log = options = &buf[CONFIG_SIZE - 1];
 
    line_start=buf;
    while(1)
@@ -431,7 +437,14 @@ int load_config(const char * const filepath)
       
       // config is finished
       if (line_end == NULL)
+      {
+         // Determine options
+         conf.option_stompy_bin =            (strstr(options, "stompy_bin")    != NULL);
+         conf.option_trustdb_no_deduce_act = (strstr(options, "trustdb_no_deduce_act") != NULL);
+         conf.option_huyton_alerts         = (strstr(options, "huyton_alerts") != NULL);
+
          return 0;
+      }
 
       if(*line_start == '\n' || *line_start == '#')
       {
@@ -481,10 +494,110 @@ int load_config(const char * const filepath)
             conf.stomp_topic_names = val_start;
          else if (strcmp(line_start, "stomp_topic_log") == 0)
             conf.stomp_topic_log = val_start;
+         else if (strcmp(line_start, "options") == 0)
+            options = val_start;
       }
       line_start = line_end + 1;
    }
 }
+#else
+
+#define CONFIG_SIZE 4096
+char * conf[MAX_CONF];
+static const char * const config_keys[MAX_CONF] = {"db_server", "db_name", "db_user", "db_password", 
+                                                   "nr_user", "nr_password", 
+                                                   "report_email",
+                                                   "stomp_topics", "stomp_topic_names", "stomp_topic_log",
+                                                   "stompy_bin", "trustdb_no_deduce_act", "huyton_alerts",
+                                                   "debug",};
+static const byte config_type[MAX_CONF] = { 0, 0, 0, 0,
+                                            0, 0,
+                                            0,
+                                            0, 0, 0,
+                                            1, 1, 1,
+                                            1,};
+
+char * load_config(const char * const filepath)
+{
+   // Read config file.
+   // Notes:
+   // Blank lines and lines beginning with # will be ignored.
+   // Other than that, all lines must contain <setting> <value>  
+   // A correctly formatted line containing an unrecognised setting (e.g. foo bar) will be silently ignored.
+   //
+   static char buf[CONFIG_SIZE];
+   char line[256], key[256], value[256];
+   size_t ll;
+   word buf_index;
+   size_t i,j;
+   FILE * cfg;
+
+   if(!(cfg = fopen(filepath, "r")))
+   {
+      return "Unable to open file.";
+   }
+
+   // Set up the fixed strings used for boolean options and unset options
+   buf[0] = 'T';
+   buf[1] = '\0';
+   buf_index = 2;
+
+   // Initialise.  Could code some default values here?
+   for(i=0; i < MAX_CONF; i++)
+   {
+      conf[i] = &buf[1];
+   }
+
+   while(fgets(line, sizeof(line), cfg))
+   {
+      if(line[0] && line[0] != '#' && line[0] != '\n')
+      {
+         ll = strlen(line);
+         if(ll > sizeof(line) - 8) return "Overlength config line.";
+         if(line[ll - 1] == '\n') line[(ll--) - 1] = '\0';
+         for(i = 0; i < ll && line[i] != ' ' && line[i] != '\t'; i++) key[i] = line[i];
+         key[i] = '\0';
+         j = 0;
+         for(; i < ll && (line[i] == ' ' || line[i] == '\t'); i++);
+         for(; i < ll ; i++) value[j++] = line[i];
+         value[j] = '\0';
+         //printf("Line \"%s\", key \"%s\", value \"%s\".\n", line, key, value);
+
+         for(i=0; i < MAX_CONF && strcasecmp(key, config_keys[i]); i++);
+
+         if(i < MAX_CONF)
+         {
+            //printf("Recognised key %d \"%s\".\n", i, key);
+            if(config_type[i])
+            {
+               // Boolean setting.
+               conf[i] = &buf[0];
+            }
+            else
+            {
+               // Value setting
+               if(buf_index + j + 1 >= CONFIG_SIZE) 
+               {
+                  fclose(cfg);
+                  return "Config buffer overflow.";
+               }
+               conf[i] = &buf[buf_index];
+               strcpy(&buf[buf_index], value);
+               buf_index += (j + 1);
+            }
+         }
+         else
+         {
+            // Ignore silently unrecognised keys
+            // This is so that we can add a new config item and not have to rebuild those programs that
+            // don't use it.
+         }
+      }
+   }
+   fclose(cfg);
+   return NULL;
+}
+#endif
 
 qword time_ms(void)
 {
@@ -680,7 +793,7 @@ void extract_match(const char * const source, const regmatch_t * const matches, 
 char * system_call(const char * const command)
 {
    // Return error string, or NULL for success.
-   static char result[256];
+   static char result[1024];
    char z[256];
    char filename[256];
    int r;

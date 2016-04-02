@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2014 Phil Wieland
+    Copyright (C) 2014, 2015, 2016 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -39,9 +39,10 @@
 #include "jsmn.h"
 #include "misc.h"
 #include "db.h"
+#include "database.h"
 
 #define NAME  "tddb"
-#define BUILD "W415"
+#define BUILD "X328"
 
 static void perform(void);
 static void process_frame(const char * const body);
@@ -98,7 +99,7 @@ static const char * stats_category[MAXstats] =
 
 // Signalling
 #define SIG_BYTES 256
-static word no_of_sig_address[DESCRIBERS] = {8, 0, 14};
+static word no_of_sig_address[DESCRIBERS] = {8, 0, 15};
 static word signalling[DESCRIBERS][SIG_BYTES];
 
 // Update handle.  MAX_HANDLE must be < 32767
@@ -142,11 +143,14 @@ int main(int argc, char *argv[])
       }
    }
 
-   if(load_config(config_file_path))
+   char * config_fail;
+   if((config_fail = load_config(config_file_path)))
    {
-      printf("Failed to read config file \"%s\".\n", config_file_path);
+      printf("Failed to read config file \"%s\":  %s\n", config_file_path, config_fail);
       usage = true;
    }
+
+   debug = *conf[conf_debug];
 
    if(usage)
    {
@@ -156,36 +160,8 @@ int main(int argc, char *argv[])
 
    int lfp = 0;
 
-   /* Determine debug mode
-     
-      We don't always want to run in production mode, so we
-      read the content of the debug config variable and act 
-      on it accordingly.
-     
-      If we do not have a variable set, we assume production 
-      mode */
-   if ( strcmp(conf.debug,"true") == 0  )
-   {
-      debug = 1;
-   }
-   else
-   {
-      debug = 0;
-   }
-
    // Set up log
    _log_init(debug?"/tmp/tddb.log":"/var/log/garner/tddb.log", debug?1:0);
-
-   if(debug)
-   {
-      _log(DEBUG, "db_server = \"%s\"", conf.db_server);
-      _log(DEBUG, "db_name = \"%s\"", conf.db_name);
-      _log(DEBUG, "db_user = \"%s\"", conf.db_user);
-      _log(DEBUG, "db_pass = \"%s\"", conf.db_pass);
-      _log(DEBUG, "nr_user = \"%s\"", conf.nr_user);
-      _log(DEBUG, "nr_pass = \"%s\"", conf.nr_pass);
-      _log(DEBUG, "debug = \"%s\"", conf.debug);
-   }
 
    // Enable core dumps
    struct rlimit limit;
@@ -314,11 +290,16 @@ int main(int argc, char *argv[])
    }
 
    // Startup delay
-   if(!debug)
    {
-      _log(GENERAL, "Startup delay...");
+      struct sysinfo info;
+      word logged = false;
       word i;
-      for(i = 0; i < 190 && run; i++) sleep(1);
+      while(run && !debug && (sysinfo(&info) || info.uptime < (512 + 64)))
+      {
+         if(!logged) _log(GENERAL, "Startup delay...");
+         logged = true;
+         for(i = 0; i < 8 && run; i++) sleep(1);
+      }
    }
 
    if(run) perform();
@@ -338,7 +319,7 @@ static void perform(void)
    word stompy_timeout = true;
 
    // Initialise database connection
-   while(db_init(conf.db_server, conf.db_user, conf.db_pass, conf.db_name) && run) 
+   while(db_init(conf[conf_db_server], conf[conf_db_user], conf[conf_db_password], conf[conf_db_name]) && run) 
    {
       _log(CRITICAL, "Failed to initialise database connection.  Will retry...");
       word i;
@@ -474,9 +455,9 @@ static void perform(void)
       if(run) check_timeout();
       {      
          word i;
-         if(holdoff < 128) holdoff += 17;
-         else holdoff = 128;
-         for(i = 0; i < holdoff && run; i++) sleep(1);
+         if(holdoff < 256) holdoff += 34;
+         else holdoff = 256;
+         for(i = 0; i < holdoff + 64 && run; i++) sleep(1);
       }
    }    
    if(interrupt)
@@ -538,7 +519,7 @@ static void process_frame(const char * const body)
          }
          
          size_t message_ends = tokens[index].end;
-         do  index++; 
+          do  index++; 
          while ( tokens[index].start < message_ends && tokens[index].start >= 0 && index < NUM_TOKENS);
       }
    }
@@ -586,10 +567,9 @@ static void process_message(const word describer, const char * const body, const
       strcpy(wast, query_berth(describer, to));
       _log(DEBUG, "%s CA:               Berth step (%s) Description \"%s\" from berth \"%s\" to berth \"%s\"", describers[describer], time_text(timestamp, true), descr, from, to);
       log_detail(timestamp, "%s CA: %s from %s to %s", describers[describer], descr, from, to);
-      if((strcmp(wasf, descr) && strcmp(from, "STIN")) || 
-         (strcmp(wast, "")    && strcmp(to, "COUT")))
+      if(strcmp(wasf, descr) || strcmp(wast, ""))
       {
-         _log(MINOR, "Message %s CA: Step \"%s\" from \"%s\" to \"%s\" found \"%s\" in \"%s\" and \"%s\" in \"%s\".", describers[describer], descr, from, to, wasf, from, wast, to);
+         _log(DEBUG, "Message %s CA: Step \"%s\" from \"%s\" to \"%s\" found \"%s\" in \"%s\" and \"%s\" in \"%s\".", describers[describer], descr, from, to, wasf, from, wast, to);
       }
       update_database(Berth, describer, from, "");
       update_database(Berth, describer, to, descr);
@@ -604,7 +584,7 @@ static void process_message(const word describer, const char * const body, const
       log_detail(timestamp, "%s CB: %s from %s", describers[describer], descr, from);
       if(strcmp(wasf, descr))
       {
-         _log(MINOR, "Message %s CB: Cancel \"%s\" from \"%s\" found \"%s\" in \"%s\".", describers[describer], descr, from, wasf, from);
+         _log(DEBUG, "Message %s CB: Cancel \"%s\" from \"%s\" found \"%s\" in \"%s\".", describers[describer], descr, from, wasf, from);
       }
       update_database(Berth, describer, from, "");
       stats[CB]++;
@@ -707,7 +687,7 @@ static void signalling_update(const char * const message_name, const word descri
    }
    else
    {
-      _log(MINOR, "Signalling address %04x out of range in %s message.  Data %08x", a, message_name, d);
+      _log(MINOR, "Signalling address %04x out of range in %s message from describer %s.  Data %08x", a, message_name, describers[describer], d);
    }
    if(debug) _log(DEBUG, show_signalling_state(describer));
    log_detail(t, "%s %s: %02x = %02x %s%s", describers[describer], message_name, a, d, show_signalling_state(describer), detail);
@@ -715,16 +695,32 @@ static void signalling_update(const char * const message_name, const word descri
 
 static void update_database(const word type, const word describer, const char * const b, const char * const v)
 {
-   char query[512], typec;
+   char query[512], typec, vv[8];
    MYSQL_RES * result;
    MYSQL_ROW row;
    time_t now = time(NULL);
 
    _log(PROC, "update_database(%d, %d, \"%s\", \"%s\")", type, describer, b, v);
-
+   if(strlen(v) > 7)
+   {
+      _log(MAJOR, "Database update discarded.  Overlong value \"%s\".", v);
+      return;
+   }
+   strcpy(vv, v);
    if(type == Berth) 
    {
       typec = 'b';
+      sprintf(query, "SELECT true_hc FROM obfus_lookup where obfus_hc = '%s' ORDER BY created DESC LIMIT 1", v);
+      if(!db_query(query))
+      {
+         result = db_store_result();
+         if((row = mysql_fetch_row(result))) 
+         {
+            strcpy(vv, row[0]);
+            _log(DEBUG, "De-obfuscating \"%s\" to \"%s\".", v, vv);
+         }
+         mysql_free_result(result);
+      }
    }
    else
    {
@@ -743,7 +739,7 @@ static void update_database(const word type, const word describer, const char * 
       db_query(query);
    }
 
-   sprintf(query, "INSERT INTO td_updates values(%ld, %d, '%s%c%s', '%s')", now, handle, describers[describer], typec, b, v);
+   sprintf(query, "INSERT INTO td_updates values(%ld, %d, '%s%c%s', '%s')", now, handle, describers[describer], typec, b, vv);
    db_query(query);
 
    sprintf(query, "SELECT * FROM td_states where k = '%s%c%s'", describers[describer], typec, b);
@@ -752,11 +748,11 @@ static void update_database(const word type, const word describer, const char * 
       result = db_store_result();
       if((row = mysql_fetch_row(result))) 
       {
-         sprintf(query, "UPDATE td_states SET updated = %ld, v = '%s' where k = '%s%c%s'", now, v, describers[describer], typec, b);
+         sprintf(query, "UPDATE td_states SET updated = %ld, v = '%s' where k = '%s%c%s'", now, vv, describers[describer], typec, b);
       }
       else
       {
-         sprintf(query, "INSERT INTO td_states VALUES(%ld, '%s%c%s', '%s')", now, describers[describer], typec, b, v);
+         sprintf(query, "INSERT INTO td_states VALUES(%ld, '%s%c%s', '%s')", now, describers[describer], typec, b, vv);
          if(type == Berth)
          {
             _log(MINOR, "Added new berth \"%s\" on describer %s to database.", b, describers[describer]);
@@ -793,72 +789,11 @@ static const char * const query_berth(const word describer, const char * const b
 static void create_database(void)
 {
    MYSQL_RES * result0;
-   MYSQL_ROW row0;
-   word create_td_updates, create_td_states, create_td_status, create_friendly_names_20;
    char query[1024];
 
    _log(PROC, "create_database()");
 
-   create_td_updates = create_td_states = create_td_status = create_friendly_names_20 = true;
-
-   if(db_query("show tables")) return;
-   
-   result0 = db_store_result();
-   while((row0 = mysql_fetch_row(result0))) 
-   {
-      if(!strcasecmp(row0[0], "td_updates"))      create_td_updates            = false;
-      if(!strcasecmp(row0[0], "td_states"))       create_td_states             = false;
-      if(!strcasecmp(row0[0], "td_status"))       create_td_status             = false;
-      if(!strcasecmp(row0[0], "friendly_names_20"))  create_friendly_names_20  = false;
-   }
-   mysql_free_result(result0);
-
-   if(create_td_updates)
-   {
-      db_query(
-"CREATE TABLE td_updates "
-"(created INT UNSIGNED NOT NULL, "
-"handle   INT UNSIGNED NOT NULL, "
-"k        CHAR(8) NOT NULL, "
-"v        CHAR(8) NOT NULL, "
-"PRIMARY KEY(k) "
-") ENGINE = InnoDB"
-               );
-      _log(GENERAL, "Created database table td_updates.");
-   }
-   if(create_td_states)
-   {
-      db_query(
-"CREATE TABLE td_states "
-"(updated INT UNSIGNED NOT NULL, "
-"k        CHAR(8) NOT NULL, "
-"v        CHAR(8) NOT NULL, "
-"PRIMARY KEY(k) "
-") ENGINE = InnoDB"
-               );
-      _log(GENERAL, "Created database table td_states.");
-   }
-   if(create_td_status)
-   {
-      db_query(
-"CREATE TABLE td_status "
-"(d             CHAR(4) NOT NULL, "
-"last_timestamp INT UNSIGNED NOT NULL "
-") ENGINE = InnoDB"
-               );
-      _log(GENERAL, "Created database table td_status.");
-   }
-   if(create_friendly_names_20)
-   {
-      db_query(
-"CREATE TABLE friendly_names_20 "
-"(tiploc CHAR(8) NOT NULL, "
-"name    VARCHAR(32), "
-"PRIMARY KEY (tiploc) "
-") ENGINE = InnoDB"
-               );
-      _log(GENERAL, "Created database table friendly_names_20.");
-   }
+   database_upgrade(tddb);
 
    // Ensure the rows are all present in td_status
    word d;
@@ -997,20 +932,24 @@ static void log_detail(const time_t stamp, const char * text, ...)
 
 static void check_timeout(void)
 {
-   MYSQL_RES * result;
-   MYSQL_ROW row;
    word describer;
-   char q[256];
 
    for(describer = 0; describer < DESCRIBERS; describer++)
    {
-      if(time(NULL) - last_td_processed[describer] > 333 && last_td_processed[describer])
+      if(last_td_processed[describer] && (time(NULL) - last_td_processed[describer] > 333))
       {
          // Timeout
          if(!timeout_reported[describer])
          {
+#if 1
+            _log(MAJOR, "Describer %s message stream - Receive timeout.", describers[describer]);
             timeout_reported[describer] = true;
+#else
+            MYSQL_RES * result;
+            MYSQL_ROW row;
+            char q[256];
             _log(MAJOR, "Describer %s message stream - Receive timeout - Clearing database.", describers[describer]);
+            timeout_reported[describer] = true;
          
             // Blank out the database
             sprintf(q, "SELECT k FROM td_states where k like '%s%%'", describers[describer]);
@@ -1029,8 +968,9 @@ static void check_timeout(void)
             {
                signalling[describer][j] = 0xffff;
             }
-            // To spread database load, drop out after one timeout, remainder will be spotted later.
+            // To spread database load, drop out after one timeout, remainder will be spotted next time.
             describer = DESCRIBERS;
+#endif
          }
       }
       else

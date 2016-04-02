@@ -1,4 +1,4 @@
-define(`BUILD', `W507')dnl
+define(`BUILD', `X225')dnl
 define(`BERTH', `<rect x="$1" y="eval(($2) - 6)" width="32" height="12" class="describer" title="$5"/><text x="eval(($1) + 2)"  y="eval(($2) + 4)" class="describer-text-off" id="$3b$4off" title="$5">$4</text><text x="eval(($1) + 2)"  y="eval(($2) + 4)" class="describer-text" id="$3b$4" title="$5">Fail</text>')dnl
 define(`BERTHL', `<polygon points="eval(($1) + 3),eval(($2) + 6) eval(($1) - 3),eval(($2) + 0) eval(($1) + 3),eval(($2) - 6) eval(($1) + 32),eval(($2) - 6) eval(($1) + 32),eval(($2) + 6) " class="describer" title="$5"/><text x="eval(($1) + 2)"  y="eval(($2) + 4)" class="describer-text-off" id="$3b$4off" title="$5">$4</text><text x="eval(($1) + 2)"  y="eval(($2) + 4)" class="describer-text" id="$3b$4" title="$5">Fail</text>')dnl
 define(`BERTHR', `<polygon points="eval(($1) + 0),eval(($2) + 6) eval(($1) + 0),eval(($2) - 6) eval(($1) + 29),eval(($2) - 6) eval(($1) + 35),eval(($2) + 0) eval(($1) + 29),eval(($2) + 6) " class="describer" title="$5"/><text x="eval(($1) + 2)"  y="eval(($2) + 4)" class="describer-text-off" id="$3b$4off" title="$5">$4</text><text x="eval(($1) + 2)"  y="eval(($2) + 4)" class="describer-text" id="$3b$4" title="$5">Fail</text>')dnl
@@ -115,9 +115,15 @@ define(`ARROWD', `<line x1="$1" y1="$2" x2="eval(($1)-20)" y2="$2" class="arrow"
     ARROWD(410,238) <text x="420" y="241" class="label-text-small">Down Fast</text>
 
     <!-- Yard accesses -->
-    <polyline points="575,135 555,115" class="track-off" />
-    <polyline points="575,225 555,245" class="track-off" />
-    <polyline points="627.5,225 647.5,245" class="track-off" />
+    <polyline points="575,135 555,115" class="track-off" /> <!-- Up side -->
+
+    <polyline points="575,225 545,255 500,255" class="track" /> <!-- Wapping -->
+    BERTHR(505, 255, XZ, E150, LE150)
+    <text x="500" y="275" class="label-text-small">Wapping</text>
+
+    <polyline points="627.5,225 657.5,255 702.5,255" class="track" /> <!-- Edge Hill Depot-->
+    BERTHL(665, 255, XZ, E135, LE135)
+    <text x="640" y="275" class="label-text-small">Edge Hill Depot</text>
 
     <!-- Edge Hill -->
     <rect x="515" y="142.5" width="32" height="10" class="platform" />
@@ -133,9 +139,10 @@ define(`ARROWD', `<line x1="$1" y1="$2" x2="eval(($1)-20)" y2="$2" class="arrow"
       <tspan x="502" y="221">P4</tspan>
     </text>
     BERTH(515, 135, XZ, ZEHF, -)
-    BERTH(515, 160, XZ, E053, LE53)
-    BERTH(515, 172, XZ, EH53, LE53)
-    BERTH(515, 200, XZ, ZEHA, -)
+    BERTHL(514, 160, XZ, E053, LE53)
+    BERTHL(514, 172, XZ, EH53, LE53)
+    BERTHR(516, 184, XZ, ZEHE, -)
+    BERTH(515, 200, XZ, ZEHD, -)
     BERTH(515, 225, XZ, E049, LE49)
     BERTH(515, 237, XZ, EH49, LE49)
     <text x="510" y="125" class="label-text-small">Edge Hill</text>
@@ -144,7 +151,7 @@ define(`ARROWD', `<line x1="$1" y1="$2" x2="eval(($1)-20)" y2="$2" class="arrow"
     <polyline points="585,160 610,135" class="track" />
     BERTH(780, 135, XZ, ZEHC, LE36)
     BERTH(705, 148, XZ, E045, LE45) BERTH(705, 160, XZ, EH45, LE45) ROUTE(705, 172, XZ, ER45, LE45 route)
-    BERTH(705, 200, XZ, E008, EH8)
+    BERTH(705, 200, XZ, ZEHA, -)
     BERTH(705, 213, XZ, E043, LE43) BERTH(705, 225, XZ, EH43, LE43) ROUTE(705, 237, XZ, ER43, LE43 route)
     <polyline points="745,160 770,135" class="track" />
     <text x="755" y="204" class="label-text-small">Up Main</text>
@@ -157,7 +164,7 @@ define(`ARROWD', `<line x1="$1" y1="$2" x2="eval(($1)-20)" y2="$2" class="arrow"
     <polyline points="820,160 865,115 930,115 990,55 1080,55" class="track" /><!-- To Up Bootle -->
     <polyline points="770,75 825,75 845,95 865,95 885,115 890,115 910,135 915,135 940,160" class="track" />
     <polyline points="770,95 890,95" class="track" />
-    BERTH(785, 75, XZ, E034, LE34)
+    BERTHR(785, 75, XZ, E034, LE34)
     BERTH(900, 115, XZ, E041, LE41)
     BERTH(990, 35, XZ, E032, LE32)
     BERTH(1040, 35, XZ, E030, LE30)
@@ -182,7 +189,7 @@ define(`ARROWD', `<line x1="$1" y1="$2" x2="eval(($1)-20)" y2="$2" class="arrow"
     <!-- Wavertree -->
     <rect x="965" y="117.5" width="32" height="10" class="platform" />
     <rect x="965" y="167.5" width="32" height="10" class="platform" />
-    BERTH(950, 160, XZ, E039, LE39)
+    BERTH(965, 160, XZ, E039, LE39)
     BERTH(965, 135, XZ, E300, LE300)
     <!-- BERTH(955, 165, XZ, E301, LE301) Not in feed -->
     <text x="960" y="187" class="label-text-small">Wavertree</text>
@@ -229,7 +236,7 @@ define(`ARROWD', `<line x1="$1" y1="$2" x2="eval(($1)-20)" y2="$2" class="arrow"
     </text>
   </g>
   <!-- Key -->
-  <g transform="translate(500 250)">
+  <g transform="translate(510 280)">
     <rect x="0" y="0" width="350" height="80" class="key-background" />
     <polyline points="5,10 55,10" class="track" /> 
     <polyline points="5,30 55,30" class="track-off" /> 

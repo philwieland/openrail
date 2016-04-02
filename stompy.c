@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2014 Phil Wieland
+    Copyright (C) 2014, 2015, 2016 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -39,7 +39,7 @@
 #include "misc.h"
 
 #define NAME  "stompy"
-#define BUILD "VC28"
+#define BUILD "X328"
 
 static void perform(void);
 static void set_up_server_sockets(void);
@@ -57,6 +57,7 @@ static void stomp_manager(const enum stomp_manager_event event, const char * con
 static void stomp_queue_tx(const char * const d, const ssize_t l);
 static void report_stats(void);
 static void report_alarms(void);
+static void report_rates(const char * const m);
 static void next_stats(void);
 static void next_alarms(void);
 static void report_status(void);
@@ -77,6 +78,8 @@ static word load_queue_from_disc(const word s);
 static int disc_queue_length(const word s);
 static qword disc_queue_oldest(const word s);
 static void log_message(const word s);
+static word count_messages(const struct frame_buffer * const b);
+static void heartbeat_tx(void);
 
 static word debug, run, interrupt, sigusr1, controlled_shutdown;
 static char zs[4096];
@@ -99,7 +102,7 @@ static ssize_t stomp_tx_queue_on, stomp_tx_queue_off;
 #define STOMP_PORT 61618
 
 // Select timeout period in seconds
-#define SELECT_TIMEOUT 4
+#define SELECT_TIMEOUT 2
 
 // Sockets
 static fd_set read_sockets, write_sockets, active_read_sockets, active_write_sockets;
@@ -134,15 +137,21 @@ static const char * stats_category[MAXstats] =
 static qword stats_longest;
 static qword grand_stats_longest;
 
+#define RATES_AVERAGE_OVER 16
+static word rates_count[STREAMS][RATES_AVERAGE_OVER];
+static word rates_index, rates_start;
+
 // Timers
 static time_t now;
 // Time in hours (local) when daily statistical report is produced.
 #define REPORT_HOUR 4
 // STOMP timeout in seconds
-#define STOMP_TIMEOUT 128
+#define STOMP_TIMEOUT 64
 // server socket retry time in seconds
 #define SERVER_SOCKET_RETRY 32
-static time_t stats_due, alarms_due, server_sockets_due, stomp_timeout;
+// Heartbeat TX interval in seconds
+#define HEARTBEAT_TX 16
+static time_t stats_due, alarms_due, server_sockets_due, stomp_timeout, rates_due, heartbeat_tx_due;
 
 // STOMP controls
 static word stomp_holdoff;
@@ -153,6 +162,9 @@ static word stomp_holdoff;
 
 // Command file
 #define COMMAND_FILE "/tmp/stompy.cmd"
+
+// Message rates log file
+#define RATES_FILE "/var/log/garner/stompy.rates"
 
 // Message log
 #define MESSAGE_LOG_FILEPATH "/var/log/garner/stompy.messagelog"
@@ -209,11 +221,14 @@ int main(int argc, char *argv[])
       }
    }
 
-   if(load_config(config_file_path))
+   char * config_fail;
+   if((config_fail = load_config(config_file_path)))
    {
-      printf("Failed to read config file \"%s\".\n", config_file_path);
+      printf("Failed to read config file \"%s\":  %s\n", config_file_path, config_fail);
       usage = true;
    }
+
+   debug = *conf[conf_debug];
 
    if(usage)
    {
@@ -223,7 +238,7 @@ int main(int argc, char *argv[])
 
    {
       // Parse subscriptions from config
-      strcpy(topics, conf.stomp_topics);
+      strcpy(topics, conf[conf_stomp_topics]);
       char * p = topics;
       char * q;
       char * e = p + strlen(p);
@@ -245,7 +260,7 @@ int main(int argc, char *argv[])
          if(!strcasecmp(stomp_topics[i], "void")) stomp_topics[i][0] = '\0';
       }
       p = e + 1;
-      strcpy(p, conf.stomp_topic_names);
+      strcpy(p, conf[conf_stomp_topic_names]);
       e = p + strlen(p);
       for(i = 0; i < STREAMS; i++)
       {
@@ -268,7 +283,7 @@ int main(int argc, char *argv[])
       }
       {
          char temp[2048];
-         strcpy(temp, conf.stomp_topic_log);
+         strcpy(temp, conf[conf_stomp_topic_log]);
          p = temp;
          for(i = 0; i < STREAMS; i++)
          {
@@ -285,23 +300,12 @@ int main(int argc, char *argv[])
 
    int lfp = 0;
 
-   // Determine debug mode
-   if ( strcmp(conf.debug,"true") == 0  )
-   {
-      debug = 1;
-   }
-   else
-   {
-      debug = 0;
-   }
-   
    now = start_time = time(NULL);
    // Set up log
    _log_init(debug?"/tmp/stompy.log":"/var/log/garner/stompy.log", debug?1:0);
 
    _log(GENERAL, "");
    _log(GENERAL, "%s %s", NAME, BUILD);
-   _log(DEBUG, "Loaded config from \"%s\".", config_file_path);
 
    // Enable core dumps
    struct rlimit limit;
@@ -478,24 +482,25 @@ int main(int argc, char *argv[])
       for(stream = 0; stream < STREAMS; stream++)
       if(stomp_topics[stream][0])
       {
-         _log(GENERAL, "%d: \"%s\" (%s) Logging %s.", stream, stomp_topics[stream], stomp_topic_names[stream], stomp_topic_log[stream]?"enabled":"disabled");
+         _log(GENERAL, "   %d: \"%s\" (%s) Logging %s.", stream, stomp_topics[stream], stomp_topic_names[stream], stomp_topic_log[stream]?"enabled":"disabled");
       }
       else
       {
-         _log(GENERAL, "%d: Not used.", stream);
+         _log(GENERAL, "   %d: Not used.", stream);
       }
+      if(*conf[conf_stompy_bin]) _log(CRITICAL, "All received data will be discarded due to stompy_bin option.");
    }
 
    // Startup delay.  Only applied immediately after system boot
-   if(!debug)
    {
       struct sysinfo info;
-      // If uptime query fails or uptime is small, wait for system to stabilise.
-      if(sysinfo(&info) || info.uptime < 64)
+      word logged = false;
+      word i;
+      while(run && !debug && (sysinfo(&info) || info.uptime < 32))
       {
-         _log(GENERAL, "System startup delay ...");
-         word i;
-         for(i = 0; i < 64 && run; i++) sleep(1);
+         if(!logged) _log(GENERAL, "Startup delay...");
+         logged = true;
+         for(i = 0; i < 8 && run; i++) sleep(1);
       }
    }
 
@@ -536,11 +541,12 @@ static void perform(void)
    interrupt = false;
    sigusr1 = false;
    controlled_shutdown = false;
+   report_rates(NULL);
 
    // Set up timers
    next_stats();
    next_alarms();
-   stomp_timeout = stomp_holdoff = server_sockets_due = 0;
+   stomp_timeout = stomp_holdoff = server_sockets_due = rates_due = heartbeat_tx_due = 0;
 
    // Set up STOMP interface
    stomp_read_state = STOMP_IDLE;
@@ -552,15 +558,12 @@ static void perform(void)
       now = time(NULL);
 
       // Check each timer for expiry
+      if(now > heartbeat_tx_due) heartbeat_tx();
       if(now > server_sockets_due && !controlled_shutdown) set_up_server_sockets();
-      if(now > stats_due) report_stats();
-      if(now > alarms_due) report_alarms();
-
-      // stomp_manager() timer
-      if(now > stomp_timeout)
-      {
-         stomp_manager(SM_TIMEOUT, NULL);
-      }
+      if(now > stats_due)     report_stats();
+      if(now > alarms_due)    report_alarms();
+      if(now > rates_due)     report_rates("");
+      if(now > stomp_timeout) stomp_manager(SM_TIMEOUT, NULL);
 
       if(controlled_shutdown)
       {
@@ -616,10 +619,6 @@ static void perform(void)
       interrupt = false;
    }
 
-   if(interrupt)
-   {
-      _log(CRITICAL, "Terminating due to interrupt.");
-   }
    report_status();
    report_stats();
 }
@@ -697,7 +696,7 @@ static void stomp_write(void)
          stomp_manager(SM_FAIL, NULL);
       }
       stomp_tx_queue_off += sent;
-      _log(DEBUG, "stomp_write():  Sent %d bytes.", sent);
+      _log(DEBUG, "stomp_write():  Sent %d bytes.  Last byte 0x%02x.", sent, stomp_tx_queue[stomp_tx_queue_off-1]);
    }
 
    if(stomp_tx_queue_on == stomp_tx_queue_off)
@@ -823,7 +822,7 @@ static void stomp_read(void)
          {
             if(stomp_read_b_i == 0 && d[i] == '\0')
             {
-               _log(MAJOR, "STOMP frame received has an empty body.  Discarded.");
+               _log(MAJOR, "STOMP frame received has an empty body.  Discarded.  Headers:");
                dump_headers(headers);
                stomp_read_state = STOMP_IDLE;
                stomp_manager(SM_RX_DONE, headers);
@@ -832,7 +831,7 @@ static void stomp_read(void)
             {
                if(!strstr(headers, "MESSAGE"))
                {
-                  _log(MAJOR, "STOMP frame received is not a MESSAGE.  Discarded.");
+                  _log(MAJOR, "STOMP frame received is not a MESSAGE.  Discarded.  Headers:");
                   dump_headers(headers);
                   stomp_read_state = STOMP_FAIL;
                }
@@ -847,7 +846,7 @@ static void stomp_read(void)
                   }
                   else
                   {
-                     _log(MAJOR, "STOMP MESSAGE received with no subscription value.  Discarded.");
+                     _log(MAJOR, "STOMP MESSAGE received with no subscription value.  Discarded.  Headers:");
                      dump_headers(headers);
                      stomp_read_state = STOMP_FAIL;
                   }
@@ -861,7 +860,7 @@ static void stomp_read(void)
                   }
                   else
                   {
-                     _log(MAJOR, "STOMP MESSAGE received with no message id.  Discarded.");
+                     _log(MAJOR, "STOMP MESSAGE received with no message id.  Discarded.  Headers:");
                      dump_headers(headers);
                      stomp_read_state = STOMP_FAIL;
                   }
@@ -932,16 +931,20 @@ static void stomp_read(void)
                   if(stomp_read_b_i > stats_longest) stats_longest = stomp_read_b_i;
                   stomp_read_buffer->stamp = time_us();
                   _log(DEBUG, "Stamp is %lld.", stomp_read_buffer->stamp);
-                  if(stream_state[stream] == STREAM_RUN)
+                  rates_count[stream][rates_index] += count_messages(stomp_read_buffer);
+                  if(!(*conf[conf_stompy_bin])) 
                   {
-                     enqueue(stream, stomp_read_buffer);
+                     if(stream_state[stream] == STREAM_RUN)
+                     {
+                        enqueue(stream, stomp_read_buffer);
+                     }
+                     else
+                     {
+                        // write buffer to disc and free it
+                        dump_buffer_to_disc(stream, stomp_read_buffer);
+                     }
+                     stomp_read_buffer = NULL; // Buffer has been emptied or recorded in the queue, so we no longer own it.
                   }
-                  else
-                  {
-                     // write buffer to disc and free it
-                     dump_buffer_to_disc(stream, stomp_read_buffer);
-                  }
-                  stomp_read_buffer = NULL; // Buffer has been emptied or recorded in the queue, so we no longer own it.
                   stats[StompMessage]++;
                   
                   if(s_number[stream][CLIENT] >= 0 && client_state[stream] != CLIENT_AWAIT_ACK)
@@ -1324,12 +1327,12 @@ static void send_subscribes(void)
          strcat(headers, "\n");
          if(debug)
          {
-            sprintf(zs, "activemq.subscriptionName:%s-stompy-%d-debug\n", conf.nr_user, stream);
+            sprintf(zs, "activemq.subscriptionName:%s-stompy-%d-debug\n", conf[conf_nr_user], stream);
             strcat(headers, zs);
          }
          else
          {
-            sprintf(zs, "activemq.subscriptionName:%s-stompy-%d-%s\n", conf.nr_user, stream, abbreviated_host_id());
+            sprintf(zs, "activemq.subscriptionName:%s-stompy-%d-%s\n", conf[conf_nr_user], stream, abbreviated_host_id());
             strcat(headers, zs);
          }
          sprintf(zs, "id:%d\n", stream);
@@ -1399,6 +1402,8 @@ static void full_shutdown(void)
 {
    word stream, type;
    _log(PROC, "full_shutdown()");
+
+   if(interrupt) _log(GENERAL, "Shutting down due to interrupt.");
 
    // Close all sockets
    if(s_stomp >= 0)
@@ -1474,15 +1479,16 @@ static void stomp_manager(const enum stomp_manager_event event, const char * con
          SET_TIMER_NEVER;
          return;
       }
-      if(outage_start /* && now - outage_start > 128 */ && !alarm_sent)
+      if(outage_start && !alarm_sent)
       {
          char report[256];
-         sprintf(report, "STOMP outage detected.");
+         sprintf(report, "STOMP connection failed.");
          email_alert(NAME, BUILD, "STOMP Alarm", report);
          alarm_sent = true;
       }
       stats[ConnectAttempt]++;
       _log(GENERAL, "Connecting to STOMP server.");
+      report_rates("Connecting to STOMP server.");
 
       stomp_read_state = STOMP_IDLE;
       // DO NOT stomp_read_buffer = NULL; HERE
@@ -1544,21 +1550,21 @@ static void stomp_manager(const enum stomp_manager_event event, const char * con
          
          strcpy(headers, "CONNECT\n");
          strcat(headers, "login:");
-         strcat(headers, conf.nr_user);  
+         strcat(headers, conf[conf_nr_user]);  
          strcat(headers, "\npasscode:");
-         strcat(headers, conf.nr_pass);
+         strcat(headers, conf[conf_nr_password]);
          strcat(headers, "\n");          
          if(debug)
          {
-            sprintf(zs, "client-id:%s-stompy-debug\n", conf.nr_user);
+            sprintf(zs, "client-id:%s-stompy-debug\n", conf[conf_nr_user]);
             strcat(headers, zs);
          }
          else
          {
-            sprintf(zs, "client-id:%s-stompy-%s\n", conf.nr_user, abbreviated_host_id());
+            sprintf(zs, "client-id:%s-stompy-%s\n", conf[conf_nr_user], abbreviated_host_id());
             strcat(headers, zs);
          }          
-         strcat(headers, "heart-beat:0,20000\n");          
+         strcat(headers, "heart-beat:20000,20000\n");          
          strcat(headers, "\n");
          
          stomp_queue_tx(headers, strlen(headers) + 1);
@@ -1570,7 +1576,11 @@ static void stomp_manager(const enum stomp_manager_event event, const char * con
       break;
       
    case 2: // Hard close
-      if(!outage_start) outage_start = now;
+      if(!outage_start) 
+      {
+         outage_start = now;
+         report_rates("STOMP connection failed.");
+      }
       if(s_stomp >= 0)
       {
          close(s_stomp);
@@ -1591,7 +1601,11 @@ static void stomp_manager(const enum stomp_manager_event event, const char * con
       break;
       
    case 3: // Soft close
-      if(!outage_start) outage_start = now;
+      if(!outage_start) 
+      {
+         outage_start = now;
+         report_rates("STOMP connection failed.");
+      }
       if(s_stomp >= 0)
       {
          _log(GENERAL, "Sending STOMP DISCONNECT.");
@@ -1609,13 +1623,14 @@ static void stomp_manager(const enum stomp_manager_event event, const char * con
    case 4: // RX_DONE while awaiting connect response
       if(param)
       {
-         _log(GENERAL, "STOMP response to CONNECT received.");
+         _log(GENERAL, "STOMP response to CONNECT received.  Headers:");
          dump_headers(param);
          if(strstr(param, "CONNECTED"))
          {
             send_subscribes();
             stomp_manager_state = SM_RUN;
             SET_TIMER_RUNNING;
+            report_rates("Connected to STOMP server.");
             if(outage_start)
             {
                time_t duration = now - outage_start;
@@ -1625,8 +1640,9 @@ static void stomp_manager(const enum stomp_manager_event event, const char * con
                if(alarm_sent)
                {
                   char report[256];
-                  sprintf(report, "STOMP outage ended.  Duration was %ld seconds.", duration);
+                  sprintf(report, "STOMP connection restored.  Outage duration was %ld seconds.", duration);
                   email_alert(NAME, BUILD, "STOMP Alarm Cleared", report);
+                  report_rates(report);
                   alarm_sent = false;
                }
             }
@@ -1753,7 +1769,7 @@ static void report_alarms(void)
       strcat(report, "STOMP connection is down.\n");
    }
 
-   for(stream = 0; stream < STREAMS; stream++)
+   for(stream = 0; stream < STREAMS && !(*conf[conf_stompy_bin]); stream++)
    {
       if(stomp_topics[stream][0])
       {
@@ -1768,8 +1784,8 @@ static void report_alarms(void)
             if(head)
             {
                head = false;
-               _log(GENERAL, "Alarm report:");
-               strcat(report, "\nAlarm report:\n");
+               _log(GENERAL, "Active alarms:");
+               strcat(report, "\nActive alarms:\n");
             }
          }
 
@@ -1802,9 +1818,135 @@ static void report_alarms(void)
          
    strcat(report, "\n");
 
-   if(!head) email_alert(NAME, BUILD, "Alarm Report", report);
+   if(!head) email_alert(NAME, BUILD, "Alarm Status Report", report);
 
    next_alarms();
+}
+
+static void report_rates(const char * const m)
+{
+   FILE * rates_fp;
+   static word last_hour;
+   word i, j;
+   dword total;
+#define REPORTED_SILENCE_THRESHOLD 2
+   static word reported_silence;
+   dword mean;
+
+   if(!m)
+   {
+      // Initialise
+      reported_silence = 0;
+      last_hour = 99;
+      rates_index = 0;
+      rates_start = true;
+      return;
+   }
+
+   time_t now = time(NULL);
+   struct tm * broken = gmtime(&now);
+
+   if((rates_fp = fopen(RATES_FILE, "a")))
+   {
+      if(broken->tm_hour != last_hour)
+      {
+         last_hour = broken->tm_hour;
+         fprintf(rates_fp, "                   ");
+         for(i=0; i < STREAMS; i++)
+         {
+            fprintf(rates_fp, "|  %7s      ", stomp_topic_names[i]);
+         }
+         fprintf(rates_fp, "\n");
+         fprintf(rates_fp, "                   ");
+         for(i=0; i < STREAMS; i++)
+         {
+            fprintf(rates_fp, "|         Mean  ");
+         }
+         fprintf(rates_fp, "  Means calculated over %d minutes.\n", RATES_AVERAGE_OVER);
+      }
+      fprintf(rates_fp, "%02d/%02d/%02d %02d:%02d:%02dZ ", 
+              broken->tm_mday, 
+              broken->tm_mon + 1, 
+              broken->tm_year % 100,
+              broken->tm_hour,
+              broken->tm_min,
+              broken->tm_sec);
+
+      if(!m[0])
+      {
+         total = 0;
+         for(i=0; i < STREAMS; i++)
+         {
+            total += rates_count[i][rates_index];
+
+            mean = 0;
+            for(j=0; j < RATES_AVERAGE_OVER; j++)
+            {
+               mean += rates_count[i][j];
+            }
+            mean = (mean + (RATES_AVERAGE_OVER/2)) / RATES_AVERAGE_OVER;
+
+            if(rates_start)
+            {
+               fprintf(rates_fp, "|  %5d     -  ", rates_count[i][rates_index]);
+            }
+            else
+            {
+               fprintf(rates_fp, "|  %5d %5ld  ", rates_count[i][rates_index], mean);
+            }
+         }
+         
+         rates_index++;
+         if(rates_index >= RATES_AVERAGE_OVER) rates_start = false;
+         rates_index %= RATES_AVERAGE_OVER;
+         for(i=0; i < STREAMS; i++) rates_count[i][rates_index] = 0;
+
+         // Bodge.  Don't do flow checking unless both "busy" streams are enabled.
+         if(stomp_topics[1][0] && stomp_topics[2][0])
+         {
+            char report[256];
+
+            if(!total)
+            {
+               // No messages this minute
+               if(reported_silence < REPORTED_SILENCE_THRESHOLD)
+               {
+                  reported_silence++;
+                  if(reported_silence == REPORTED_SILENCE_THRESHOLD)
+                  {
+                     // Beginning of silence
+                     sprintf(report, "No STOMP frames received in %d minutes.", REPORTED_SILENCE_THRESHOLD);
+                     _log(MAJOR, report);
+                     fprintf(rates_fp, "  %s", report);
+                     email_alert(NAME, BUILD, "STOMP Alarm", report);
+                  }
+               }
+            }
+            else if(reported_silence >= REPORTED_SILENCE_THRESHOLD)
+            {
+               // End of silence.
+               reported_silence = 0;
+               strcpy(report, "STOMP message flow has resumed.");
+               _log(MAJOR, report);
+               fprintf(rates_fp, "  %s", report);
+               email_alert(NAME, BUILD, "STOMP Alarm Cleared", report);
+            }
+         }
+      }
+      else
+      {
+         fprintf(rates_fp, "%s", m);
+      }
+      fprintf(rates_fp, "\n");
+
+      fclose(rates_fp);
+      rates_due = now - now%60 + 60;
+   }
+   else
+   {
+      _log(MINOR, "Failed to open rates file \"%s\".", RATES_FILE);
+      rates_due = now - now%60 + 600;
+   }
 }
 
 static void next_stats(void)
@@ -1863,7 +2005,7 @@ static void dump_headers(const char * const h)
       if(h[i] == '\n')
       {
          zs[j] = '\0';
-         if(j) _log(GENERAL, zs);
+         if(j) _log(GENERAL, "   %s", zs);
          j = 0;
          i++;
       }
@@ -1978,10 +2120,20 @@ static void dump_buffer_to_disc(const word s, struct frame_buffer * const b)
    }
    else
    {
-      ssize_t l = write(fd, b->frame, length);
-      if(l < 0)
+      ssize_t l, done;
+      done = 0;
+      while (done < length)
       {
-         // Handle error
+         l = write(fd, b->frame + done, length - done);
+         if(l < 0)
+         {
+            _log(CRITICAL, "dump_buffer_to_disc()  Failed during write to \"%s\".  Error %d %s.", filename, errno, strerror(errno));
+            done = length;
+         }
+         else
+         {
+            done += l;
+         }
       }
       close(fd);
       stats[DiscWrite]++;
@@ -2038,17 +2190,28 @@ static void load_buffer_from_disc(struct frame_buffer * const b, const word s, c
    }
    else
    {
-      ssize_t l = read(fd, b->frame, FRAME_SIZE - 1);
-      if(l < 0)
+      ssize_t l, length;
+      length = 0;
+      l = -1;
+      while(l)
       {
-         _log(CRITICAL, "Error reading buffer \"%s\" from disc.  Error %d %s.", filepath, errno, strerror(errno));
-      }
-      else
-      {
-         b->stamp = atoll(name);
-         b->frame[l] = 0; // Append the \0.
-         _log(DEBUG, "load_buffer_from_disc(): Successfully read %ld bytes with stamp %lld.", l, b->stamp);
-         stats[DiscRead]++;
+         l = read(fd, b->frame + length, FRAME_SIZE - length - 1);
+         if(l < 0)
+         {
+            _log(CRITICAL, "Error reading buffer \"%s\" from disc.  Error %d %s.", filepath, errno, strerror(errno));
+            l = 0;
+         }
+         else if(l > 0)
+         {
+            length += l;
+         }
+         else // l == 0  EOF
+         {
+            b->stamp = atoll(name);
+            b->frame[length] = 0; // Append the \0.
+            _log(DEBUG, "load_buffer_from_disc(): Successfully read %ld bytes with stamp %lld.", l, b->stamp);
+            stats[DiscRead]++;
+         }
       }
       close(fd);
 
@@ -2194,3 +2357,41 @@ static void log_message(const word s)
    }
 }
 
+static word count_messages(const struct frame_buffer * const b)
+{
+   word i, count, depth;
+
+   if (b->frame[0] != '[') return 1;
+
+   i = 1;
+   count = 0;
+   depth = 0;
+
+   while(b->frame[i])
+   {
+      if(b->frame[i] == '{')
+      {
+         depth++;
+      }
+      if(b->frame[i] == '}')
+      {
+         depth--;
+         if(!depth) count++;
+      }
+      i++;
+   }
+   if(depth) _log(MINOR, "count_messages()  Depth = %d");
+   return count;
+}
+
+static void heartbeat_tx(void)
+{
+   _log(PROC, "heartbeat_tx()");
+   heartbeat_tx_due = now + HEARTBEAT_TX;
+
+   if(stomp_manager_state == SM_RUN)
+   {
+      stomp_queue_tx("\n", 1);
+      _log(DEBUG, "Queued heartbeat for transmission.");
+   }
+}

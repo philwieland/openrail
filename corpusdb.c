@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2013 Phil Wieland
+    Copyright (C) 2013, 2015, 2016 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -30,9 +30,10 @@
 #include "jsmn.h"
 #include "misc.h"
 #include "db.h"
+#include "database.h"
 
 #define NAME  "corpusdb"
-#define BUILD "W422"
+#define BUILD "X328"
 
 #define FILEPATH       "/tmp/corpusdb"
 #define FILEPATH_DEBUG "/tmp/corpusdb-debug"
@@ -51,21 +52,6 @@ static void process_corpus_object(const char * object_string);
 static word update_friendly_names(void);
 
 // Database table
-
-const char const * create_table_corpus =
-"CREATE TABLE corpus"
-"("
-"id INT(10) UNSIGNED NOT NULL AUTO_INCREMENT, "
-"fn                     VARCHAR(255) NOT NULL,"
-"stanox                 CHAR(16) NOT NULL,"
-"uic                    CHAR(16) NOT NULL,"
-"3alpha                 CHAR(16) NOT NULL,"
-"nlcdesc16              CHAR(20) NOT NULL,"
-"tiploc                 CHAR(16) NOT NULL,"
-"nlc                    CHAR(16) NOT NULL,"
-"nlcdesc                VARCHAR(255) NOT NULL,"
-"PRIMARY KEY (id), INDEX(TIPLOC)              "
-") ENGINE = InnoDB";
 
 dword count_locations, count_fns;
 
@@ -101,11 +87,15 @@ int main(int argc, char **argv)
       }
    }
 
-   if(load_config(config_file_path))
+   char * config_fail;
+   if((config_fail = load_config(config_file_path)))
    {
-      printf("Failed to read config file \"%s\".\n", config_file_path);
+      printf("Failed to read config file \"%s\":  %s\n", config_file_path, config_fail);
       usage = true;
    }
+
+   debug = *conf[conf_debug];
+
    if(usage)
    {
       printf("\tUsage: %s [-c /path/to/config/file.conf] [-i] [-p]\n\n", argv[0] );
@@ -120,23 +110,6 @@ int main(int argc, char **argv)
 
    fp_result = NULL;
 
-     /* Determine debug mode
-     
-     We don't always want to run in production mode, so we
-     read the content of the debug config variable and act 
-     on it accordingly.
-     
-     If we do not have a variable set, we assume production 
-     mode */
-     if ( strcmp(conf.debug,"true") == 0  )
-     {
-       debug = 1;
-     }
-     else
-     {
-       debug = 0;
-     }
-
    _log_init(debug?"/tmp/corpusdb.log":"/var/log/garner/corpusdb.log", debug?1:(opt_verbose?4:0));
 
    _log(GENERAL, "");
@@ -145,8 +118,7 @@ int main(int argc, char **argv)
 
    if(debug == 1)
    {
-      _log(GENERAL, "Debug mode selected.  Using TEST database.");
-      _log(GENERAL, "To use live database, update the debug option in the config file to 'false'.");
+      _log(GENERAL, "Debug mode selected.");
 
       strcpy(filepath, FILEPATH_DEBUG);
    }
@@ -166,7 +138,7 @@ int main(int argc, char **argv)
    }
 
    // Initialise database
-   db_init(conf.db_server, conf.db_user, conf.db_pass, conf.db_name);
+   if(db_init(conf[conf_db_server], conf[conf_db_user], conf[conf_db_password], conf[conf_db_name])) exit(1);
 
    if(!fetch_corpus() && !process_corpus() && !update_friendly_names())
    {
@@ -222,7 +194,7 @@ static word fetch_corpus(void)
    slist = curl_slist_append(slist, "Cache-Control: no-cache");
    if(!slist)
    {
-      _log(MAJOR,"scraper_cif():  Failed to create slist.");
+      _log(MAJOR,"fetch_corpus():  Failed to create slist.");
       result = 2;
    }
 
@@ -236,19 +208,19 @@ static word fetch_corpus(void)
       curl_easy_setopt(curlh, CURLOPT_HTTPHEADER, slist);
 
       // Set timeouts
-      curl_easy_setopt(curlh, CURLOPT_NOSIGNAL,              1);
-      curl_easy_setopt(curlh, CURLOPT_FTP_RESPONSE_TIMEOUT, 64);
-      curl_easy_setopt(curlh, CURLOPT_TIMEOUT,              64);
-      curl_easy_setopt(curlh, CURLOPT_CONNECTTIMEOUT,       64);
+      curl_easy_setopt(curlh, CURLOPT_NOSIGNAL,              1L);
+      curl_easy_setopt(curlh, CURLOPT_FTP_RESPONSE_TIMEOUT, 64L);
+      curl_easy_setopt(curlh, CURLOPT_TIMEOUT,              64L);
+      curl_easy_setopt(curlh, CURLOPT_CONNECTTIMEOUT,       64L);
 
       // Debugging prints.
-      //   curl_easy_setopt(curlh, CURLOPT_VERBOSE,               1);
+      //   curl_easy_setopt(curlh, CURLOPT_VERBOSE,               1L);
 
       // URL and login
       curl_easy_setopt(curlh, CURLOPT_URL,     url);
-      sprintf(zs, "%s:%s", conf.nr_user, conf.nr_pass);
+      sprintf(zs, "%s:%s", conf[conf_nr_user], conf[conf_nr_password]);
       curl_easy_setopt(curlh, CURLOPT_USERPWD, zs);
-      curl_easy_setopt(curlh, CURLOPT_FOLLOWLOCATION,        1);
+      curl_easy_setopt(curlh, CURLOPT_FOLLOWLOCATION,        1L);
 
    }
 
@@ -272,8 +244,8 @@ static word fetch_corpus(void)
          {
             _log(MAJOR, "Retrying download in insecure mode.");
             // SSH failure, retry without
-            curl_easy_setopt(curlh, CURLOPT_SSL_VERIFYPEER, 0);
-            curl_easy_setopt(curlh, CURLOPT_SSL_VERIFYHOST, 0);
+            curl_easy_setopt(curlh, CURLOPT_SSL_VERIFYPEER, 0L);
+            curl_easy_setopt(curlh, CURLOPT_SSL_VERIFYHOST, 0L);
             used_insecure = true;
             if((res = curl_easy_perform(curlh)))
             {
@@ -345,7 +317,6 @@ static word process_corpus(void)
 
    FILE * fp;
    
-   _log(GENERAL, "Processing CORPUS data.");
 
    // Read in json data
    if(!(fp = fopen(filepath, "r")))
@@ -356,8 +327,10 @@ static word process_corpus(void)
    }      
 
    // Reset the database
-   db_query("DROP TABLE IF EXISTS corpus");
-   db_query(create_table_corpus);
+   database_upgrade(corpusdb);
+   db_query("DELETE FROM corpus");
+
+   _log(GENERAL, "Processing CORPUS data.");
 
    // Bodge:  Bin off the array stuff
    buf_end = fread(buffer, 1, 15, fp);
@@ -451,11 +424,23 @@ static word update_friendly_names(void)
    word result = 0;
    MYSQL_RES * result0, * result1;
    MYSQL_ROW row0, row1;
-   word done;
+   word done, fn_available;
 
    char query[1024], location[256];
 
-   _log(GENERAL,"Updating friendly names where known.");
+   fn_available = false;
+   if(!db_query("SHOW TABLES LIKE 'location_data'"))
+   {
+      result0 = db_store_result();
+      word num_rows = mysql_num_rows(result0);
+      mysql_free_result(result0);
+      if(num_rows) fn_available = true;
+   }
+
+   if(fn_available)
+      _log(GENERAL,"Updating friendly names where known.");
+   else
+      _log(MAJOR, "No friendly names available in database.");
 
    db_query("SELECT id, stanox, uic, 3alpha, tiploc, nlc, nlcdesc FROM corpus WHERE fn = ''");
 
@@ -465,28 +450,7 @@ static word update_friendly_names(void)
    {
       done = false;
 
-#if 0
-      // stanox ain't unique so can't use them
-      if(row0[1][0] ) // stanox
-      {
-         // stanox
-         sprintf(query, "SELECT location FROM location_data WHERE stanox = '%s'", row0[1]);
-         db_query(query);
-
-         result1 = db_store_result();
-         if((row1 = mysql_fetch_row(result1)))
-         {
-            db_real_escape_string(location, row1[0], strlen(row1[0]));
-            sprintf(query, "UPDATE corpus set fn = '%s' where id = %s", location, row0[0]);
-            db_query(query);
-            count_fns++;
-            done = true;
-         }
-         mysql_free_result(result1);
-      }
-#endif
-
-      if(row0[4][0] && !done) // tiploc
+      if(row0[4][0] && !done && fn_available) // tiploc
       {
          sprintf(query, "SELECT location FROM location_data WHERE tiploc = '%s'", row0[4]);
          db_query(query);
@@ -502,7 +466,7 @@ static word update_friendly_names(void)
          }
          mysql_free_result(result1);
       }
-      if(!done && row0[3][0]) //3alpha
+      if(!done && row0[3][0] && fn_available) //3alpha
       {
          sprintf(query, "SELECT location FROM location_data WHERE crs = '%s'", row0[3]);
          db_query(query);
@@ -518,7 +482,7 @@ static word update_friendly_names(void)
          }
           mysql_free_result(result1);
       }
-      if(!done && row0[5][0])
+      if(!done && row0[5][0] && fn_available)
       {
          sprintf(query, "SELECT location FROM location_data WHERE nlc = '%s'", row0[5]);
          db_query(query);

@@ -20,38 +20,40 @@
 
 var url_base = "/rail/liverail/";
 var query_url_base = "/rail/query/";
-var refresh_tick = 2048; /* ms between ticks */
-//var refresh_tick = 400; /* Testing only */
-var refresh_period = 25; /* Number of ticks before refresh.  If not 25, css styles must be changed */
-var refresh_count = 0;
-var updating = 0;
+var refresh_tick = 1024; /* ms between ticks */
+var refresh_period = 64000; /* ms */
+var refresh_timeout_period = 64000; 
+var timer_refresh = 0;
+var timer_refresh_timeout = 0;
 var tick_timer;
+var visible = true;
+var smart_update_req = null;
 
 function search_onclick()
 {
    ar_off();
-   result = url_base + "full" + '/' + document.getElementById("search_loc").value + '/' + document.getElementById("search_date").value;
+   var result = url_base + "full" + '/' + document.getElementById("search_loc").value + '/' + document.getElementById("search_date").value;
    window.location = result;
 }
 
 function summary_onclick()
 {
    ar_off();
-   result = url_base + "sum" + '/' + document.getElementById("search_loc").value + '/' + document.getElementById("search_date").value;
+   var result = url_base + "sum" + '/' + document.getElementById("search_loc").value + '/' + document.getElementById("search_date").value;
    window.location = result;
 }
 
 function depart_onclick()
 {
    ar_off();
-   result = url_base + "dep" + '/' + document.getElementById("search_loc").value + '/' + document.getElementById("search_date").value;
+   var result = url_base + "dep" + '/' + document.getElementById("search_loc").value + '/' + document.getElementById("search_date").value;
    window.location = result;
 }
 
 function as_search_onclick()
 {
    ar_off();
-   result = url_base + "as" + '/' + document.getElementById("as-uid").value + '/' + document.getElementById("as-head").value;
+   var result = url_base + "as" + '/' + document.getElementById("as-uid").value + '/' + document.getElementById("as-head").value;
    if(document.getElementById("as-this-week").checked)
    {
       result += '/w';
@@ -62,7 +64,7 @@ function as_search_onclick()
 function as_go_onclick()
 {
    ar_off();
-   result = url_base + "train" + '/' + document.getElementById("as-g-id").value;
+   var result = url_base + "train" + '/' + document.getElementById("as-g-id").value;
    window.location = result;
 }
 
@@ -74,14 +76,14 @@ function as_rq_onclick()
 function status_onclick()
 {
    ar_off();
-   result = url_base + "status";
+   var result = url_base + "status";
    window.location = result;
 }
 
 function train_date_onclick(schedule_id)
 {
    ar_off();
-   result = url_base + "train" + '/' + schedule_id + '/' + document.getElementById("train_date").value;
+   var result = url_base + "train" + '/' + schedule_id + '/' + document.getElementById("train_date").value;
    window.location = result;
 }
 
@@ -89,13 +91,14 @@ function ar_onclick()
 {
    if(document.getElementById("ar").checked)
    {
-      refresh_count = refresh_period;
+      timer_refresh = 1;
       show_progress(); 
       document.getElementById("progress").style.display='';
    }
    else
    {
       document.getElementById("progress").style.display='none';
+      timer_refresh = 0;
    }
 }
 
@@ -106,35 +109,36 @@ function ar_off()
       document.getElementById("ar").checked = false;
       document.getElementById("progress").style.display='none';
    }
+   if(smart_update_req) smart_update_req.abort();
+   smart_update_req = null;
+   timer_refresh = 0;
+   timer_refresh_timeout = 0;
 }
 
 function startup()
 {
-   tick_timer = setInterval('ar()', refresh_tick);
-   refresh_count = 0;
-   updating = 0;
+   tick_timer = setInterval(tick, refresh_tick);
+   
    if(document.getElementById("ar") && document.getElementById("ar").checked)
    {
       // Refresh has been enabled.
- 
       var url = document.URL;
       var url_parts = url.split('/');
       if(url_parts[5] == "sum" || url_parts[5] == "dep" || url_parts[5] == "panel")
       {
-         // trigger an immediate update
+         // Smart update page.  Trigger an immediate update
          document.getElementById("progress").style.display='none';
-         refresh_count = refresh_period;
-         ar();
+         timer_refresh = 1;
       }
       else
       {
-         show_progress(); 
-         document.getElementById("progress").style.display='';
+         // Dumb refresh page.  Set up refresh timer.
+         timer_refresh = new Date().getTime() + refresh_period;
       }
    }
    else
    {
-      if(document.getElementById("ar") )
+      if(document.getElementById("progress") )
       {
          document.getElementById("progress").style.display='none';
       }
@@ -142,20 +146,36 @@ function startup()
 }
 
 // Timer tick
-function ar()
+function tick()
 {
-   if(document.getElementById("ar") && document.getElementById("ar").checked)
+   var now = new Date().getTime();
+   // Check if display is visible
+   if ((typeof document.hidden !== "undefined") && (document.hidden))
    {
-      if(++refresh_count < refresh_period)
+      if(visible)
       {
-         show_progress();
+         visible = false;
       }
-      else
+   }
+   else
+   {
+      if(!visible)
       {
-         if(!updating)
+         // Becoming visible.
+         if(document.getElementById("ar") && document.getElementById("ar").checked)
          {
             show_progress();
-            updating = 1;
+            visible = true;
+         }
+      }
+   }
+   if(visible && document.getElementById("ar") && document.getElementById("ar").checked)
+   {
+      if(timer_refresh && timer_refresh < now)
+      {
+         if(!smart_update_req)
+         {
+            show_progress();
             var url = document.URL;
             if(url.substr(url.length - 2, 2) != "/r") { url += "/r"; }
             var url_parts = url.split('/');
@@ -168,28 +188,36 @@ function ar()
             else
             {
                clearInterval(tick_timer);
+               document.getElementById("bottom-line").innerHTML += "&nbsp;&nbsp;Refreshing...";
+               // Just reload the page
                window.location = url;
             }
-            updating = 0;
-         }
-         else if(refresh_count > refresh_period * 8)
-         {
-            // Update seems to have timed out.  Try a reload.
-            refresh_count = refresh_period;
-            var url = document.URL;
-            if(url.substr(url.length - 2, 2) != "/r") { url += "/r"; }
-            clearInterval(tick_timer);
-            window.location = url;
+            timer_refresh_timeout = now + refresh_timeout_period;
+            timer_refresh = 0;
          }
       }
+      else
+      {
+         show_progress();
+      }
+   }
+   if(timer_refresh_timeout && timer_refresh_timeout < now)
+   {
+      // Smart update seems to have timed out.
+      if(smart_update_req) smart_update_req.abort();
+      smart_update_req = null;
+      timer_refresh = 1;
+      document.getElementById("bottom-line").innerHTML = "Failed to contact server.";
    }
 }
 
 function show_progress()
 {
+   var now = new Date().getTime();
    var progress = '<div style="background-color:white;display:block;width:100%%;height:';
-   var step = Math.round(refresh_count * 25 / refresh_period);
+   var step = 25 - Math.round((timer_refresh - now) * 25 / refresh_period);
    if(step > 25) step = 25;
+   if(step < 0 ) step = 0;
    progress += step;
    progress += 'px;"></div>';
    document.getElementById("progress").innerHTML = progress;
@@ -197,31 +225,60 @@ function show_progress()
 
 function smart_update(url)
 {
+
+   if(smart_update_req)
+   {
+      smart_update_req.abort();
+      smart_update_req = null;
+   }
    var update_url = url.replace('/sum', '/sumu');
    update_url = update_url.replace('/dep', '/depu');
    update_url = update_url.replace('/panel', '/panelu');
    document.getElementById("bottom-line").innerHTML += "&nbsp;&nbsp;Updating...";
 
-   var req = new XMLHttpRequest();
-   req.open('GET', update_url, false);
-   req.send();
-   var results = req.responseText.split("\n");
+   smart_update_req = new XMLHttpRequest();
+   smart_update_req.onreadystatechange = function()
+      {
+         if(smart_update_req.readyState == 4)
+         {
+            if(smart_update_req.status == 200)
+            {
+               process_smart_update_response(smart_update_req.responseText);
+               smart_update_req = null;
+               timer_refresh_timeout = 0;
+               timer_refresh = new Date().getTime() + refresh_period;
+               show_progress();
+            }
+            else
+            {
+               // Failed.  No action, leave for timeout to sort it out.
+               smart_update_req = null;
+            }
+         }
+      };
+   smart_update_req.open('GET', update_url, true);
+   smart_update_req.send(null);
+}
 
+function process_smart_update_response(result)
+{
    var index = 1; // Index of first train data line.
+   var results = result.split("\n");
 
    // Check display handle
    if(results.length < index || results[index-1] != document.getElementById('display_handle').value)
    {
       // Fetch has failed or page layout has changed or date has changed or software version has changed.  Reload whole page from scratch.
-      if(req.responseText.substring(0, 8) == '<!DOCTYP')
+      if(result.substring(0, 8) == '<!DOCTYP')
       {
          // Web site shut down.  Just ignore it
-         refresh_count = 0;
-         show_progress();
-         document.getElementById("bottom-line").innerHTML = 'Data feed failed.';
+         document.getElementById("bottom-line").innerHTML = 'Data feed is shut down.';
          return;
       }
       clearInterval(tick_timer);
+      document.getElementById("bottom-line").innerHTML += "&nbsp;&nbsp;Refreshing...";
+      var url = document.URL;
+      if(url.substr(url.length - 2, 2) != "/r") { url += "/r"; }
       window.location = url;
       return;
    }
@@ -238,8 +295,5 @@ function smart_update(url)
       }
       index++;
    }
-   refresh_count = 0;
-   show_progress();
-
    document.getElementById("bottom-line").innerHTML = results[index];
 }

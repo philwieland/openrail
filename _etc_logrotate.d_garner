@@ -18,3 +18,13 @@
         delaycompress
         dateext
 }
+/var/log/garner/stompy.rates {
+        weekly
+        missingok
+        rotate 63
+        notifempty
+        nocreate
+        compress
+        delaycompress
+        dateext
+}

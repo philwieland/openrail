@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2013, 2014 Phil Wieland
+    Copyright (C) 2013, 2014, 2015, 2016 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -40,9 +40,10 @@
 #include "jsmn.h"
 #include "misc.h"
 #include "db.h"
+#include "database.h"
 
 #define NAME  "vstpdb"
-#define BUILD "W415"
+#define BUILD "X329"
 
 static void perform(void);
 static void process_frame(const char * body);
@@ -79,14 +80,14 @@ static jsmntok_t tokens[NUM_TOKENS];
 // Stats
 static time_t start_time;
 enum stats_categories {ConnectAttempt, GoodMessage, DeleteHit, DeleteMiss, DeleteMulti, Create, 
-                       UpdateCreate, UpdateDeleteMiss, UpdateDeleteMulti,
+                       UpdateCreate, UpdateDeleteMiss, UpdateDeleteMulti, HeadcodeDeduced,
                        NotMessage, NotVSTP, NotTransaction, MAXstats};
 static qword stats[MAXstats];
 static qword grand_stats[MAXstats];
 static const char * stats_category[MAXstats] = 
    {
       "Stompy Connect Attempt", "Good Message", "Delete Hit", "Delete Miss", "Delete Multiple Hit", "Create",
-      "Update", "Update Delete Miss", "Update Delete Mult. Hit",
+      "Update", "Update Delete Miss", "Update Delete Mult. Hit", "Deduced Schedule Headcode",
       "Not a message", "Invalid or Not VSTP", "Unknown Transaction",
    };
 
@@ -121,11 +122,14 @@ int main(int argc, char *argv[])
       }
    }
 
-   if(load_config(config_file_path))
+   char * config_fail;
+   if((config_fail = load_config(config_file_path)))
    {
-      printf("Failed to read config file \"%s\".\n", config_file_path);
+      printf("Failed to read config file \"%s\":  %s\n", config_file_path, config_fail);
       usage = true;
    }
+
+   debug = *conf[conf_debug];
 
    if(usage)
    {
@@ -135,23 +139,6 @@ int main(int argc, char *argv[])
 
    int lfp = 0;
 
-   /* Determine debug mode
-     
-      We don't always want to run in production mode, so we
-      read the content of the debug config variable and act 
-      on it accordingly.
-     
-      If we do not have a variable set, we assume production 
-      mode */
-   if ( strcmp(conf.debug,"true") == 0  )
-   {
-      debug = 1;
-   }
-   else
-   {
-      debug = 0;
-   }
-   
    // Set up log
    _log_init(debug?"/tmp/vstpdb.log":"/var/log/garner/vstpdb.log", debug?1:0);
 
@@ -285,11 +272,16 @@ int main(int argc, char *argv[])
    }
 
    // Startup delay
-   if(!debug)
    {
-      _log(GENERAL, "Startup delay...");
+      struct sysinfo info;
+      word logged = false;
       word i;
-      for(i = 0; i < 200 && run; i++) sleep(1);
+      while(run && !debug && (sysinfo(&info) || info.uptime < (512 + 128)))
+      {
+         if(!logged) _log(GENERAL, "Startup delay...");
+         logged = true;
+         for(i = 0; i < 8 && run; i++) sleep(1);
+      }
    }
 
    if(run) perform();
@@ -304,7 +296,16 @@ static void perform(void)
    word last_report_day = 9;
 
    // Initialise database
-   db_init(conf.db_server, conf.db_user, conf.db_pass, conf.db_name);
+   {
+      db_init(conf[conf_db_server], conf[conf_db_user], conf[conf_db_password], conf[conf_db_name]);
+
+      word e;
+      if((e=database_upgrade(vstpdb)))
+      {
+         _log(CRITICAL, "Error %d in upgrade_database().  Aborting.", e);
+         exit(1);
+      }
+   }
 
    {
       time_t now = time(NULL);
@@ -382,9 +383,9 @@ static void perform(void)
       close_stompy();
       {      
          word i;
-         if(holdoff < 256) holdoff += 19;
+         if(holdoff < 256) holdoff += 38;
          else holdoff = 256;
-         for(i = 0; i < holdoff && run; i++) sleep(1);
+         for(i = 0; i < holdoff + 64 && run; i++) sleep(1);
       }
    }  // while(run)
 
@@ -557,6 +558,8 @@ static void process_create_schedule(const char * string, const jsmntok_t * token
    char zs[128], zs1[128];
    char query[2048];
    word i;
+   char uid[16], stp_indicator[2];
+   char signalling_id[8];
 
    if(debug) jsmn_dump_tokens(string, tokens, 0);
 
@@ -564,8 +567,14 @@ static void process_create_schedule(const char * string, const jsmntok_t * token
    sprintf(query, "INSERT INTO cif_schedules VALUES(0, %ld, %lu", now, NOT_DELETED); // update_id == 0 => VSTP
 
    EXTRACT_APPEND_SQL("CIF_bank_holiday_running");
-   EXTRACT_APPEND_SQL("CIF_stp_indicator");
-   EXTRACT_APPEND_SQL("CIF_train_uid");
+
+   //EXTRACT_APPEND_SQL("CIF_stp_indicator");
+   EXTRACT("CIF_stp_indicator", stp_indicator);
+   sprintf(zs1, ", '%s'", stp_indicator); strcat(query, zs1); 
+
+   //EXTRACT_APPEND_SQL("CIF_train_uid");
+   EXTRACT("CIF_train_uid", uid);
+   sprintf(zs1, ", '%s'", uid); strcat(query, zs1); 
 
    EXTRACT_APPEND_SQL("applicable_timetable");
 
@@ -584,7 +593,9 @@ static void process_create_schedule(const char * string, const jsmntok_t * token
    sprintf(zs1, ", %ld", z);
    strcat(query, zs1);
 
-   EXTRACT_APPEND_SQL("signalling_id");
+   EXTRACT("signalling_id", signalling_id);
+   sprintf(zs1, ", '%s'", signalling_id); strcat(query, zs1);
+
    EXTRACT_APPEND_SQL("CIF_train_category");
    EXTRACT_APPEND_SQL("CIF_headcode");
    //EXTRACT_APPEND_SQL("CIF_course_indicator");
@@ -629,6 +640,31 @@ static void process_create_schedule(const char * string, const jsmntok_t * token
       index = process_create_schedule_location(string, tokens, index, id);
    }
 
+   if(stp_indicator[0] == 'O' && (signalling_id[0] == '\0' || signalling_id[0] == ' '))
+   {
+      // Search db for schedules with a deduced headcode, and add it to this one, status = D
+      // Bug:  Really this should also look for schedules with a signalling_id
+      MYSQL_RES * result;
+      MYSQL_ROW row;
+      sprintf(query, "SELECT deduced_headcode FROM cif_schedules WHERE CIF_train_uid = '%s' AND deduced_headcode != '' AND schedule_end_date > %ld ORDER BY created DESC", uid, now - (64L * 24L * 60L * 60L));
+      if(!db_query(query))
+      {
+         result = db_store_result();
+         if((row = mysql_fetch_row(result)))
+         {
+            sprintf(query, "UPDATE cif_schedules SET deduced_headcode = '%s', deduced_headcode_status = 'D' WHERE id = %ld", row[0], id);
+            db_query(query);
+            _log(DEBUG, "Deduced headcode \"%s\" applied to overlay schedule %ld, uid \"%s\".", row[0], id, uid);
+            stats[HeadcodeDeduced]++;
+         }
+         else
+         {
+            _log(DEBUG, "Deduced headcode not found for overlay schedule %ld, uid \"%s\".", id, uid);
+         }
+         mysql_free_result(result);
+      }
+   }
+
    sprintf(query, "UPDATE status SET last_vstp_processed = %ld", now);
    db_query(query);
 
@@ -639,15 +675,17 @@ static void process_create_schedule(const char * string, const jsmntok_t * token
 
    if(huyton_flag)
    {
-      char title[64], message[256];
+      char title[64], message[512];
       MYSQL_RES * result0;
       MYSQL_ROW row0;
+      char stp[4];
       sprintf(title, "Huyton Schedule Created.");
       sprintf(message, "Created schedule which passes Huyton.");
       if(update) strcat(message, "  Due to a VSTP Update transaction.");
       strcat(message, "\n\n");
       EXTRACT("CIF_train_uid", zs1);
-      sprintf(zs, "%ld (%s) ", id, zs1);
+      EXTRACT("CIF_stp_indicator", stp);
+      sprintf(zs, "%ld (%s %s) ", id, zs1, stp);
       EXTRACT("signalling_id", zs1);
       strcat(zs, zs1);
       sprintf(query, "SELECT tiploc_code, departure FROM cif_schedule_locations WHERE record_identity = 'LO' AND cif_schedule_id = %ld", id);
@@ -674,7 +712,7 @@ static void process_create_schedule(const char * string, const jsmntok_t * token
 
       strcat(message, zs);
 
-      sprintf(query, "SELECT schedule_start_date, schedule_end_date FROM cif_schedules WHERE id = %ld", id);
+      sprintf(query, "SELECT schedule_start_date, schedule_end_date, CIF_stp_indicator FROM cif_schedules WHERE id = %ld", id);
       if(!db_query(query))
       {
          result0 = db_store_result();
@@ -694,7 +732,34 @@ static void process_create_schedule(const char * string, const jsmntok_t * token
                strcat(message, " to ");
                strcat(message, date_text(to,   true));
             }
-            strcat(message, "\n\n");
+            if(row0[2][0] == 'C') strcat(message, "  CANCELLED");
+            strcat(message, "\n");
+         }
+         mysql_free_result(result0);
+      }
+      sprintf(query, "SELECT departure, arrival, pass, tiploc_code FROM cif_schedule_locations WHERE (tiploc_code = 'HUYTON' OR tiploc_code = 'HUYTJUN') AND cif_schedule_id = %ld", id);
+      if(!db_query(query))
+      {
+         result0 = db_store_result();
+         while((row0 = mysql_fetch_row(result0)))
+         {
+            char where[32], z[128];
+            if(row0[3][4] == 'J') strcpy(where, "Huyton Junction"); else strcpy(where, "Huyton"); 
+            if(row0[0][0]) 
+            {
+               sprintf(z, "Depart %s at %s.\n", where, row0[0]);
+               strcat(message, z);
+            }
+            else if(row0[1][0])
+            {
+               sprintf(z, "Arrive %s at %s.\n", where, row0[1]); 
+               strcat(message, z);
+            }
+            else if(row0[2][0])
+            {
+               sprintf(z, "Pass %s at %s.\n", where, row0[2]);
+               strcat(message, z);
+            }
          }
          mysql_free_result(result0);
       }
@@ -734,7 +799,7 @@ static word process_create_schedule_location(const char * string, const jsmntok_
       strcat(query, ", 'LI'");
    }
    EXTRACT_APPEND_SQL_OBJECT("tiploc_id");
-   if((!strcmp(zs, "HUYTON")) || (!strcmp(zs, "HUYTJUN")))
+   if(*conf[conf_huyton_alerts] && ((!strcmp(zs, "HUYTON")) || (!strcmp(zs, "HUYTJUN"))))
    {
       huyton_flag = true;
    }

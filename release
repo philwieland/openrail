@@ -13,6 +13,18 @@ if [ "$1" = "all" -o "$1" = "cifdb" ]; then
     DONE="cifdb"
 fi
 
+if [ "$1" = "all" -o "$1" = "jsondb" ]; then
+    echo "Releasing jsondb"
+    sudo cp jsondb   /usr/sbin/jsondb
+    DONE="jsondb"
+fi
+
+if [ "$1" = "all" -o "$1" = "tscdb" ]; then
+    echo "Releasing tscdb"
+    sudo cp tscdb   /usr/sbin/tscdb
+    DONE="tscdb"
+fi
+
 if [ "$1" = "all" -o "$1" = "archdb" ]; then
     echo "Releasing archdb"
     sudo cp archdb   /usr/sbin/archdb
@@ -23,6 +35,12 @@ if [ "$1" = "all" -o "$1" = "corpusdb" ]; then
     echo "Releasing corpusdb"
     sudo cp corpusdb   /usr/sbin/corpusdb
     DONE="corpusdb"
+fi
+
+if [ "$1" = "all" -o "$1" = "smartdb" ]; then
+    echo "Releasing smartdb"
+    sudo cp smartdb   /usr/sbin/smartdb
+    DONE="smartdb"
 fi
 
 if [ "$1" = "all" -o "$1" = "liverail" ]; then
@@ -87,7 +105,7 @@ if [ "$1" = "all" -o "$1" = "livesig" ]; then
 fi
 
 if [ "$1" = "all" -o "$1" = "dump-rail" ]; then
-    if [ "$host" = "friedbread.liverpub.com" ]; then
+    if [ "$host" = "friedbread" ]; then
         echo "Releasing dump-rail for friedbread"
         sudo cp dump-rail-fb /usr/sbin/dump-rail 
     else
@@ -133,7 +151,22 @@ if [ "$1" = "all" -o "$1" = "tddb" ]; then
     DONE="tddb"
 fi
 
+if [ "$1" = "all" -o "$1" = "limed" ]; then
+    echo "Releasing limed"
+    sudo /etc/init.d/limed stop
+    sleep 4 
+    if [ "$host" = "friedbread" ]; then
+        sudo cp limed /usr/sbin/limed 
+        sudo cp limed.css        /var/www/friedbread/auxy/limed.css
+    else
+        sudo cp limed /usr/sbin/limed 
+        sudo cp limed.css        /var/www/auxy/limed.css
+    fi
+    sudo /etc/init.d/limed start
+    DONE="limed"
+fi
+
 if [ "$DONE" = "" ]; then
-    echo "Usage:  $0 cifdb|archdb|corpusdb|vstpdb|trustdb|tddb|liverail|livesig|railquery|stompy|all    -    Release specified unit or all."
+    echo "Usage:  $0 cifdb|archdb|corpusdb|vstpdb|trustdb|tddb|liverail|livesig|railquery|stompy|limed|all    -    Release specified unit or all."
 fi
 
