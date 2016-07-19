@@ -184,7 +184,7 @@ int main(int argc, char *argv[])
    if(!debug) signal(SIGTTIN,SIG_IGN);
 
    // DAEMONISE
-   if(debug != 1)
+   if(!debug)
    {
       int i=fork();
       if (i<0)

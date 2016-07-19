@@ -368,7 +368,7 @@ int main(int argc, char *argv[])
    }
 
    // DAEMONISE
-   if(debug != 1)
+   if(!debug)
    {
       int i=fork();
       if (i<0)
