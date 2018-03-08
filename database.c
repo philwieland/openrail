@@ -128,7 +128,7 @@ word database_upgrade(const word caller)
 "stanox                 CHAR(16) NOT NULL,    "
 "uic                    CHAR(16) NOT NULL,    "
 "3alpha                 CHAR(16) NOT NULL,    "
-"nlcdesc16              CHAR(20) NOT NULL,    "
+"nlcdesc16              CHAR(30) NOT NULL,    "
 "tiploc                 CHAR(16) NOT NULL,    "
 "nlc                    CHAR(16) NOT NULL,    "
 "nlcdesc                VARCHAR(255) NOT NULL,"
