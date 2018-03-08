@@ -1,5 +1,5 @@
 DROP TABLE IF EXISTS cape_reasons;
-CREATE TABLE cape_reasons ( code CHAR(2) NOT NULL, reason VARCHAR(128) NOT NULL) Engine = InnoDB;
+CREATE TABLE cape_reasons ( code CHAR(2) NOT NULL, reason VARCHAR(255) NOT NULL) Engine = InnoDB;
 INSERT INTO  cape_reasons VALUES
 ('AA','Waiting Terminal/Yard acceptance'), 
 ('AB','Waiting Customer release of documentation'), 
