@@ -26,17 +26,26 @@
 #include <unistd.h>
 #include <sys/resource.h>
 #include <curl/curl.h>
+#include <sys/stat.h>
+#include <dirent.h>
 
 #include "jsmn.h"
 #include "misc.h"
 #include "db.h"
 #include "database.h"
+#include "build.h"
 
 #define NAME  "smartdb"
-#define BUILD "X328"
 
-#define FILEPATH       "/tmp/smartdb"
-#define FILEPATH_DEBUG "/tmp/smartdb-debug"
+#ifndef RELEASE_BUILD
+#define BUILD "Y129p"
+#else
+#define BUILD RELEASE_BUILD
+#endif
+
+#define TEMP_DIRECTORY "/var/tmp"
+#define FILE_NAME      "/smartdb-downloaded.json"
+#define FILEPATH_DEBUG "/tmp/smartdb-debug.json"
 
 char filepath[128], filepath_z[128];
 
@@ -112,7 +121,7 @@ int main(int argc, char **argv)
    sprintf(zs, "%s %s", NAME, BUILD);
    _log(GENERAL, zs);
 
-   if(debug == 1)
+   if(debug)
    {
       _log(GENERAL, "Debug mode selected.");
 
@@ -120,7 +129,9 @@ int main(int argc, char **argv)
    }
    else
    {
-      strcpy(filepath, FILEPATH);
+      strcpy(filepath, TEMP_DIRECTORY);
+      strcat(filepath, "/");
+      strcat(filepath, FILE_NAME);
    }
    strcpy(filepath_z, filepath);
    strcat(filepath_z, ".gz");
@@ -152,12 +163,15 @@ int main(int argc, char **argv)
       _log(GENERAL, zs);
       strcat(report, zs);
       strcat(report, "\n");
-      sprintf(zs, "Records loaded           : %ld", count_records);
+      sprintf(zs, "Records loaded           : %u", count_records);
       _log(GENERAL, zs);
       strcat(report, zs);
       strcat(report, "\n");
       
       email_alert(NAME, BUILD, "SMART Data Update Report", report);
+
+      db_disconnect();
+
       exit(0);
    }
 

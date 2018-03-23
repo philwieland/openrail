@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2014, 2015, 2016 Phil Wieland
+    Copyright (C) 2014, 2015, 2016, 2017 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -37,55 +37,24 @@
 #include <dirent.h>
 
 #include "misc.h"
+#include "build.h"
 
 #define NAME  "stompy"
-#define BUILD "X328"
 
-static void perform(void);
-static void set_up_server_sockets(void);
-static void stomp_write(void);
-static void stomp_read(void);
-static void client_write(const int s);
-static void client_read(const int s);
-static void client_accept(const int s);
-static void user_command(void);
-static void send_subscribes(void);
-static void handle_shutdown(word report);
-static void full_shutdown(void);
-enum stomp_manager_event {SM_START, SM_ERROR, SM_FAIL, SM_TIMEOUT, SM_TX_DONE, SM_RX_DONE, SM_SHUTDOWN, SM_EVENTS};
-static void stomp_manager(const enum stomp_manager_event event, const char * const headers);
-static void stomp_queue_tx(const char * const d, const ssize_t l);
-static void report_stats(void);
-static void report_alarms(void);
-static void report_rates(const char * const m);
-static void next_stats(void);
-static void next_alarms(void);
-static void report_status(void);
-static void dump_headers(const char * const h);
-
-static void init_buffers_queues(void);
-static struct frame_buffer * new_buffer(void);
-static void free_buffer(struct frame_buffer * const b);
-static void enqueue(const word s, struct frame_buffer * const b);
-static struct frame_buffer * dequeue(const word s);
-static struct frame_buffer * queue_front(const word s);
-static word queue_length(const word s);
-
-static void dump_buffer_to_disc(const word s, struct frame_buffer * const b);
-static word dump_queue_to_disc(const word s);
-static int is_a_buffer(const struct dirent *d);
-static word load_queue_from_disc(const word s);
-static int disc_queue_length(const word s);
-static qword disc_queue_oldest(const word s);
-static void log_message(const word s);
-static word count_messages(const struct frame_buffer * const b);
-static void heartbeat_tx(void);
+#ifndef RELEASE_BUILD
+#define BUILD "Y910p"
+#else
+#define BUILD RELEASE_BUILD
+#endif
 
 static word debug, run, interrupt, sigusr1, controlled_shutdown;
 static char zs[4096];
 
 // STOMP manager
 static enum {SM_AWAIT_CONNECTED, SM_RUN, SM_SEND_DISCO, SM_HOLD, SM_STATES} stomp_manager_state;
+enum stomp_manager_event {SM_START, SM_ERROR, SM_FAIL, SM_TIMEOUT, SM_TX_DONE, SM_RX_DONE, SM_SHUTDOWN, SM_EVENTS};
+static const char * const sm_states[] = {"SM_AWAIT_CONNECTED", "SM_RUN", "SM_SEND_DISCO", "SM_HOLD"};
+static const char * const sm_events[] = {"SM_START", "SM_ERROR", "SM_FAIL", "SM_TIMEOUT", "SM_TX_DONE", "SM_RX_DONE", "SM_SHUTDOWN"};
 
 // STOMP RX
 static enum {STOMP_IDLE, STOMP_HEADER, STOMP_BODY, STOMP_FAIL} stomp_read_state;
@@ -108,7 +77,7 @@ static ssize_t stomp_tx_queue_on, stomp_tx_queue_off;
 static fd_set read_sockets, write_sockets, active_read_sockets, active_write_sockets;
 static int s_stomp;
 static byte s_stream[FD_SETSIZE];
-#define STREAMS 4
+#define STREAMS 3
 #define STOMP STREAMS
 static byte s_type[FD_SETSIZE];
 enum s_types {CLIENT, SERVER, TYPES};
@@ -124,29 +93,23 @@ static char topics[1024];
 
 // Stats
 static time_t start_time;
-enum stats_categories {StompBytes, ConnectAttempt, StompMessage, BaseStreamFrameSent, 
+enum stats_categories {StompBytes, ConnectAttempt, StompMessage, StompInvalid, BaseStreamFrameSent, 
                        DiscWrite = BaseStreamFrameSent + STREAMS, DiscRead, MAXstats
 };
 static qword stats[MAXstats];
 static qword grand_stats[MAXstats];
 static const char * stats_category[MAXstats] = 
    {
-      "STOMP Bytes", "STOMP Connect Attempt", "STOMP Message", "", "", "", "",
+      "STOMP Bytes", "STOMP Connect Attempt", "Accepted STOMP Message", "Discarded STOMP Message", "", "", "",
       "Frame Disc Write", "Frame Disc Read",
    };
-static qword stats_longest;
-static qword grand_stats_longest;
-
-#define RATES_AVERAGE_OVER 16
-static word rates_count[STREAMS][RATES_AVERAGE_OVER];
-static word rates_index, rates_start;
 
 // Timers
 static time_t now;
 // Time in hours (local) when daily statistical report is produced.
 #define REPORT_HOUR 4
 // STOMP timeout in seconds
-#define STOMP_TIMEOUT 64
+#define STOMP_TIMEOUT 128
 // server socket retry time in seconds
 #define SERVER_SOCKET_RETRY 32
 // Heartbeat TX interval in seconds
@@ -155,10 +118,12 @@ static time_t stats_due, alarms_due, server_sockets_due, stomp_timeout, rates_du
 
 // STOMP controls
 static word stomp_holdoff;
+static time_t stomp_holdoff_time[8] = { 8, 64, 64, 128, 128, 128, 128, 256};
 
 // Disc spool
 // This and sub-directories will be created if required.
 #define STOMPY_SPOOL "/var/spool/stompy"
+static char spool_path[STREAMS][1024];
 
 // Command file
 #define COMMAND_FILE "/tmp/stompy.cmd"
@@ -184,6 +149,52 @@ static struct frame_buffer * empty_list, * stream_q_on[STREAMS], * stream_q_off[
 static ssize_t client_length[STREAMS], client_index[STREAMS];
 static struct frame_buffer * client_buffer[STREAMS];
 static enum { CLIENT_IDLE, CLIENT_AWAIT_ACK, CLIENT_RUN} client_state[STREAMS];
+
+// Instrumentation
+enum inst_categories {StartPeriod, StartIdle, TotalIdle, BaseStartWaitClientAck, BaseTotalWaitClientAck = BaseStartWaitClientAck + STREAMS,
+                      StartDisc = BaseTotalWaitClientAck + STREAMS, TotalDisc, CountDiscWrite, CountDiscRead, CountOnDisc, BaseCountStreamRX,
+                      BaseCountStreamTX = BaseCountStreamRX + STREAMS, MAXinst = BaseCountStreamTX + STREAMS};
+static qword inst[MAXinst];
+
+static void perform(void);
+static void set_up_server_sockets(void);
+static void stomp_write(void);
+static void stomp_read(void);
+static void client_write(const int s);
+static void client_read(const int s);
+static void client_accept(const int s);
+static void user_command(void);
+static void send_subscribes(void);
+static void handle_shutdown(word report);
+static void full_shutdown(void);
+static void stomp_manager(const enum stomp_manager_event event, const char * const headers);
+static void stomp_queue_tx(const char * const d, const ssize_t l);
+static void report_stats(void);
+static void report_alarms(void);
+static void report_rates(const char * const m);
+static void next_stats(void);
+static void next_alarms(void);
+static void report_status(void);
+static void dump_headers(const char * const h);
+
+static void init_buffers_queues(void);
+static struct frame_buffer * new_buffer(void);
+static void free_buffer(struct frame_buffer * const b);
+static void enqueue(const word s, struct frame_buffer * const b);
+static struct frame_buffer * dequeue(const word s);
+static struct frame_buffer * queue_front(const word s);
+static word queue_length(const word s);
+
+static void dump_buffer_to_disc(const word s, struct frame_buffer * const b);
+static word dump_queue_to_disc(const word s);
+static int is_a_buffer(const struct dirent *d);
+static word load_queue_from_disc(const word s);
+static int disc_queue_length(const word s);
+static qword disc_queue_oldest(const word s);
+static void log_message(const word s);
+//static word count_messages(const struct frame_buffer * const b);
+static void heartbeat_tx(void);
+static char * show_percent(qword * s, qword * t, const qword l, const qword n);
 
 // Signal handling
 void termination_handler(int signum)
@@ -319,7 +330,6 @@ int main(int argc, char *argv[])
    {
       word s;
       struct stat b;
-      char d[256];
       if(stat(STOMPY_SPOOL, &b))
       {
          if(mkdir(STOMPY_SPOOL, 0777))
@@ -343,20 +353,21 @@ int main(int argc, char *argv[])
 
       for(s = 0; s < STREAMS; s++)
       {
-         sprintf(d, "%s/%s%d", STOMPY_SPOOL, debug?"d-":"", s);
-         if(stat(d, &b))
+         sprintf(spool_path[s], "%s/%s%d", STOMPY_SPOOL, debug?"d-":"", s);
+
+         if(stat(spool_path[s], &b))
          {
-            if(mkdir(d, 0777))
+            if(mkdir(spool_path[s], 0777))
             {
-               _log(CRITICAL, "Failed to create spool directory \"%s\".  Error %d %s", d, errno, strerror(errno));
+               _log(CRITICAL, "Failed to create spool directory \"%s\".  Error %d %s", spool_path[s], errno, strerror(errno));
             }
             else
             {
-               _log(GENERAL, "Created spool directory \"%s\".", d);
+               _log(GENERAL, "Created spool directory \"%s\".", spool_path[s]);
             }
-            if(chmod(d, 0777))
+            if(chmod(spool_path[s], 0777))
             {
-               _log(CRITICAL, "Failed to chmod spool directory \"%s\".  Error %d %s", d, errno, strerror(errno));
+               _log(CRITICAL, "Failed to chmod spool directory \"%s\".  Error %d %s", spool_path[s], errno, strerror(errno));
             }
          }
          if(disc_queue_length(s) < 0)
@@ -470,7 +481,13 @@ int main(int argc, char *argv[])
          grand_stats[i] = 0;
       }
    }
-   stats_longest = grand_stats_longest = 0;
+
+   // Zero the instrumentation
+   {
+      word i;
+      for(i=0; i < MAXinst; i++) inst[i] = 0LL;
+      inst[StartPeriod] = time_us();
+   }
 
    // Remove any user commands lying around.
    unlink(COMMAND_FILE);
@@ -496,7 +513,7 @@ int main(int argc, char *argv[])
       struct sysinfo info;
       word logged = false;
       word i;
-      while(run && !debug && (sysinfo(&info) || info.uptime < 32))
+      while(run && !debug && !sysinfo(&info) && info.uptime < 32)
       {
          if(!logged) _log(GENERAL, "Startup delay...");
          logged = true;
@@ -535,6 +552,8 @@ static void perform(void)
       client_state[stream] = CLIENT_IDLE;
       client_buffer[stream] = NULL;
       stream_state[stream] = STREAM_DISC;
+
+      inst[CountOnDisc] += disc_queue_length(stream);
    }
 
    run = true;
@@ -542,6 +561,11 @@ static void perform(void)
    sigusr1 = false;
    controlled_shutdown = false;
    report_rates(NULL);
+   {
+      char zs[128];
+      sprintf(zs, "Startup.  %s %s", NAME, BUILD);
+      report_rates(zs);
+   }
 
    // Set up timers
    next_stats();
@@ -553,17 +577,19 @@ static void perform(void)
    stomp_read_buffer = NULL;
    stomp_manager(SM_START, NULL);
 
+
+
    while(run)
    {
       now = time(NULL);
 
       // Check each timer for expiry
-      if(now > heartbeat_tx_due) heartbeat_tx();
-      if(now > server_sockets_due && !controlled_shutdown) set_up_server_sockets();
-      if(now > stats_due)     report_stats();
-      if(now > alarms_due)    report_alarms();
-      if(now > rates_due)     report_rates("");
-      if(now > stomp_timeout) stomp_manager(SM_TIMEOUT, NULL);
+      if(now >= heartbeat_tx_due) heartbeat_tx();
+      if(now >= server_sockets_due && !controlled_shutdown) set_up_server_sockets();
+      if(now >= stats_due)        report_stats();
+      if(now >= alarms_due)       report_alarms();
+      if(now >= rates_due)        report_rates("");
+      if(now >= stomp_timeout)    stomp_manager(SM_TIMEOUT, NULL);
 
       if(controlled_shutdown)
       {
@@ -577,7 +603,10 @@ static void perform(void)
       }
       active_read_sockets = read_sockets;
       active_write_sockets = write_sockets;
+      inst[StartIdle] = time_us();
       int result = select(FD_SETSIZE, &active_read_sockets, &active_write_sockets, NULL, &wait_time);
+      inst[TotalIdle] += (time_us() - inst[StartIdle]);
+      inst[StartIdle] = 0LL;
       if(result < 0)
       {
          // Error
@@ -684,21 +713,24 @@ static void set_up_server_sockets(void)
 static void stomp_write(void)
 {
    // Send anything in the STOMP TX queue.
-   // Note - This is NOT a proper circular buffer.
-   _log(PROC, "stomp_write()");
+   // Note - This is NOT a circular buffer.
+   _log(PROC, "stomp_write() stomp_tx_queue_on = %d, stomp_tx_queue_off = %d", stomp_tx_queue_on, stomp_tx_queue_off);
 
    if(stomp_tx_queue_on != stomp_tx_queue_off)
    {
+
       ssize_t sent = write(s_stomp, stomp_tx_queue + stomp_tx_queue_off, stomp_tx_queue_on - stomp_tx_queue_off);
       if(sent < 0)
       {
          _log(MAJOR, "Failed to write to STOMP server.  Error %d %s", errno, strerror(errno));
          stomp_manager(SM_FAIL, NULL);
       }
-      stomp_tx_queue_off += sent;
-      _log(DEBUG, "stomp_write():  Sent %d bytes.  Last byte 0x%02x.", sent, stomp_tx_queue[stomp_tx_queue_off-1]);
+      else
+      {
+         stomp_tx_queue_off += sent;
+         _log(DEBUG, "stomp_write():  Sent %d bytes.  Last byte 0x%02x.", sent, stomp_tx_queue[stomp_tx_queue_off-1]);
+      }
    }
-
    if(stomp_tx_queue_on == stomp_tx_queue_off)
    {
       stomp_tx_queue_on = stomp_tx_queue_off = 0;
@@ -723,13 +755,16 @@ static void stomp_read(void)
    static ssize_t stomp_read_h_i, stomp_read_b_i;
    static char * mid, * s, * body;
    static word stream;
+   static word fail_send_ack;
+   char d[1024];
 
    _log(PROC, "stomp_read()");
 
    // N.B. Handling of stomp_read_buffer
    // If a receive is interrupted by an error, stomp_read_buffer remains pointing to a buffer (which contains 
    // garbage).  This will be re-used for the next frame.
-   char d[1024];
+
+   if(s_stomp < 0) return;
    ssize_t l = read(s_stomp, d, 1024);
    if(l < 0)
    {
@@ -752,10 +787,11 @@ static void stomp_read(void)
 
    for(i=0; i < l; i++)
    {
+      // _log(DEBUG, "stomp_read() Rx %02x %02x %c", i, d[i], (d[i]<0x20 || d[i] > 0x7e) ? '.':d[i]);
       switch(stomp_read_state)
       {
       case STOMP_IDLE: // Start
-         stomp_read_h_i = stomp_read_b_i = 0;
+         stomp_read_h_i = stomp_read_b_i = fail_send_ack = 0;
 
          // First character - could be a heartbeat
          if(d[i] == '\n')
@@ -776,6 +812,7 @@ static void stomp_read(void)
          if(stomp_read_h_i >= MAX_HEADER)
          {
             _log(MAJOR, "Received STOMP headers too long.  Frame discarded.");
+            stats[StompInvalid]++;
             stomp_read_state = STOMP_FAIL;
          }
          else
@@ -801,6 +838,7 @@ static void stomp_read(void)
                else
                {
                   _log(MAJOR, "Received STOMP headers too long.  Frame discarded.");
+                  stats[StompInvalid]++;
                   stomp_read_state = STOMP_FAIL;
                }
             }
@@ -826,6 +864,7 @@ static void stomp_read(void)
                dump_headers(headers);
                stomp_read_state = STOMP_IDLE;
                stomp_manager(SM_RX_DONE, headers);
+               stats[StompInvalid]++;
             }
             else if(stomp_read_b_i == 0)
             {
@@ -834,6 +873,7 @@ static void stomp_read(void)
                   _log(MAJOR, "STOMP frame received is not a MESSAGE.  Discarded.  Headers:");
                   dump_headers(headers);
                   stomp_read_state = STOMP_FAIL;
+                  stats[StompInvalid]++;
                }
                else
                {
@@ -849,6 +889,7 @@ static void stomp_read(void)
                      _log(MAJOR, "STOMP MESSAGE received with no subscription value.  Discarded.  Headers:");
                      dump_headers(headers);
                      stomp_read_state = STOMP_FAIL;
+                     stats[StompInvalid]++;
                   }
                }
                if(stomp_read_state == STOMP_BODY)
@@ -863,6 +904,7 @@ static void stomp_read(void)
                      _log(MAJOR, "STOMP MESSAGE received with no message id.  Discarded.  Headers:");
                      dump_headers(headers);
                      stomp_read_state = STOMP_FAIL;
+                     stats[StompInvalid]++;
                   }
                }
                // Set up where it's going, and get a queue entry if appropriate
@@ -903,6 +945,8 @@ static void stomp_read(void)
                         {
                            _log(CRITICAL, "Failed to find a free buffer.  STOMP MESSAGE discarded.");
                            stomp_read_state = STOMP_FAIL;
+                           fail_send_ack = true; // Failure at our end.  Need to send ack or message feed will cease.
+            stats[StompInvalid]++;
                            body = NULL;
                         }
                         else
@@ -913,6 +957,7 @@ static void stomp_read(void)
                   default: _log(MAJOR, "STOMP MESSAGE received with unrecognised subscription value \"%c\".", *s);
                      stomp_read_state = STOMP_FAIL;
                      body = NULL;
+                     stats[StompInvalid]++;
                      break;
                   }
                }
@@ -920,18 +965,29 @@ static void stomp_read(void)
 
             if(stomp_read_state == STOMP_BODY) 
             {
-               // Stick character in buffer
                stomp_read_b_i++;
+
+               // Handle overlong body
+               if(body && stomp_read_b_i >= FRAME_SIZE)
+               {
+                  _log(CRITICAL, "STOMP MESSAGE received with overlong payload.  Discarded.  Headers:");
+                  dump_headers(headers);
+                  stats[StompInvalid]++;
+                  stomp_read_state = STOMP_FAIL;
+                  fail_send_ack = true; // Failure at our end.  Need to send ack or message feed will cease.
+                  body = NULL;
+               }
+
+               // Stick character in buffer
                if(body) *body++ = d[i];
 
                if(body && !d[i])
                {
                   // Deal with frame
                   _log(DEBUG, "Got end of message frame.  Processing...");
-                  if(stomp_read_b_i > stats_longest) stats_longest = stomp_read_b_i;
                   stomp_read_buffer->stamp = time_us();
                   _log(DEBUG, "Stamp is %lld.", stomp_read_buffer->stamp);
-                  rates_count[stream][rates_index] += count_messages(stomp_read_buffer);
+                  inst[BaseCountStreamRX + stream]++;
                   if(!(*conf[conf_stompy_bin])) 
                   {
                      if(stream_state[stream] == STREAM_RUN)
@@ -979,6 +1035,22 @@ static void stomp_read(void)
       case STOMP_FAIL: // Just bin data until the end of the STOMP frame.
          if(d[i] == '\0')
          {
+            if(fail_send_ack)
+               // Send ACK
+            {
+               char ack_h[1024];
+               sprintf(ack_h, "ACK\nsubscription:%c\nmessage-id:", *s);
+               ssize_t i = strlen(ack_h);
+               while((ack_h[i++] = *mid++) != '\n');
+               ack_h[i++] = '\n';
+               ack_h[i++] = '\0';
+               if(debug)
+               {
+                  _log(DEBUG, "Ack message headers:");
+                  dump_headers(ack_h);
+               }
+               stomp_queue_tx(ack_h, i);
+            }
             stomp_read_state = STOMP_IDLE;
             stomp_manager(SM_RX_DONE, NULL);
          }
@@ -1051,7 +1123,7 @@ static void client_write(const int s)
                   if(dump_queue_to_disc(st))
                   {
                      if(stream_state[st] == STREAM_RUN) stream_state[st] = STREAM_DISC;
-                     _log(GENERAL, "Dumped queue for stream %d (%s) to disc to free space.", st, stomp_topic_names[st]);
+                     _log(GENERAL, "client_write() dumped queue for stream %d (%s) to disc to free space.", st, stomp_topic_names[st]);
                      st = STREAMS;
                   }
                }
@@ -1120,6 +1192,7 @@ static void client_write(const int s)
             client_state[stream] = CLIENT_AWAIT_ACK;
             FD_CLR(s, &write_sockets);
             FD_SET(s, &read_sockets);
+            inst[BaseStartWaitClientAck + stream] = time_us();
          }
       }
    }
@@ -1171,6 +1244,10 @@ static void client_read(const int s)
 
    // Log message
    if(stomp_topic_log[stream]) log_message(stream);
+
+   if(inst[BaseStartWaitClientAck + stream]) inst[BaseTotalWaitClientAck + stream] += (time_us() - inst[BaseStartWaitClientAck + stream]);
+   inst[BaseStartWaitClientAck + stream] = 0LL;
+   inst[BaseCountStreamTX + stream]++;
 
    if(client_buffer[stream] != dequeue(stream))
    {
@@ -1273,7 +1350,7 @@ static void user_command(void)
          case 'V':
             _log(GENERAL, "Command V - Stream 0 (VSTP) run.");
             // We set the stream to DISC.  If the disc is empty it'll drop to RUN on the first client_write
-            if(!controlled_shutdown)
+            if(!controlled_shutdown && stream_state[0] == STREAM_LOCK)
             {
                stream_state[0] = STREAM_DISC;
                if(s_number[0][CLIENT] >= 0) FD_SET(s_number[0][CLIENT], &write_sockets);
@@ -1281,7 +1358,7 @@ static void user_command(void)
             break;
          case 'T':
             _log(GENERAL, "Command T - Stream 1 (TRUST) run.");
-            if(!controlled_shutdown)
+            if(!controlled_shutdown && stream_state[1] == STREAM_LOCK)
             {
                stream_state[1] = STREAM_DISC;
                if(s_number[1][CLIENT] >= 0) FD_SET(s_number[1][CLIENT], &write_sockets);
@@ -1289,7 +1366,7 @@ static void user_command(void)
             break;
          case 'D':
             _log(GENERAL, "Command D - Stream 2 (TD) run.");
-            if(!controlled_shutdown)
+            if(!controlled_shutdown && stream_state[2] == STREAM_LOCK)
             {
                stream_state[2] = STREAM_DISC;
                if(s_number[2][CLIENT] >= 0) FD_SET(s_number[2][CLIENT], &write_sockets);
@@ -1298,6 +1375,8 @@ static void user_command(void)
          case 's':
             _log(GENERAL, "Command s - Commence controlled shutdown.");
             controlled_shutdown = true;
+            report_rates("Commencing controlled shutdown.");
+            report_rates("");
             stomp_manager(SM_SHUTDOWN, NULL);
             handle_shutdown(false);
             break;
@@ -1428,7 +1507,7 @@ static void full_shutdown(void)
 
 
 ///////// STOMP Manager //////////
-#define SET_TIMER_HOLDOFF   {if(++stomp_holdoff > 16) stomp_holdoff = 16; stomp_timeout = now + stomp_holdoff * 8;}
+#define SET_TIMER_HOLDOFF   {if(stomp_holdoff > 7) stomp_holdoff = 7; stomp_timeout = now + stomp_holdoff_time[stomp_holdoff]; stomp_holdoff++;}
 #define SET_TIMER_RUNNING   {stomp_timeout = now + STOMP_TIMEOUT;}
 #define SET_TIMER_NEVER     {stomp_timeout = 0x7fffffff;}
 #define SET_TIMER_IMMEDIATE {stomp_timeout = now;}
@@ -1587,7 +1666,7 @@ static void stomp_manager(const enum stomp_manager_event event, const char * con
          FD_CLR(s_stomp, &read_sockets);
          FD_CLR(s_stomp, &write_sockets);
          s_stomp = -1;
-         _log(GENERAL, "STOMP socket disconnected.");
+         _log(GENERAL, "%s in state %s.  STOMP socket disconnected.", sm_events[event], sm_states[stomp_manager_state]);
       }
       stomp_manager_state = SM_HOLD;
       if(controlled_shutdown) 
@@ -1604,11 +1683,11 @@ static void stomp_manager(const enum stomp_manager_event event, const char * con
       if(!outage_start) 
       {
          outage_start = now;
-         report_rates("STOMP connection failed.");
+         report_rates("STOMP connection disconnected.");
       }
       if(s_stomp >= 0)
       {
-         _log(GENERAL, "Sending STOMP DISCONNECT.");
+         _log(GENERAL, "%s in state %s.  Sending STOMP DISCONNECT.", sm_events[event], sm_states[stomp_manager_state]);
          stomp_queue_tx("DISCONNECT\n\n", 13);
          SET_TIMER_RUNNING;
          stomp_manager_state = SM_SEND_DISCO;
@@ -1732,13 +1811,6 @@ static void report_stats(void)
       }
       stats[i] = 0;
    }
-   if(stats_longest > grand_stats_longest)grand_stats_longest = stats_longest;
-   sprintf(zs, "%27s: %-14s ", "Longest STOMP frame", commas_q(stats_longest));
-   strcat(zs, commas_q(grand_stats_longest));
-   _log(GENERAL, zs);
-   strcat(report, zs);
-   strcat(report, "\n");
-   stats_longest = 0;
 
    email_alert(NAME, BUILD, "Statistics Report", report);
 
@@ -1827,19 +1899,16 @@ static void report_rates(const char * const m)
 {
    FILE * rates_fp;
    static word last_hour;
-   word i, j;
+   word i;
    dword total;
 #define REPORTED_SILENCE_THRESHOLD 2
    static word reported_silence;
-   dword mean;
 
    if(!m)
    {
       // Initialise
       reported_silence = 0;
       last_hour = 99;
-      rates_index = 0;
-      rates_start = true;
       return;
    }
 
@@ -1851,19 +1920,28 @@ static void report_rates(const char * const m)
       if(broken->tm_hour != last_hour)
       {
          last_hour = broken->tm_hour;
+         fprintf(rates_fp, "                   |      Number of message frames in period       | Percentage of period in each state  Count  Count  Count  |\n");
          fprintf(rates_fp, "                   ");
          for(i=0; i < STREAMS; i++)
          {
             fprintf(rates_fp, "|  %7s      ", stomp_topic_names[i]);
          }
+         fprintf(rates_fp, "|  Idle   Await client ack.    Disc   Disc   Disc   Frames |");
          fprintf(rates_fp, "\n");
          fprintf(rates_fp, "                   ");
          for(i=0; i < STREAMS; i++)
          {
-            fprintf(rates_fp, "|         Mean  ");
+            fprintf(rates_fp, "|     RX    TX  ");
          }
-         fprintf(rates_fp, "  Means calculated over %d minutes.\n", RATES_AVERAGE_OVER);
+         fprintf(rates_fp, "|        ");
+         for(i=0; i < STREAMS; i++)
+         {
+            fprintf(rates_fp, "%6s ", stomp_topic_names[i]);
+         }
+
+         fprintf(rates_fp, "Access Writes  Reads  On Disc|\n");
       }
+
       fprintf(rates_fp, "%02d/%02d/%02d %02d:%02d:%02dZ ", 
               broken->tm_mday, 
               broken->tm_mon + 1, 
@@ -1877,38 +1955,41 @@ static void report_rates(const char * const m)
          total = 0;
          for(i=0; i < STREAMS; i++)
          {
-            total += rates_count[i][rates_index];
+            total += inst[BaseCountStreamRX + i];
 
-            mean = 0;
-            for(j=0; j < RATES_AVERAGE_OVER; j++)
-            {
-               mean += rates_count[i][j];
-            }
-            mean = (mean + (RATES_AVERAGE_OVER/2)) / RATES_AVERAGE_OVER;
-
-            if(rates_start)
-            {
-               fprintf(rates_fp, "|  %5d     -  ", rates_count[i][rates_index]);
-            }
-            else
-            {
-               fprintf(rates_fp, "|  %5d %5ld  ", rates_count[i][rates_index], mean);
-            }
+            fprintf(rates_fp, "|  %5llu %5llu  ", inst[BaseCountStreamRX + i], inst[BaseCountStreamTX + i]);
          }
          
-         rates_index++;
-         if(rates_index >= RATES_AVERAGE_OVER) rates_start = false;
-         rates_index %= RATES_AVERAGE_OVER;
-         for(i=0; i < STREAMS; i++) rates_count[i][rates_index] = 0;
+         // Calculate frames on disc
+         inst[CountOnDisc] = inst[CountOnDisc] + inst[CountDiscWrite] - inst[CountDiscRead];
 
+         for(i=0; i < STREAMS; i++) inst[BaseCountStreamRX + i] = inst[BaseCountStreamTX + i] = 0LL;
+
+         {
+            word i;
+            qword now = time_us();
+            qword period_length = now - inst[StartPeriod];
+            fprintf(rates_fp, "|  ");
+            fprintf(rates_fp, "%5s  ", show_percent(&inst[StartIdle],       &inst[TotalIdle],       period_length, now));
+            for(i = 0; i < STREAMS;i++)
+            {
+               fprintf(rates_fp, "%5s  ", show_percent(&inst[BaseStartWaitClientAck + i], &inst[BaseTotalWaitClientAck + i], period_length, now));
+            }
+            fprintf(rates_fp, "%5s  %5llu  %5llu%8s ", show_percent(&inst[StartDisc], &inst[TotalDisc], period_length, now), inst[CountDiscWrite], inst[CountDiscRead], commas_q(inst[CountOnDisc]));
+            inst[StartPeriod] = now;
+            inst[TotalIdle] = inst[TotalDisc] = inst[CountDiscWrite] = inst[CountDiscRead] = 0LL;
+            for(i = 0; i < STREAMS;i++) inst[BaseTotalWaitClientAck + i] = 0LL;
+         }
+         fprintf(rates_fp, "|");
          // Bodge.  Don't do flow checking unless both "busy" streams are enabled.
+         // Note:  This flow checking doesn't work in stompy_bin mode.
          if(stomp_topics[1][0] && stomp_topics[2][0])
          {
             char report[256];
 
             if(!total)
             {
-               // No messages this minute
+               // No frames this minute
                if(reported_silence < REPORTED_SILENCE_THRESHOLD)
                {
                   reported_silence++;
@@ -1937,6 +2018,7 @@ static void report_rates(const char * const m)
       {
          fprintf(rates_fp, "%s", m);
       }
+
       fprintf(rates_fp, "\n");
 
       fclose(rates_fp);
@@ -1995,7 +2077,7 @@ static void report_status(void)
 
 static void dump_headers(const char * const h)
 {
-   char zs[256];
+   char zs[256], zs1[256];
    ssize_t i,j;
 
    i=0;
@@ -2005,7 +2087,25 @@ static void dump_headers(const char * const h)
       if(h[i] == '\n')
       {
          zs[j] = '\0';
-         if(j) _log(GENERAL, "   %s", zs);
+         if(j)
+         {
+            if(strstr(zs, "timestamp:"))
+            {
+               strcpy(zs1, zs + 10);
+               zs1[10] = '\0';
+               _log(GENERAL, "   %s (%s)", zs, time_text(atol(zs1), false));
+            }
+            else if(strstr(zs, "expires:"))
+            {
+               strcpy(zs1, zs + 8);
+               zs1[10] = '\0';
+               _log(GENERAL, "   %s   (%s)", zs, time_text(atol(zs1), false));
+            }
+            else
+            {
+            _log(GENERAL, "   %s", zs);
+            }
+         }
          j = 0;
          i++;
       }
@@ -2108,10 +2208,12 @@ static void dump_buffer_to_disc(const word s, struct frame_buffer * const b)
 {
    char filename[256];
 
-   sprintf(filename, "%s/%s%d/%lld", STOMPY_SPOOL, debug?"d-":"", s, b->stamp);
+   sprintf(filename, "%s/%lld", spool_path[s], b->stamp);
    _log(DEBUG, "dump_buffer_to_disc():  Target filename \"%s\".", filename);
 
    ssize_t length = strlen(b->frame);
+
+   inst[StartDisc] = time_us();
 
    int fd = open(filename, O_WRONLY | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
    if(fd < 0)
@@ -2137,6 +2239,9 @@ static void dump_buffer_to_disc(const word s, struct frame_buffer * const b)
       }
       close(fd);
       stats[DiscWrite]++;
+      inst[TotalDisc] += (time_us() - inst[StartDisc]);
+      inst[StartDisc] = 0LL;
+      inst[CountDiscWrite]++;
    }
 
    free_buffer(b);   
@@ -2177,11 +2282,13 @@ static void load_buffer_from_disc(struct frame_buffer * const b, const word s, c
    char filepath[256], newpath[256];
    _log(PROC, "load_buffer_from_disc(~, %d, \"%s\")", s, name);
 
-   sprintf(filepath, "%s/%s%d/%s", STOMPY_SPOOL, debug?"d-":"", s, name);
+   sprintf(filepath, "%s/%s", spool_path[s], name);
    _log(DEBUG, "load_buffer_from_disc():  Target filename \"%s\".", filepath);
 
    b->frame[0] = '\0';
    b->stamp = 0;
+
+   inst[StartDisc] = time_us();
 
    int fd = open(filepath, O_RDONLY);
    if(fd < 0)
@@ -2226,6 +2333,10 @@ static void load_buffer_from_disc(struct frame_buffer * const b, const word s, c
          if(unlink(filepath))
             _log(MAJOR, "Failed to delete \"%s\" from disc.  Error %d %s.", errno, strerror(errno));
       }
+
+      inst[TotalDisc] += (time_us() - inst[StartDisc]);
+      inst[StartDisc] = 0LL;
+      inst[CountDiscRead]++;
    }
 }
 
@@ -2237,11 +2348,12 @@ static word load_queue_from_disc(const word s)
    struct dirent **eps;
    struct frame_buffer * b;
 
-   char spool_path[128];
-   sprintf(spool_path, "%s/%s%d", STOMPY_SPOOL, debug?"d-":"", s);
-
    // Get some file names
-   int n = scandir (spool_path, &eps, is_a_buffer, alphasort);
+   inst[StartDisc] = time_us();
+   int n = scandir (spool_path[s], &eps, is_a_buffer, alphasort);
+   inst[TotalDisc] += (time_us() - inst[StartDisc]);
+   inst[StartDisc] = 0LL;
+
    if (n >= 0)
    {
       int cnt;
@@ -2272,7 +2384,7 @@ static word load_queue_from_disc(const word s)
    else
    {
       // Couldn't open the directory");
-      _log(CRITICAL, "load_queue_from_disc() failed to open directory \"%s\".  Error %d %s.  Fatal", spool_path, errno, strerror(errno));
+      _log(CRITICAL, "load_queue_from_disc() failed to open directory \"%s\".  Error %d %s.  Fatal", spool_path[s], errno, strerror(errno));
       run = false;
    }
 
@@ -2287,11 +2399,11 @@ static int disc_queue_length(const word s)
    struct dirent **eps;
    int result, i;
 
-   char spool_path[128];
-   sprintf(spool_path, "%s/%s%d", STOMPY_SPOOL, debug?"d-":"", s);
-
    // Get some file names
-   result = scandir (spool_path, &eps, is_a_buffer, alphasort);
+   inst[StartDisc] = time_us();
+   result = scandir (spool_path[s], &eps, is_a_buffer, alphasort);
+   inst[TotalDisc] += (time_us() - inst[StartDisc]);
+   inst[StartDisc] = 0LL;
    if(result >=0)
    {
       for(i = 0; i < result; i++)
@@ -2301,7 +2413,7 @@ static int disc_queue_length(const word s)
       free(eps);
    }
 
-   _log(PROC, "disc_queue_length(%d) return s %d.", s, result);
+   _log(PROC, "disc_queue_length(%d) returns %d.", s, result);
    return result;
 }
 
@@ -2313,11 +2425,11 @@ static qword disc_queue_oldest(const word s)
    qword result = 0;
    int n, i;
 
-   char spool_path[128];
-   sprintf(spool_path, "%s/%s%d", STOMPY_SPOOL, debug?"d-":"", s);
-
    // Get some file names
-   n = scandir(spool_path, &eps, is_a_buffer, alphasort);
+   inst[StartDisc] = time_us();
+   n = scandir(spool_path[s], &eps, is_a_buffer, alphasort);
+   inst[TotalDisc] += (time_us() - inst[StartDisc]);
+   inst[StartDisc] = 0LL;
 
    if(n > 0)
    {
@@ -2357,6 +2469,7 @@ static void log_message(const word s)
    }
 }
 
+#if 0
 static word count_messages(const struct frame_buffer * const b)
 {
    word i, count, depth;
@@ -2383,6 +2496,7 @@ static word count_messages(const struct frame_buffer * const b)
    if(depth) _log(MINOR, "count_messages()  Depth = %d");
    return count;
 }
+#endif
 
 static void heartbeat_tx(void)
 {
@@ -2394,4 +2508,35 @@ static void heartbeat_tx(void)
       stomp_queue_tx("\n", 1);
       _log(DEBUG, "Queued heartbeat for transmission.");
    }
+}
+
+static char * show_percent(qword * s, qword * t, const qword l, const qword n)
+{
+   static char display[800];
+
+
+   if(*s)
+   {
+      // Currently active
+      *t += (n - *s);
+      *s = n;
+   }
+
+   qword permille = 0;
+
+   if(l)
+   {
+      permille = (((10000LL * (*t))/l) + 5) / 10;
+   }
+
+   if(permille < 1000)
+   {
+      sprintf(display, "%2llu.%llu%%", permille/10, permille%10);
+   } 
+   else
+   {
+      sprintf(display, " 100%%");
+   }
+
+   return display;
 }

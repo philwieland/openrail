@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2013, 2014, 2015, 2016 Phil Wieland
+    Copyright (C) 2013, 2014, 2015, 2016, 2017 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -26,14 +26,23 @@
 #include <unistd.h>
 #include <sys/resource.h>
 #include <curl/curl.h>
+#include <dirent.h>
+#include <sys/types.h>
+#include <sys/stat.h>
 
 #include "misc.h"
 #include "jsmn.h"
 #include "db.h"
 #include "database.h"
+#include "build.h"
 
 #define NAME  "jsondb"
-#define BUILD "X328"
+
+#ifndef RELEASE_BUILD
+#define BUILD "Y127p"
+#else
+#define BUILD RELEASE_BUILD
+#endif
 
 static word debug, fetch_all, run, tiploc_ignored, test_mode, verbose, opt_insecure, used_insecure;
 static char * opt_filename;
@@ -43,6 +52,8 @@ static time_t start_time, last_reported_time;
 #define INVALID_SORT_TIME 9999
 
 #define NOT_DELETED 0xffffffffL
+
+#define TEMP_DIRECTORY "/var/tmp"
 
 // Stats
 enum stats_categories {Fetches, Sequence, DBError, 
@@ -63,8 +74,8 @@ static const char * stats_category[MAXStats] =
       "Total JSON Records", "Approx. CIF Records", 
    };
 #define HOME_REPORT_SIZE 512
-static unsigned long home_report_id[HOME_REPORT_SIZE];
-static word home_report_index;
+static dword home_report_id[HOME_REPORT_SIZE];
+static word  home_report_index;
 
 // Buffer for reading file
 #define MAX_BUF 8192
@@ -90,6 +101,7 @@ static char* match_strings[MATCHES] =
       "\"sequence\":([[:digit:]]{1,12})",   // 1
    };
 
+static int file_is_cif_download(const struct dirent *d);
 static void process_object(const char * object);
 static void process_timetable(const char * string, const jsmntok_t * tokens);
 static void process_association(const char * string, const jsmntok_t * tokens);
@@ -98,7 +110,7 @@ static void process_create_association(const char * string, const jsmntok_t * to
 static void process_schedule(const char * string, const jsmntok_t * tokens);
 static void process_delete_schedule(const char * string, const jsmntok_t * tokens);
 static void process_create_schedule(const char * string, const jsmntok_t * tokens);
-static word process_schedule_location(const char * string, const jsmntok_t * tokens, const int index, const unsigned long id);
+static word process_schedule_location(const char * string, const jsmntok_t * tokens, const int index, const dword id);
 static void process_tiploc(const char * string, const jsmntok_t * tokens);
 static word get_sort_time(const char const * buffer);
 static void reset_database(void);
@@ -298,7 +310,7 @@ int main(int argc, char **argv)
          if(now - last_reported_time > 10*60)
          {
             char zs[128], zs1[128];
-            sprintf(zs, "Progress: Created %s associations, ", commas_q(stats[AssocCreate]));
+            sprintf(zs, "Progress:  Created %s associations, ", commas_q(stats[AssocCreate]));
             sprintf(zs1, "%s schedules and ", commas_q(stats[ScheduleCreate]));
             strcat(zs, zs1);
             sprintf(zs1, "%s schedule locations.  Working...", commas_q(stats[ScheduleLocCreate]));
@@ -402,10 +414,10 @@ int main(int argc, char **argv)
       {
          row0 = NULL;
          result0 = NULL;
-         sprintf(zs, "%9ld ", home_report_id[i]);
+         sprintf(zs, "%9u ", home_report_id[i]);
          
          //                       0             1                  2                    3                 4
-         sprintf(q, "select CIF_train_UID, signalling_id, schedule_start_date, schedule_end_date, CIF_stp_indicator, deleted FROM cif_schedules WHERE id = %ld", home_report_id[i]);
+         sprintf(q, "select CIF_train_UID, signalling_id, schedule_start_date, schedule_end_date, CIF_stp_indicator, deleted FROM cif_schedules WHERE id = %u", home_report_id[i]);
          if(!db_query(q))
          {
             result0 = db_store_result();
@@ -416,7 +428,7 @@ int main(int argc, char **argv)
             }
          }
          else stats[DBError]++;
-         sprintf(q, "SELECT tiploc_code, departure FROM cif_schedule_locations WHERE record_identity = 'LO' AND cif_schedule_id = %ld", home_report_id[i]);
+         sprintf(q, "SELECT tiploc_code, departure FROM cif_schedule_locations WHERE record_identity = 'LO' AND cif_schedule_id = %u", home_report_id[i]);
          if(!db_query(q))
          {
             result1 = db_store_result();
@@ -428,7 +440,7 @@ int main(int argc, char **argv)
             mysql_free_result(result1);
          }
          else stats[DBError]++;
-         sprintf(q, "SELECT tiploc_code FROM cif_schedule_locations WHERE record_identity = 'LT' AND cif_schedule_id = %ld", home_report_id[i]);
+         sprintf(q, "SELECT tiploc_code FROM cif_schedule_locations WHERE record_identity = 'LT' AND cif_schedule_id = %u", home_report_id[i]);
          if(!db_query(q))
          {
             result1 = db_store_result();
@@ -484,7 +496,49 @@ int main(int argc, char **argv)
 
    email_alert(NAME, BUILD, "Timetable Update Report", report);
 
+   _log(GENERAL, "Tidying temporary files.");
+   {
+      struct dirent **eps;
+      char filepath[1024];
+      struct stat buf;
+      word i;
+      int rr;
+      int n = scandir(TEMP_DIRECTORY, &eps, file_is_cif_download, NULL);
+      if(n >= 0)
+      {
+         for(i = 0; i < n; i++)
+         {
+            sprintf(filepath, "%s/%s", TEMP_DIRECTORY, eps[i]->d_name);
+            stat(filepath, &buf);
+            // Keep eight day's files      v--Put keep-1 here
+            if(buf.st_mtime < start_time - 7*24*60*60 - 4*60*60)
+            {
+               _log(GENERAL, "   Deleting \"%s\".", filepath);
+               rr = unlink(filepath);
+               _log(rr?MAJOR:DEBUG, "   unlink returned %d.", rr);
+            }
+            free(eps[i]);
+         }
+         free(eps);
+      }
+      else
+      {
+         _log(MAJOR, "scandir() returned %d", n);
+      }
+   }
+   _log(GENERAL, "Run complete.");
    exit(0);
+}           
+
+static int file_is_cif_download(const struct dirent *d)
+{
+   _log(PROC, "file_is_cif_download(%s)", d->d_name);
+
+   if(strncmp(d->d_name, "jsondb-cif-", 11)) return 0; // No
+
+   _log(DEBUG, "   Returns 1.");
+   
+   return 1;
 }
 
 static void process_object(const char * object_string)
@@ -590,8 +644,7 @@ static void process_timetable(const char * string, const jsmntok_t * tokens)
             sprintf(zs, "INSERT INTO updates_processed VALUES(0, %ld)", stamp);
             db_query(zs);
             update_id = db_insert_id();
-            sprintf(zs, "Update_id = %ld", update_id);
-            _log(GENERAL, zs);
+            _log(GENERAL, "Update_id = %u", update_id);
          }
       }
    }
@@ -710,7 +763,7 @@ static void process_create_association(const char * string, const jsmntok_t * to
    time_t end_stamp   = parse_timestamp(end_date  );
    time_t now = time(NULL);
    char query[1024];
-   sprintf(query, "INSERT INTO cif_associations VALUES(%ld, %ld, %lu, '%s', '%s', %ld, %ld, '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s')",
+   sprintf(query, "INSERT INTO cif_associations VALUES(%u, %ld, %lu, '%s', '%s', %ld, %ld, '%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s')",
            update_id, now, NOT_DELETED, main_train_uid, assoc_train_uid, start_stamp, end_stamp, assoc_days,category, date_indicator, location, base_location_suffix, assoc_location_suffix, diagram_type, cif_stp_indicator);
 
    if(db_query(query)) stats[DBError]++;
@@ -787,7 +840,7 @@ static void process_delete_schedule(const char * string, const jsmntok_t * token
    while((row0 = mysql_fetch_row(result0)) && row0[0]) 
    {
       id = atol(row0[0]);
-      sprintf(query, "UPDATE cif_schedules SET deleted = %ld where id = %ld", time(NULL), id);
+      sprintf(query, "UPDATE cif_schedules SET deleted = %ld where id = %u", time(NULL), id);
    
       if(!db_query(query))
       {
@@ -796,7 +849,7 @@ static void process_delete_schedule(const char * string, const jsmntok_t * token
       else stats[DBError]++;
       if(conf[conf_huyton_alerts][0])
       {
-         sprintf(query, "SELECT * FROM cif_schedule_locations WHERE cif_schedule_id = %ld AND (tiploc_code = 'HUYTON' OR tiploc_code = 'HUYTJUN')", id);
+         sprintf(query, "SELECT * FROM cif_schedule_locations WHERE cif_schedule_id = %u AND (tiploc_code = 'HUYTON' OR tiploc_code = 'HUYTJUN')", id);
          if(!db_query(query))
          {
             result1 = db_store_result();
@@ -838,7 +891,7 @@ static void process_create_schedule(const char * string, const jsmntok_t * token
 
    time_t now = time(NULL);
 
-   sprintf(query, "INSERT INTO cif_schedules VALUES(%ld, %ld, %lu",
+   sprintf(query, "INSERT INTO cif_schedules VALUES(%u, %ld, %lu",
            update_id, now, NOT_DELETED);
 
    EXTRACT_APPEND_SQL("CIF_bank_holiday_running");
@@ -923,7 +976,7 @@ static void process_create_schedule(const char * string, const jsmntok_t * token
          result = db_store_result();
          if((row = mysql_fetch_row(result)))
          {
-            sprintf(query, "UPDATE cif_schedules SET deduced_headcode = '%s', deduced_headcode_status = 'D' WHERE id = %ld", row[0], id);
+            sprintf(query, "UPDATE cif_schedules SET deduced_headcode = '%s', deduced_headcode_status = 'D' WHERE id = %u", row[0], id);
             db_query(query);
             stats[HeadcodeDeduced]++;
          }
@@ -935,7 +988,7 @@ static void process_create_schedule(const char * string, const jsmntok_t * token
 
 #define EXTRACT_APPEND_SQL_OBJECT(a) { jsmn_find_extract_token(string, tokens, index, a, zs, sizeof( zs )); sprintf(zs1, ", \"%s\"", zs); strcat(query, zs1); }
 
-static word process_schedule_location(const char * string, const jsmntok_t * tokens, const int index, const unsigned long schedule_id)
+static word process_schedule_location(const char * string, const jsmntok_t * tokens, const int index, const dword schedule_id)
 {
    char query[2048], zs[1024], zs1[1024];
 
@@ -944,10 +997,10 @@ static word process_schedule_location(const char * string, const jsmntok_t * tok
 
    byte type_LO, huyton;
 
-   sprintf(zs, "process_schedule_location(%d, %ld)", index, schedule_id);
+   sprintf(zs, "process_schedule_location(%d, %u)", index, schedule_id);
    _log(PROC, zs);
 
-   sprintf(query, "INSERT INTO cif_schedule_locations VALUES(%ld, %ld",
+   sprintf(query, "INSERT INTO cif_schedule_locations VALUES(%u, %u",
            update_id, schedule_id);
 
    EXTRACT_APPEND_SQL_OBJECT("location_type");
@@ -1137,18 +1190,18 @@ static word fetch_file(void)
 
       if(opt_url || debug)
       {
-         sprintf(filepathz, "/tmp/jsondb-cif-fetch-%ld.gz", now);
-         sprintf(filepath,  "/tmp/jsondb-cif-fetch-%ld",    now);
+         sprintf(filepathz, "%s/jsondb-cif-fetch-%ld.gz", TEMP_DIRECTORY, now);
+         sprintf(filepath,  "%s/jsondb-cif-fetch-%ld",    TEMP_DIRECTORY, now);
       }
       else if(fetch_all)
       {
-         sprintf(filepathz, "/tmp/jsondb-cif-all-%02d-%02d-%02d-%s.gz", broken->tm_year%100, broken->tm_mon + 1, broken->tm_mday, weekdays[broken->tm_wday]);
-         sprintf(filepath,  "/tmp/jsondb-cif-all-%02d-%02d-%02d-%s",    broken->tm_year%100, broken->tm_mon + 1, broken->tm_mday, weekdays[broken->tm_wday]);
+         sprintf(filepathz, "%s/jsondb-cif-all-%02d-%02d-%02d-%s.gz", TEMP_DIRECTORY, broken->tm_year%100, broken->tm_mon + 1, broken->tm_mday, weekdays[broken->tm_wday]);
+         sprintf(filepath,  "%s/jsondb-cif-all-%02d-%02d-%02d-%s",    TEMP_DIRECTORY, broken->tm_year%100, broken->tm_mon + 1, broken->tm_mday, weekdays[broken->tm_wday]);
       }
       else
       {
-         sprintf(filepathz, "/tmp/jsondb-cif-%02d-%02d-%02d-%s.gz", broken->tm_year%100, broken->tm_mon + 1, broken->tm_mday, weekdays[broken->tm_wday]);
-         sprintf(filepath,  "/tmp/jsondb-cif-%02d-%02d-%02d-%s",    broken->tm_year%100, broken->tm_mon + 1, broken->tm_mday, weekdays[broken->tm_wday]);
+         sprintf(filepathz, "%s/jsondb-cif-%02d-%02d-%02d-%s.gz", TEMP_DIRECTORY, broken->tm_year%100, broken->tm_mon + 1, broken->tm_mday, weekdays[broken->tm_wday]);
+         sprintf(filepath,  "%s/jsondb-cif-%02d-%02d-%02d-%s",    TEMP_DIRECTORY, broken->tm_year%100, broken->tm_mon + 1, broken->tm_mday, weekdays[broken->tm_wday]);
       }
 
       if(!(fp_result = fopen(filepathz, "w")))

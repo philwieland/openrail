@@ -1,5 +1,5 @@
  /*
-    Copyright (C) 2014, 2015 Phil Wieland
+    Copyright (C) 2014, 2015, 2016, 2017 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -33,55 +33,80 @@
 #include "misc.h"
 #include "db.h"
 #include "database.h"
+#include "build.h"
 
 #define NAME  "archdb"
-#define BUILD "X328"
+
+#ifndef RELEASE_BUILD
+#define BUILD "YB05p"
+#else
+#define BUILD RELEASE_BUILD
+#endif
 
 static int smart_loop(const word initial_quantity, int (*f)(word), const word stat);
 static int perform(void);
 static int cif_associations(const word quantity);
 static int cif_schedules(const word quantity);
+static int cif_schedule_locations_orphan(const word quantity);
+static int cif_schedule_CR_orphan(const word quantity);
 static int trust_activation(const word quantity);
 static int trust_cancellation(const word quantity);
 static int trust_movement(const word quantity);
 static int trust_changeorigin(const word quantity);
 static int trust_changeid(const word quantity);
-static int trust_generic(const char * const table, const word quantity, const word stat);
+static int trust_changelocation(const word quantity);
+static int trust_activation_extra(const word quantity);
+static int trust_generic_orphan(const char * const table, const word quantity, const word stat);
 static word check_space(void);
 
-static word debug, run, report_only, verbose, archive;
+static word debug, run, opt_report_only, opt_print, opt_archive;
 static time_t start_time, last_reported_time;
 
 #define NONE_FOUND  -98
 #define DISC_SPACE  -97
 #define RUN_ABORTED -96
+
 #define TRUST_TIME_RANGE (15L * 24L * 60L * 60L)
 
 // Stats
-enum stats_categories {CIFAssociation, CIFSchedule, CIFScheduleLocation, CIFChangeEnRoute, 
-TrustActivation, TrustCancellation, TrustMovement, TrustChangeOrigin, TrustChangeID, OrphanTrustCancellation, OrphanTrustMovement, OrphanTrustChangeOrigin, OrphanTrustChangeID, MAXstats};
+enum stats_categories 
+   { CIFAssociation, CIFSchedule, CIFScheduleLocation, CIFChangeEnRoute, 
+     OrphanCIFScheduleLocation, OrphanCIFChangeEnRoute,
+     TrustActivation, TrustActivationExtra,
+     TrustCancellation,       TrustMovement,       TrustChangeOrigin,       TrustChangeID,       TrustChangeLocation,
+     OrphanTrustActivationExtra, OrphanTrustCancellation, OrphanTrustMovement, OrphanTrustChangeOrigin, OrphanTrustChangeID, OrphanTrustChangeLocation,
+     MAXstats
+   };
 qword stats[MAXstats];
 const char * stats_category[MAXstats] = 
    {
-      "CIF association records processed",
-      "CIF schedule records processed",
-      "CIF schedule location records processed",
-      "CIF change en-route records processed",
-      "Trust activation records processed", 
-      "Trust cancellation records processed", 
-      "Trust movement records processed", 
-      "Trust change origin records processed", 
-      "Trust change ID records processed", 
-      "Trust cancellation orphan records processed", 
-      "Trust movement orphan records processed", 
-      "Trust change origin orphan records processed", 
-      "Trust change ID orphan records processed", 
+      "CIF association records",
+      "CIF schedule records",
+      "CIF schedule location records",
+      "CIF change en-route records",
+      "CIF schedule location orphan records",
+      "CIF change en-route orphan records",
+      "Trust activation records", 
+      "Trust activation extra records", 
+      "Trust cancellation records", 
+      "Trust movement records", 
+      "Trust change origin records", 
+      "Trust change ID records", 
+      "Trust change location records", 
+      "Trust activation extra orphan records", 
+      "Trust cancellation orphan records", 
+      "Trust movement orphan records", 
+      "Trust change origin orphan records", 
+      "Trust change ID orphan records", 
+      "Trust change location orphan records", 
    };
 
 // Days age threshold
-int age;
+int opt_age;
 // Threshold in unix time
 time_t threshold;
+
+#define COMFORT_REPORT_PERIOD ((opt_print?1:10) * 60)
 
 // Signal handling
 void termination_handler(int signum)
@@ -95,10 +120,10 @@ int main(int argc, char **argv)
    int result;
    char config_file_path[256];
 
-   age = 0;
-   report_only = false;
-   verbose = false;
-   archive = true;
+   opt_age = 0;
+   opt_report_only = false;
+   opt_print = false;
+   opt_archive = true;
 
    word usage = false;
    int c;
@@ -111,16 +136,16 @@ int main(int argc, char **argv)
          strcpy(config_file_path, optarg);
          break;
       case 'r':
-         report_only = true;
+         opt_report_only = true;
          break;
       case 'a':
-         age = atoi(optarg);
+         opt_age = atoi(optarg);
          break;
       case 'p':
-         verbose = true;
+         opt_print = true;
          break;
       case 'd':
-         archive = false;
+         opt_archive = false;
          break;
       case ':':
          break;
@@ -140,7 +165,7 @@ int main(int argc, char **argv)
 
    debug = *conf[conf_debug];
 
-   if(report_only)
+   if(opt_report_only)
    {
       printf("Sorry.  Report only mode not implemented.\n");
       usage = true;
@@ -166,7 +191,7 @@ int main(int argc, char **argv)
    if(signal(SIGINT,  termination_handler) == SIG_IGN) signal(SIGINT,  SIG_IGN);
    if(signal(SIGHUP,  termination_handler) == SIG_IGN) signal(SIGHUP,  SIG_IGN);
 
-   _log_init(debug?"/tmp/archdb.log":"/var/log/garner/archdb.log", (debug?1:(verbose?4:0)));
+   _log_init(debug?"/tmp/archdb.log":"/var/log/garner/archdb.log", (debug?1:(opt_print?4:0)));
    
    _log(GENERAL, "");
    _log(GENERAL, "%s %s", NAME, BUILD);
@@ -218,24 +243,28 @@ int main(int argc, char **argv)
       strcat(report, "*** Processing interrupted. ***\n");
    }
 
-   if(result == DISC_SPACE)
+   switch(result)
    {
+   case 0: // Good
+   case RUN_ABORTED:
+      break;
+   case DISC_SPACE:
       _log(GENERAL,  "*** Processing aborted due to shortage of disc space. ***");
       strcat(report, "*** Processing aborted due to shortage of disc space. ***\n");
+      break;
+   default:
+      _log(GENERAL,  "*** Processing aborted due to%s error %d. ***",   ((result>0)?" database":""), result);
+      sprintf(zs,    "*** Processing aborted due to%s error %d. ***\n", ((result>0)?" database":""), result);
+      strcat(report, zs);
+      break;
    }
-
 
    sprintf(zs, "%48s: %s", "Database", conf[conf_db_name]);
    _log(GENERAL, zs);
    strcat(report, zs);
    strcat(report, "\n");
 
-   sprintf(zs, "%48s: %d days (Threshold %ld %s)", "Cut-off age", age, threshold, time_text(threshold, true));
-   _log(GENERAL, zs);
-   strcat(report, zs);
-   strcat(report, "\n");
-
-   sprintf(zs, "%48s: %s", "Old records were", archive?"Archived":"Deleted");
+   sprintf(zs, "%48s: %d days (Threshold %ld %s)", "Cut-off age", opt_age, threshold, time_text(threshold, true));
    _log(GENERAL, zs);
    strcat(report, zs);
    strcat(report, "\n");
@@ -246,21 +275,25 @@ int main(int argc, char **argv)
 
    for(i=0; i<MAXstats; i++)
    {
-      sprintf(zs, "%48s: %s", stats_category[i], commas_q(stats[i]));
+      char zs1[128];
+      strcpy(zs1, stats_category[i]);
+      strcat(zs1, opt_archive?" archived":" deleted");
+      sprintf(zs, "%48s: %s", zs1, commas_q(stats[i]));
       _log(GENERAL, zs);
       strcat(report, zs);
       strcat(report, "\n");
    }
 
+   if(run)
    {
 #define DB_REPORT_FORMAT "%30s: %s"
       MYSQL_RES * result;
       MYSQL_ROW row;
       // Database report
-      _log(GENERAL, "Size of live database after archiving:");
-      strcat(report, "\nSize of live database after archiving:\n");
+      _log(GENERAL, "Size of live database after processing:");
+      strcat(report, "\nSize of live database after processing:\n");
 
-      if(!db_query("SELECT COUNT(*) FROM cif_associations"))
+      if(run && !db_query("SELECT COUNT(*) FROM cif_associations"))
       {
          result = db_store_result();
          if((row = mysql_fetch_row(result))) 
@@ -272,7 +305,7 @@ int main(int argc, char **argv)
          }
          mysql_free_result(result);
       }
-      if(!db_query("SELECT COUNT(*) FROM cif_schedules"))
+      if(run && !db_query("SELECT COUNT(*) FROM cif_schedules"))
       {
          result = db_store_result();
          if((row = mysql_fetch_row(result))) 
@@ -284,7 +317,7 @@ int main(int argc, char **argv)
          }
          mysql_free_result(result);
       }
-      if(!db_query("SELECT COUNT(*) FROM cif_schedule_locations"))
+      if(run && !db_query("SELECT COUNT(*) FROM cif_schedule_locations"))
       {
          result = db_store_result();
          if((row = mysql_fetch_row(result))) 
@@ -296,7 +329,7 @@ int main(int argc, char **argv)
          }
          mysql_free_result(result);
       }
-      if(!db_query("SELECT COUNT(*) FROM cif_changes_en_route"))
+      if(run && !db_query("SELECT COUNT(*) FROM cif_changes_en_route"))
       {
          result = db_store_result();
          if((row = mysql_fetch_row(result))) 
@@ -308,7 +341,7 @@ int main(int argc, char **argv)
          }
          mysql_free_result(result);
       }
-      if(!db_query("SELECT COUNT(*) FROM trust_activation"))
+      if(run && !db_query("SELECT COUNT(*) FROM trust_activation"))
       {
          result = db_store_result();
          if((row = mysql_fetch_row(result))) 
@@ -320,7 +353,18 @@ int main(int argc, char **argv)
          }
          mysql_free_result(result);
       }
-      if(!db_query("SELECT COUNT(*) FROM trust_cancellation"))
+      if(run && !db_query("SELECT COUNT(*) FROM trust_activation_extra"))
+      {
+         result = db_store_result();
+         if((row = mysql_fetch_row(result))) 
+         {
+            sprintf(zs, DB_REPORT_FORMAT, "Trust activation extra records", commas(atol(row[0])));
+            _log(GENERAL, zs);
+            strcat(report, zs);
+            strcat(report, "\n");
+         }
+      }
+      if(run && !db_query("SELECT COUNT(*) FROM trust_cancellation"))
       {
          result = db_store_result();
          if((row = mysql_fetch_row(result))) 
@@ -331,7 +375,7 @@ int main(int argc, char **argv)
             strcat(report, "\n");
          }
       }
-      if(!db_query("SELECT COUNT(*) FROM trust_movement"))
+      if(run && !db_query("SELECT COUNT(*) FROM trust_movement"))
       {
          result = db_store_result();
          if((row = mysql_fetch_row(result))) 
@@ -343,7 +387,7 @@ int main(int argc, char **argv)
          }
          mysql_free_result(result);
       }
-      if(!db_query("SELECT COUNT(*) FROM trust_changeid"))
+      if(run && !db_query("SELECT COUNT(*) FROM trust_changeid"))
       {
          result = db_store_result();
          if((row = mysql_fetch_row(result))) 
@@ -355,12 +399,24 @@ int main(int argc, char **argv)
          }
          mysql_free_result(result);
       }
-      if(!db_query("SELECT COUNT(*) FROM trust_changeorigin"))
+      if(run && !db_query("SELECT COUNT(*) FROM trust_changeorigin"))
       {
          result = db_store_result();
          if((row = mysql_fetch_row(result))) 
          {
             sprintf(zs, DB_REPORT_FORMAT, "Trust change origin records", commas(atol(row[0])));
+            _log(GENERAL, zs);
+            strcat(report, zs);
+            strcat(report, "\n");
+         }
+         mysql_free_result(result);
+      }
+      if(run && !db_query("SELECT COUNT(*) FROM trust_changelocation"))
+      {
+         result = db_store_result();
+         if((row = mysql_fetch_row(result))) 
+         {
+            sprintf(zs, DB_REPORT_FORMAT, "Trust change location records", commas(atol(row[0])));
             _log(GENERAL, zs);
             strcat(report, zs);
             strcat(report, "\n");
@@ -378,8 +434,8 @@ int main(int argc, char **argv)
 #define MIN_QUANTITY 1
 #define THRESHOLD_VL   4000
 #define THRESHOLD_L    8000
-#define THRESHOLD_H   10000
-#define THRESHOLD_VH  14000
+#define THRESHOLD_H   32000
+#define THRESHOLD_VH  48000
 
 static int smart_loop(const word initial_quantity, int (*f)(word), const word stat)
 {
@@ -393,14 +449,15 @@ static int smart_loop(const word initial_quantity, int (*f)(word), const word st
 
    while (run)  
    {
-      if(time(NULL) - last_report > 10*60)
+      // Comfort report
+      if(time(NULL) - last_report > COMFORT_REPORT_PERIOD)
       {
          _log(GENERAL, "   Archived %s records so far.  Current batch size is %s.", commas_q(stats[stat]), commas(quantity));
-         last_report += 10*60;
+         last_report += COMFORT_REPORT_PERIOD;
       }
       elapsed = time_ms();
       reply = f(quantity);
-      if(reply) 
+      if(reply || !run) 
       {
          _log(GENERAL, "   Final batch size was %s.", commas(quantity));
          return reply;
@@ -423,23 +480,23 @@ static int smart_loop(const word initial_quantity, int (*f)(word), const word st
 static int perform(void)
 {
    struct tm * broken;
-   if(age)
+   if(opt_age)
    {
-      // Move threshold to 02:30
+      // Move threshold to 02:30 local
       // There must be a better way of doing this?
       threshold = time(NULL);
       broken = localtime(&threshold);
       broken->tm_hour = 12;
       threshold = timelocal(broken);
-      threshold -= 60*60*24*age;
+      threshold -= 60*60*24*opt_age;
       broken = localtime(&threshold);
       broken->tm_hour = 2; broken->tm_min = 30; broken->tm_sec = 0;
       threshold = timelocal(broken);
 
-      if(archive)
-         _log(GENERAL, "Archiving all records more than %d days old.  (Cut-off threshold is %s.)", age, time_text(threshold, true));
+      if(opt_archive)
+         _log(GENERAL, "Archiving all records more than %d days old.  Threshold is %s.", opt_age, time_text(threshold, true));
       else
-         _log(GENERAL, "Deleting all records more than %d days old.  (Cut-off threshold is %s.)", age, time_text(threshold, true));
+         _log(GENERAL, "Deleting all records more than %d days old.  Threshold is %s.", opt_age, time_text(threshold, true));
 
 
       int result;
@@ -462,6 +519,24 @@ static int perform(void)
       }
       if(!run) return RUN_ABORTED;
 
+      _log(GENERAL, "Processing cif schedule location orphans...");
+      result = smart_loop(10, &cif_schedule_locations_orphan, OrphanCIFScheduleLocation);
+      if(run && result != NONE_FOUND)
+      {
+         _log(CRITICAL, "Processing cif schedule location tables failed, error %d.", result);
+         return result;
+      }
+      if(!run) return RUN_ABORTED;
+
+      _log(GENERAL, "Processing cif schedule change en-route orphans...");
+      result = smart_loop(10, &cif_schedule_CR_orphan, OrphanCIFChangeEnRoute);
+      if(run && result != NONE_FOUND)
+      {
+         _log(CRITICAL, "Processing cif schedule change en-route tables failed, error %d.", result);
+         return result;
+      }
+      if(!run) return RUN_ABORTED;
+
       _log(GENERAL, "Processing TRUST records...");
       result = smart_loop(10, &trust_activation, TrustActivation);
       if(run && result != NONE_FOUND)
@@ -471,11 +546,20 @@ static int perform(void)
       }
       if(!run) return RUN_ABORTED;
       
+      _log(GENERAL, "Processing table trust_activation_extra orphans...");
+      result = smart_loop(10, &trust_activation_extra, OrphanTrustActivationExtra);
+      if(run && result != NONE_FOUND)
+      {
+         _log(CRITICAL, "Processing trust_activation_extra orphans failed, error %d.", result);
+         return result;
+      }
+      if(!run) return RUN_ABORTED;
+
       _log(GENERAL, "Processing table trust_cancellation orphans...");
       result = smart_loop(10, &trust_cancellation, OrphanTrustCancellation);
       if(run && result != NONE_FOUND)
       {
-         _log(CRITICAL, "Processing trust_cancellation failed, error %d.", result);
+         _log(CRITICAL, "Processing trust_cancellation orphans failed, error %d.", result);
          return result;
       }
       if(!run) return RUN_ABORTED;
@@ -484,7 +568,7 @@ static int perform(void)
       result = smart_loop(10, &trust_movement, OrphanTrustMovement);
       if(run && result != NONE_FOUND)
       {
-         _log(CRITICAL, "Processing trust_movement failed, error %d.", result);
+         _log(CRITICAL, "Processing trust_movement orphans failed, error %d.", result);
          return result;
       }
       if(!run) return RUN_ABORTED;
@@ -493,7 +577,7 @@ static int perform(void)
       result = smart_loop(10, &trust_changeorigin, OrphanTrustChangeOrigin);
       if(run && result != NONE_FOUND)
       {
-         _log(CRITICAL, "Processing trust_changeorigin failed, error %d.", result);
+         _log(CRITICAL, "Processing trust_changeorigin orphans failed, error %d.", result);
          return result;
       }
       if(!run) return RUN_ABORTED;
@@ -502,7 +586,16 @@ static int perform(void)
       result = smart_loop(10, &trust_changeid, OrphanTrustChangeID);
       if(run && result != NONE_FOUND)
       {
-         _log(CRITICAL, "Processing trust_changeid failed, error %d.", result);
+         _log(CRITICAL, "Processing trust_changeid orphans failed, error %d.", result);
+         return result;
+      }
+      if(!run) return RUN_ABORTED;
+
+      _log(GENERAL, "Processing table trust_changelocation orphans...");
+      result = smart_loop(10, &trust_changelocation, OrphanTrustChangeLocation);
+      if(run && result != NONE_FOUND)
+      {
+         _log(CRITICAL, "Processing trust_changelocation orphans failed, error %d.", result);
          return result;
       }
       if(!run) return RUN_ABORTED;
@@ -530,7 +623,7 @@ static int cif_associations(const word quantity)
    {
       {
          db_start_transaction();
-         if(archive)
+         if(opt_archive)
          {
             sprintf(q, "INSERT INTO cif_associations_arch SELECT * FROM cif_associations WHERE created = %s AND main_train_uid = '%s'", row[1], row[2]);
 
@@ -587,7 +680,7 @@ static int cif_schedules(const word quantity)
    {
       db_start_transaction();
 
-      if(archive)
+      if(opt_archive)
       {
          sprintf(q, "INSERT INTO cif_schedules_arch SELECT * FROM cif_schedules WHERE id = %s", row[0]);
 
@@ -614,7 +707,7 @@ static int cif_schedules(const word quantity)
       stats[CIFSchedule] += deleted;
       count += deleted;
 
-      if(archive)
+      if(opt_archive)
       {
          sprintf(q, "INSERT INTO cif_schedule_locations_arch SELECT * FROM cif_schedule_locations WHERE cif_schedule_id = %s", row[0]);
 
@@ -640,7 +733,7 @@ static int cif_schedules(const word quantity)
       stats[CIFScheduleLocation] += deleted;
       countl += deleted;
 
-      if(archive)
+      if(opt_archive)
       {
          sprintf(q, "INSERT INTO cif_changes_en_route_arch SELECT * FROM cif_changes_en_route WHERE cif_schedule_id = %s", row[0]);
 
@@ -653,7 +746,7 @@ static int cif_schedules(const word quantity)
          }
       }
 
-      sprintf(q, "DELETE FROM cif_schedule_locations WHERE cif_schedule_id = %s", row[0]);
+      sprintf(q, "DELETE FROM cif_changes_en_route WHERE cif_schedule_id = %s", row[0]);
       r = db_query(q);
       if(r) 
       {
@@ -669,6 +762,115 @@ static int cif_schedules(const word quantity)
    }
 
    _log(DEBUG, "cif_schedules(%d) has archived %d and %d records.", quantity, count, countl);
+
+   mysql_free_result(result);
+   if(count) return 0;
+
+   return NONE_FOUND;
+}
+
+static int cif_schedule_locations_orphan(const word quantity)
+{
+   char q[1024];
+   int r;
+   int count = 0;
+   MYSQL_RES * result;
+   MYSQL_ROW row;
+
+   // Note:  The query takes much longer than the processing, so we fiddle the quantity somewhat
+   sprintf(q, "SELECT DISTINCT cif_schedule_id FROM cif_schedule_locations AS l WHERE NOT EXISTS(SELECT * FROM cif_schedules AS s WHERE s.id = l.cif_schedule_id) LIMIT %d", quantity + 100);
+   r = db_query(q);
+   if(r) return r;
+
+   result = db_store_result();
+   db_errored = false;
+   while(run && !db_errored && (row = mysql_fetch_row(result)))
+   {
+      db_start_transaction();
+
+      if(opt_archive)
+      {
+         sprintf(q, "INSERT INTO cif_schedule_locations_arch SELECT * FROM cif_schedule_locations WHERE cif_schedule_id = %s", row[0]);
+
+         r = db_query(q);
+         if(r) 
+         {
+            mysql_free_result(result);
+            db_rollback_transaction();
+            return r;
+         }
+      }
+      
+      sprintf(q, "DELETE FROM cif_schedule_locations WHERE cif_schedule_id = %s", row[0]);
+      r = db_query(q);
+      if(r) 
+      {
+         mysql_free_result(result);
+         db_rollback_transaction();
+         return r;
+      }
+
+      word deleted = db_row_count();
+      db_commit_transaction();
+      stats[OrphanCIFScheduleLocation] += deleted;
+      count += deleted;
+   }
+
+   _log(DEBUG, "cif_schedule_locations_orphan(%d) has archived %d records.", quantity, count);
+
+   mysql_free_result(result);
+   if(count) return 0;
+
+   return NONE_FOUND;
+}
+
+static int cif_schedule_CR_orphan(const word quantity)
+{
+   char q[1024];
+   int r;
+   int count = 0;
+   MYSQL_RES * result;
+   MYSQL_ROW row;
+
+   sprintf(q, "SELECT DISTINCT cif_schedule_id FROM cif_changes_en_route AS l WHERE NOT EXISTS(SELECT * FROM cif_schedules AS s WHERE s.id = l.cif_schedule_id) LIMIT %d", quantity);
+   r = db_query(q);
+   if(r) return r;
+
+   result = db_store_result();
+   db_errored = false;
+   while(run && !db_errored && (row = mysql_fetch_row(result)))
+   {
+      db_start_transaction();
+
+      if(opt_archive)
+      {
+         sprintf(q, "INSERT INTO cif_changes_en_route_arch SELECT * FROM cif_changes_en_route WHERE cif_schedule_id = %s", row[0]);
+
+         r = db_query(q);
+         if(r) 
+         {
+            mysql_free_result(result);
+            db_rollback_transaction();
+            return r;
+         }
+      }
+      
+      sprintf(q, "DELETE FROM cif_changes_en_route WHERE cif_schedule_id = %s", row[0]);
+      r = db_query(q);
+      if(r) 
+      {
+         mysql_free_result(result);
+         db_rollback_transaction();
+         return r;
+      }
+
+      word deleted = db_row_count();
+      db_commit_transaction();
+      stats[OrphanCIFChangeEnRoute] += deleted;
+      count += deleted;
+   }
+
+   _log(DEBUG, "cif_schedule_CR_orphan(%d) has archived %d records.", quantity, count);
 
    mysql_free_result(result);
    if(count) return 0;
@@ -698,7 +900,7 @@ static int trust_activation(const word quantity)
       time_t created = atol(row[1]);
       strcpy(trust_id, row[0]);
 
-      if(archive)
+      if(opt_archive)
       {
          sprintf(q, "INSERT INTO trust_activation_arch SELECT * FROM trust_activation WHERE created < %ld AND created > %ld AND trust_id = '%s'", created + TRUST_TIME_RANGE, created - TRUST_TIME_RANGE, trust_id);
 
@@ -724,9 +926,9 @@ static int trust_activation(const word quantity)
       stats[TrustActivation] += deleted;
       count += deleted;
 
-      if(archive)
+      if(opt_archive)
       { 
-         sprintf(q, "INSERT INTO trust_cancellation_arch SELECT * FROM trust_cancellation WHERE created < %ld AND created > %ld AND trust_id = '%s'", created + TRUST_TIME_RANGE, created - TRUST_TIME_RANGE, trust_id);
+         sprintf(q, "INSERT INTO trust_cancellation_arch SELECT * FROM trust_cancellation WHERE created < %ld AND trust_id = '%s'", created + TRUST_TIME_RANGE, trust_id);
 
          r = db_query(q);
          if(r) 
@@ -737,7 +939,7 @@ static int trust_activation(const word quantity)
          }
       }
 
-      sprintf(q, "DELETE FROM trust_cancellation WHERE created < %ld AND created > %ld AND trust_id = '%s'", created + TRUST_TIME_RANGE, created - TRUST_TIME_RANGE, trust_id);
+      sprintf(q, "DELETE FROM trust_cancellation WHERE created < %ld AND trust_id = '%s'", created + TRUST_TIME_RANGE, trust_id);
       r = db_query(q);
       if(r) 
       {
@@ -749,9 +951,9 @@ static int trust_activation(const word quantity)
       deleted = db_row_count();
       stats[TrustCancellation] += deleted;
 
-      if(archive)
+      if(opt_archive)
       { 
-         sprintf(q, "INSERT INTO trust_movement_arch SELECT * FROM trust_movement WHERE created < %ld AND created > %ld AND trust_id = '%s'", created + TRUST_TIME_RANGE, created - TRUST_TIME_RANGE, trust_id);
+         sprintf(q, "INSERT INTO trust_movement_arch SELECT * FROM trust_movement WHERE created < %ld AND trust_id = '%s'", created + TRUST_TIME_RANGE, trust_id);
          
          r = db_query(q);
          if(r) 
@@ -762,7 +964,7 @@ static int trust_activation(const word quantity)
          }
       }
 
-      sprintf(q, "DELETE FROM trust_movement WHERE created < %ld AND created > %ld AND trust_id = '%s'", created + TRUST_TIME_RANGE, created - TRUST_TIME_RANGE, trust_id);
+      sprintf(q, "DELETE FROM trust_movement WHERE created < %ld AND trust_id = '%s'", created + TRUST_TIME_RANGE, trust_id);
       r = db_query(q);
       if(r) 
       {
@@ -774,9 +976,9 @@ static int trust_activation(const word quantity)
       deleted = db_row_count();
       stats[TrustMovement] += deleted;
 
-      if(archive)
+      if(opt_archive)
       { 
-         sprintf(q, "INSERT INTO trust_changeorigin_arch SELECT * FROM trust_changeorigin WHERE created < %ld AND created > %ld AND trust_id = '%s'", created + TRUST_TIME_RANGE, created - TRUST_TIME_RANGE, trust_id);
+         sprintf(q, "INSERT INTO trust_changeorigin_arch SELECT * FROM trust_changeorigin WHERE created < %ld AND trust_id = '%s'", created + TRUST_TIME_RANGE, trust_id);
 
          r = db_query(q);
          if(r) 
@@ -787,7 +989,7 @@ static int trust_activation(const word quantity)
          }
       }
 
-      sprintf(q, "DELETE FROM trust_changeorigin WHERE created < %ld AND created > %ld AND trust_id = '%s'", created + TRUST_TIME_RANGE, created - TRUST_TIME_RANGE, trust_id);
+      sprintf(q, "DELETE FROM trust_changeorigin WHERE created < %ld AND trust_id = '%s'", created + TRUST_TIME_RANGE, trust_id);
       r = db_query(q);
       if(r) 
       {
@@ -799,9 +1001,9 @@ static int trust_activation(const word quantity)
       deleted = db_row_count();
       stats[TrustChangeOrigin] += deleted;
 
-      if(archive)
+      if(opt_archive)
       {
-         sprintf(q, "INSERT INTO trust_changeid_arch SELECT * FROM trust_changeid WHERE created < %ld AND created > %ld AND trust_id = '%s'", created + TRUST_TIME_RANGE, created - TRUST_TIME_RANGE, trust_id);
+         sprintf(q, "INSERT INTO trust_changeid_arch SELECT * FROM trust_changeid WHERE created < %ld AND trust_id = '%s'", created + TRUST_TIME_RANGE, trust_id);
 
          r = db_query(q);
          if(r) 
@@ -812,7 +1014,7 @@ static int trust_activation(const word quantity)
          }
       }
 
-      sprintf(q, "DELETE FROM trust_changeid WHERE created < %ld AND created > %ld AND trust_id = '%s'", created + TRUST_TIME_RANGE, created - TRUST_TIME_RANGE, trust_id);
+      sprintf(q, "DELETE FROM trust_changeid WHERE created < %ld AND trust_id = '%s'", created + TRUST_TIME_RANGE, trust_id);
       r = db_query(q);
       if(r) 
       {
@@ -823,6 +1025,57 @@ static int trust_activation(const word quantity)
 
       deleted = db_row_count();
       stats[TrustChangeID] += deleted;
+
+      if(opt_archive)
+      {
+         sprintf(q, "INSERT INTO trust_changelocation_arch SELECT * FROM trust_changelocation WHERE created < %ld AND trust_id = '%s'", created + TRUST_TIME_RANGE, trust_id);
+
+         r = db_query(q);
+         if(r) 
+         {
+            mysql_free_result(result);
+            db_rollback_transaction();
+            return r;
+         }
+      }
+
+      sprintf(q, "DELETE FROM trust_changelocation WHERE created < %ld AND trust_id = '%s'", created + TRUST_TIME_RANGE, trust_id);
+      r = db_query(q);
+      if(r) 
+      {
+         mysql_free_result(result);
+         db_rollback_transaction();
+         return r;
+      }
+
+      deleted = db_row_count();
+      stats[TrustChangeLocation] += deleted;
+
+      if(opt_archive)
+      {
+         sprintf(q, "INSERT INTO trust_activation_extra_arch SELECT * FROM trust_activation_extra WHERE created < %ld AND trust_id = '%s'", created + TRUST_TIME_RANGE, trust_id);
+
+         r = db_query(q);
+         if(r) 
+         {
+            mysql_free_result(result);
+            db_rollback_transaction();
+            return r;
+         }
+      }
+
+      sprintf(q, "DELETE FROM trust_activation_extra WHERE created < %ld AND trust_id = '%s'", created + TRUST_TIME_RANGE, trust_id);
+      r = db_query(q);
+      if(r) 
+      {
+         mysql_free_result(result);
+         db_rollback_transaction();
+         return r;
+      }
+
+      deleted = db_row_count();
+      stats[TrustActivationExtra] += deleted;
+
       db_commit_transaction();
    }
 
@@ -834,25 +1087,35 @@ static int trust_activation(const word quantity)
 
 static int trust_cancellation(const word quantity)
 {
-   return trust_generic("trust_cancellation", quantity, OrphanTrustCancellation);
+   return trust_generic_orphan("trust_cancellation", quantity, OrphanTrustCancellation);
 }
 
 static int trust_movement(const word quantity)
 {
-   return trust_generic("trust_movement", quantity, OrphanTrustMovement);
+   return trust_generic_orphan("trust_movement", quantity, OrphanTrustMovement);
 }
 
 static int trust_changeorigin(const word quantity)
 {
-   return trust_generic("trust_changeorigin", quantity, OrphanTrustChangeOrigin);
+   return trust_generic_orphan("trust_changeorigin", quantity, OrphanTrustChangeOrigin);
 }
 
 static int trust_changeid(const word quantity)
 {
-   return trust_generic("trust_changeid", quantity, OrphanTrustChangeID);
+   return trust_generic_orphan("trust_changeid", quantity, OrphanTrustChangeID);
 }
 
-static int trust_generic(const char * const table, const word quantity, const word stat)
+static int trust_changelocation(const word quantity)
+{
+   return trust_generic_orphan("trust_changelocation", quantity, OrphanTrustChangeLocation);
+}
+
+static int trust_activation_extra(const word quantity)
+{
+   return trust_generic_orphan("trust_activation_extra", quantity, OrphanTrustActivationExtra);
+}
+
+static int trust_generic_orphan(const char * const table, const word quantity, const word stat)
 {
    char q[1024];
    int r;
@@ -873,7 +1136,7 @@ static int trust_generic(const char * const table, const word quantity, const wo
       db_start_transaction();
       last_timestamp = atol(row[0]);
 
-      if(archive)
+      if(opt_archive)
       {
          sprintf(q, "INSERT INTO %s_arch SELECT * FROM %s WHERE created = %s", table, table, row[0]);
 
@@ -902,7 +1165,7 @@ static int trust_generic(const char * const table, const word quantity, const wo
       _log(DEBUG, "Deleted %d records dated %s.", deleted, time_text(atol(row[0]), true));
    }
 
-   _log(DEBUG, "trust_generic(\"%s\", %d) has archived %d records.  Last datestamp was %s.", table, quantity, count, time_text(last_timestamp, true));
+   _log(DEBUG, "trust_generic_orphan(\"%s\", %d) has archived %d records.  Last datestamp was %s.", table, quantity, count, time_text(last_timestamp, true));
 
    mysql_free_result(result);
    if(count) return 0;
@@ -917,7 +1180,7 @@ static word check_space(void)
    {
       qword free = fstatus.f_bavail * fstatus.f_bsize;
       // Archive mode: 2GB, Delete mode: 200MB (Decimal units)
-      if((free < 2000000000LL && archive) || free < 200000000LL)
+      if((free < 2000000000LL && opt_archive) || free < 200000000LL)
       {
          _log(CRITICAL, "Disc free space %s bytes is too low.  Terminating run.", commas_q(free));
          return 1;

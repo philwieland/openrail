@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2013, 2016 Phil Wieland
+    Copyright (C) 2013, 2016, 2017 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -24,18 +24,20 @@
 #include <regex.h>
 
 typedef unsigned long long qword;
-typedef unsigned long      dword;
+typedef unsigned int       dword;
 typedef unsigned short     word;
 typedef unsigned char      byte;
+#define false 0
+#define true ~0
+
 enum config_keys {conf_db_server, conf_db_name, conf_db_user, conf_db_password, 
                   conf_nr_user, conf_nr_password, 
                   conf_report_email,
                   conf_stomp_topics, conf_stomp_topic_names, conf_stomp_topic_log,
                   conf_stompy_bin, conf_trustdb_no_deduce_act, conf_huyton_alerts,
-                  conf_debug, MAX_CONF};
+                  conf_live_server, conf_tddb_report_new, conf_debug, 
+                  MAX_CONF};
 extern char * conf[MAX_CONF];
-#define false 0
-#define true ~0
 enum log_types {GENERAL, PROC, DEBUG, MINOR, MAJOR, CRITICAL, ABEND};
 
 extern char * time_text(const time_t time, const byte local);
@@ -62,5 +64,6 @@ extern word ack_stompy(void);
 extern void close_stompy(void);
 extern void extract_match(const char * const source, const regmatch_t * const matches, const unsigned int match, char * result, const size_t max_length);
 extern char * system_call(const char * const command);
+extern char * show_inst_percent(qword * s, qword * t, const qword l, const qword n);
 
 #endif

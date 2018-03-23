@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2014, 2015 Phil Wieland
+    Copyright (C) 2014, 2015, 2017 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -47,6 +47,13 @@ BODY { background-color:white;
     stroke-width:4;
     fill:none;
 }
+.track-closed
+{
+    stroke:#000000;
+    stroke-width:4;
+    fill:none;
+    stroke-dasharray:9,3;
+}
 .arrow
 {
     stroke:black;
@@ -88,19 +95,27 @@ BODY { background-color:white;
 }
 .describer-text
 {
-font-size:12px;fill:#ffff00;stroke:#ffff00;stroke-opacity:1;stroke-width:0.7;font-family:Courier, monospace;
+font-size:12px;fill:#ffff00;stroke:#ffff00;stroke-opacity:1;stroke-width:0.7;font-family:Courier, monospace; cursor:default;
 }
 .describer-text-off
 {
-font-size:8px;fill:#ffffff;stroke:#ffffff;stroke-opacity:1;stroke-width:0.2;font-family:Courier, monospace;
+font-size:8px;fill:#ffffff;stroke:#ffffff;stroke-opacity:1;stroke-width:0.2;font-family:Courier, monospace; cursor:default;
 }
 .describer-text-route
 {
-font-size:12px;fill:#00ff00;stroke:#00ff00;stroke-opacity:1;stroke-width:0.7;font-family:Courier, monospace;
+font-size:12px;fill:#00ff00;stroke:#00ff00;stroke-opacity:1;stroke-width:0.7;font-family:Courier, monospace; cursor:default;
 }
 .info-text
 {
 font-size:12px;fill:#ffff00;stroke:#ffff00;stroke-opacity:1;stroke-width:0.7;font-family:Courier, monospace;
+}
+.banner-text
+{
+font-size:15px;fill:#000000;stroke:#000000;stroke-opacity:1;stroke-width:0.7;font-family:Courier, monospace;
+}
+.banner-text-small
+{
+font-size:14px;fill:#000000;stroke:#000000;stroke-opacity:1;stroke-width:0.7;font-family:Courier, monospace;
 }
 .title-text
 {
@@ -142,4 +157,16 @@ font-size:12px;fill:#ffff00;stroke:#ffff00;stroke-opacity:1;stroke-width:0.7;fon
     stroke:black;
     stroke-width:2;
     fill:none;
+}
+
+.tooltip
+{
+    font-size: 12px;
+}
+.tooltip_box
+{
+    fill: white;
+    stroke: black;
+    stroke-width: 1;
+    opacity: 1;
 }

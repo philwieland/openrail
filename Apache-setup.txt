@@ -6,17 +6,17 @@ a virtual host if desired.
 
 	DocumentRoot /var/www
 	<Directory />
-		Options FollowSymLinks
+		Options FollowSymLinks -Indexes
 		AllowOverride None
 	</Directory>
 	<Directory /var/www/>
-		Options Indexes FollowSymLinks MultiViews
+		Options -Indexes FollowSymLinks MultiViews
 		AllowOverride None
 		Order allow,deny
 		allow from all
 	</Directory>
 	<Directory /var/www/auxy>
-		Options Indexes FollowSymLinks MultiViews
+		Options -Indexes FollowSymLinks MultiViews
 		AllowOverride None
 		Order allow,deny
 		allow from all
@@ -30,7 +30,7 @@ a virtual host if desired.
 	<Directory "/usr/lib/cgi-bin">
 		AllowOverride None
                 AddHandler cgi-script .pl .cgi
-		Options +ExecCGI -MultiViews +SymLinksIfOwnerMatch
+		Options +ExecCGI -MultiViews +SymLinksIfOwnerMatch -Indexes
 		Order allow,deny
 		Allow from all      
 

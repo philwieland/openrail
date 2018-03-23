@@ -20,12 +20,16 @@
 
 #include <mysql.h>
 
+#define DB_MODE_NORMAL     0
+#define DB_MODE_FOUND_ROWS 0x0001
+
 extern word db_errored;
 
 extern word db_init(const char * const server, const char * const user, const char * const password, const char * const database);
 extern word db_query(const char * const query);
 extern MYSQL_RES * db_store_result(void);
 extern MYSQL_RES * db_use_result(void);
+extern qword db_affected_rows(void);
 extern word db_row_count(void);
 extern word db_connect(void);
 extern void db_disconnect(void);
@@ -37,3 +41,4 @@ extern word db_real_escape_string(char * to, const char * const from, const size
 extern word db_start_transaction(void);
 extern word db_commit_transaction(void);
 extern word db_rollback_transaction(void);
+extern void db_mode(const word flags);

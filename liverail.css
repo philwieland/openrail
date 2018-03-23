@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2013, 2015, 2016 Phil Wieland
+    Copyright (C) 2013, 2015, 2016, 2017 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -16,6 +16,7 @@
 
     phil@philwieland.com
 
+Build Y919n
 */
 
 BODY { color:black; background-color:white;
@@ -26,6 +27,7 @@ BODY { color:black; background-color:white;
               font-family: sans-serif;
             }
 	  
+/*
 .mini-button
 	{
 	height:14px;
@@ -51,6 +53,7 @@ BODY { color:black; background-color:white;
 {
         background-color: #00ff00;
 }
+*/
 .button
 	{
         font-weight: bold;
@@ -170,12 +173,27 @@ background-color:#ff8888; /* Red */
     background-color: #ddeedd;
 } 
 
+.control-panel-off
+{
+    color: black;
+    background-color: #dddddd;
+    vertical-align: top;
+} 
+
 .control-panel-row
 {
     color: black;
     background-color: #ddeedd;
     height: 26px;
 } 
+
+.control-panel-box
+{
+    padding:0px;
+    margin:0px;
+    box-sizing:border-box;
+    height:26px;
+}
 
 .cp-button
 {
@@ -210,11 +228,22 @@ font-family: "courier","monospace";
     text-decoration: none;
     display:block;
 }
+.linkbutton-summ
+{
+    /* height:11px;  13 if font is x-small */
+    color: black;
+    border: 0px;
+    text-decoration: none;
+}
 .linkbutton:hover
 {
         background-color: #00ff00;
 }
 .linkbutton-summary:hover
+{
+        background-color: #00ff00;
+}
+.linkbutton-summ:hover
 {
         background-color: #00ff00;
 }
@@ -273,6 +302,13 @@ text-align:center;
 background-color: #eeeeee;
 }
 
+/* Association info table on the train page. */
+.train-table-small tr
+{
+font-size: x-small;
+background-color: #eeeeee;
+}
+
 /* Schedule table on the train page. */
 .sched-table tr
 {
@@ -280,3 +316,36 @@ font-size: x-small;
 background-color:#c0e0ff;
 }
 
+table.result-table
+{
+    font-size: x-small; 
+    border-spacing: 2px;
+}
+table.result-table td 
+{
+    background:#c0e0ff;
+    padding: 1px 4px;
+}
+table.result-table th 
+{
+    font-size: x-small; 
+    background:#9090ff;
+    font-weight: bold;
+}
+/* Cells in even rows (2,4,6...) are one color */ 
+tr.result-table:nth-child(even) td { background: #dfefff; }
+
+/* Cells in odd rows (1,3,5...) are another (excludes header cells)  */ 
+tr.result-table:nth-child(odd)  td { background: #c0e0ff; } 
+
+.help-text-box
+{
+width:1200px;
+background-color:#eeeeee;
+}
+
+.licence
+{
+width: 1200px;
+font-size: x-small;
+}

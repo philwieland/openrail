@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2014, 2015, 2016 Phil Wieland
+    Copyright (C) 2014, 2015, 2016, 2017 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -30,14 +30,21 @@
 
 #include "misc.h"
 #include "db.h"
+#include "build.h"
 
 static void page(void);
 static void update(void);
 static void query(void);
 static char * location_name(const char * const tiploc);
+static char * show_handle(const dword h);
 
 #define NAME "livesig"
-#define BUILD "X328"
+
+#ifndef RELEASE_BUILD
+#define BUILD "Y930p"
+#else
+#define BUILD RELEASE_BUILD
+#endif
 
 word debug;
 enum {PageMode, UpdateMode, QueryMode} mode;
@@ -104,10 +111,10 @@ int main()
 
    // Set up log
    {
-      struct tm * broken = localtime(&now);
       char logfile[128];
 
-      sprintf(logfile, "/tmp/livesig-%04d-%02d-%02d.log", broken->tm_year + 1900, broken->tm_mon + 1, broken->tm_mday);
+      sprintf(logfile, "/var/log/garner/web/%s.log", NAME);
+      // Set to no logging at all (3) in normal mode.
       _log_init(logfile, debug?2:3);
    }
 
@@ -187,7 +194,7 @@ static void page(void)
    {
       printf("<p>Map %d not found.  <a href=\"/\">Please select a map from the list on the home page.</a></p>\n", map_id);
    }
-   printf("<table width=\"1260\"><tr><td align=\"left\" id=\"bottom-line\">&copy;2016 Phil Wieland.  Live data from Network Rail under <a href=\"http://www.networkrail.co.uk/data-feeds/terms-and-conditions\">this licence</a>.</td>\n");
+   printf("<table width=\"1260\"><tr><td align=\"left\" id=\"bottom-line\">&copy;2017 Phil Wieland.  Live data from Network Rail under <a href=\"http://www.networkrail.co.uk/data-feeds/terms-and-conditions\">this licence</a>.</td>\n");
    printf("<td align=\"right\"><a href=\"/\">Home Page and other maps</a></td><td width=\"10%%\">&nbsp;</td>\n");
    printf("<td align=\"right\"><a href=\"/about.html\">About livesig</a></td></tr></table>\n");
    printf("</body></html>\n\n");
@@ -196,8 +203,8 @@ static void page(void)
 static void update(void)
 {
    char query[1024];
-   word new_handle;
-   word handle = atoi(parameters[1]);
+   dword new_handle;
+   dword handle = strtol(parameters[1], NULL, 36);
    MYSQL_RES * result;
    MYSQL_ROW row;
 
@@ -209,7 +216,7 @@ static void update(void)
       result = db_store_result();
       if((row = mysql_fetch_row(result)) && row[0]) 
       {
-         new_handle = atoi(row[0]);
+         new_handle = atol(row[0]);
       }
       else
       {
@@ -226,8 +233,8 @@ static void update(void)
    if(handle > new_handle)
    {
       // Send all
-      printf("%d\n", new_handle);
-      sprintf(query, "SELECT * FROM td_states WHERE k LIKE '%s%%'", parameters[2]);
+      printf("%s\n", show_handle(new_handle));
+      sprintf(query, "SELECT * FROM td_states WHERE (SUBSTRING(k,3,1) = 'b' OR SUBSTRING(k,3,1) = 's') AND (k LIKE '%s%%'", parameters[2]);
       word p = 3;
       while(p < PARMS && parameters[p][0])
       {
@@ -236,6 +243,9 @@ static void update(void)
          strcat(query, q);
          p++;
       }
+      // Ordered so that blank ones come first, to avoid overfilling the arrays in client js.
+      // (This would FAIL if a k was present multiple times in td_states.)
+      strcat(query, ") ORDER BY v");
       if(!db_query(query))
       {
          result = db_store_result();
@@ -249,7 +259,7 @@ static void update(void)
    else
    {
       // Send updates
-      printf("%d\n", new_handle);
+      printf("%s\n", show_handle(new_handle));
       sprintf(query, "SELECT * FROM td_updates where handle > %d AND (k LIKE '%s%%'", handle, parameters[2]);
       word p = 3;
       while(p < PARMS && parameters[p][0])
@@ -259,7 +269,9 @@ static void update(void)
          strcat(query, q);
          p++;
       }
-      strcat(query, ")");
+      // Ordered so that blank ones come first, to avoid overfilling the arrays in client js.
+      // (This would FAIL if a k was present multiple times in td_updates.)
+      strcat(query, ") ORDER BY v");
       if(!db_query(query))
       {
          result = db_store_result();
@@ -276,11 +288,11 @@ static void update(void)
       char host[256], query[256], q[256];
       if(gethostname(host, sizeof(host))) host[0] = '\0';
       time_t last_actual = 0;
-      sprintf(query, "SELECT min(last_timestamp) FROM td_status WHERE d = '%s'", parameters[2]);
+      sprintf(query, "SELECT min(last_timestamp) FROM describers WHERE id = '%s'", parameters[2]);
       word p = 3;
       while(p < PARMS && parameters[p][0])
       {
-         sprintf(q, " OR d = '%s'", parameters[p]);
+         sprintf(q, " OR id = '%s'", parameters[p]);
          strcat(query, q);
          p++;
       }
@@ -296,14 +308,35 @@ static void update(void)
       }
       strcpy(query, time_text(last_actual, 1));
       query[14] = '\0'; // Chop off the seconds.
+
+      time_t now = time(NULL);
       // WA14 Changed 64 to 96
-      printf("%d|%s|%s|%s|%s\n", ((time(NULL) - last_actual < 96)?0:1), query, NAME, BUILD, host);
+      printf("%d|%s|%s|%s|%s", ((now - last_actual < 96)?0:1), query, NAME, BUILD, host);
+
+      {
+         // Banner
+         if(!db_query("SELECT banner, banner1, expires FROM banners WHERE type = 'diagram'"))
+         {
+            MYSQL_RES * result = db_store_result();
+            MYSQL_ROW row;
+            if((row = mysql_fetch_row(result)) && row[0][0])
+            {
+               time_t expires = atol(row[2]);
+               if(expires == 0 || expires > now)
+               {
+                  printf("|%s|%s", row[0], row[1]);
+               }
+            }
+            mysql_free_result(result);
+         }
+      }
+      printf("\n");
    }
 }
 
 static void query(void)
 {
-   char headcode[8], query[512], query1[256];
+   char headcode[8], re_ob_headcode[8], query[512], query1[256];
    MYSQL_RES * result0, * result1;
    MYSQL_ROW row0;
    dword schedule_id;
@@ -339,7 +372,7 @@ static void query(void)
 
             printf("Allocated to %c%c:%c%c", headcode[0], headcode[1], headcode[2], headcode[3]);
 
-            sprintf(query, "SELECT tiploc_code FROM cif_schedule_locations WHERE record_identity = 'LT' AND cif_schedule_id = %ld", schedule_id);
+            sprintf(query, "SELECT tiploc_code FROM cif_schedule_locations WHERE record_identity = 'LT' AND cif_schedule_id = %u", schedule_id);
             if(!db_query(query))
             {
                result0 = db_store_result();
@@ -354,9 +387,12 @@ static void query(void)
          }
          mysql_free_result(result0);
       }
+      printf("Allocated to %c%c:%c%c departure.\n", headcode[0], headcode[1], headcode[2], headcode[3]);
+      return;
    }
 
    // Reverse the de-obfuscation process
+   strcpy(re_ob_headcode, headcode);
    sprintf(query, "SELECT obfus_hc FROM obfus_lookup WHERE true_hc = '%s' ORDER BY created DESC LIMIT 1", headcode);
    if(!db_query(query))
    {
@@ -364,12 +400,12 @@ static void query(void)
       if((row0 = mysql_fetch_row(result0)) && row0[0][0]) 
       {
          _log(DEBUG, "query() Real headcode \"%s\", obfuscated headcode \"%s\" found in obfuscation lookup table.", headcode, row0[0]);
-         strcpy(headcode, row0[0]);
+         strcpy(re_ob_headcode, row0[0]);
       }
       mysql_free_result(result0);
    }
 
-   sprintf(query, "SELECT cif_schedule_id FROM trust_activation WHERE created > %ld AND SUBSTR(trust_id,3,4) = '%s' ORDER BY created DESC", now-(24*60*60), headcode);
+   sprintf(query, "SELECT cif_schedule_id FROM trust_activation WHERE created > %ld AND (SUBSTR(trust_id,3,4) = '%s' OR SUBSTR(trust_id,3,4) = '%s') ORDER BY created DESC", now-(24*60*60), headcode, re_ob_headcode);
 
    if(db_query(query))
    {
@@ -382,7 +418,7 @@ static void query(void)
    {
       schedule_id = atol(row0[0]);
 
-      sprintf(query, "SELECT * from cif_schedule_locations WHERE cif_schedule_id = %ld AND (0", schedule_id);
+      sprintf(query, "SELECT * from cif_schedule_locations WHERE cif_schedule_id = %u AND (0", schedule_id);
 
       word p = 2;
       while(p < PARMS && parameters[p][0])
@@ -408,7 +444,7 @@ static void query(void)
          mysql_free_result(result0);
          
          // Note we use WTT time, not GBTT.
-         sprintf(query, "SELECT tiploc_code, departure FROM cif_schedule_locations WHERE record_identity = 'LO' AND cif_schedule_id = %ld", schedule_id);
+         sprintf(query, "SELECT tiploc_code, departure FROM cif_schedule_locations WHERE record_identity = 'LO' AND cif_schedule_id = %u", schedule_id);
          if(!db_query(query))
          {
             result0 = db_store_result();
@@ -420,7 +456,7 @@ static void query(void)
             mysql_free_result(result0);
          }
      
-         sprintf(query, "SELECT tiploc_code FROM cif_schedule_locations WHERE record_identity = 'LT' AND cif_schedule_id = %ld", schedule_id);
+         sprintf(query, "SELECT tiploc_code FROM cif_schedule_locations WHERE record_identity = 'LT' AND cif_schedule_id = %u", schedule_id);
          if(!db_query(query))
          {
             result0 = db_store_result();
@@ -440,30 +476,29 @@ static void query(void)
    }
 
    _log(DEBUG, "query() Not found in database."); 
+
    // Translate some non-train ones.
-   if(headcode[0] >= '0' && headcode[0] <= '2' && 
-      headcode[1] >= '0' && headcode[1] <= '9' &&
-      headcode[2] >= '0' && headcode[2] <= '5' &&
-      headcode[3] >= '0' && headcode[3] <= '9')
-      printf("Train allocated to %c%c:%c%c departure.\n", headcode[0], headcode[1], headcode[2], headcode[3]);
-   else if(!strcmp(headcode, "142 "))
-      printf("Stabled Class 142 unit.\n");
-   else if(!strcmp(headcode, "156 "))
-      printf("Stabled Class 156 unit.\n");
-   else if(!strcmp(headcode, "185 "))
-      printf("Stabled Class 185 unit.\n");
-   else if(!strcmp(headcode, "319 "))
-      printf("Stabled Class 319 unit.\n");
-   else if(!strcmp(headcode, "BLOK"))
-      printf("Line blocked.\n");
-   else if((!strcmp(headcode, "DEMC")) || (!strcmp(headcode, "DEMI")))
-      printf("Failed train.\n");
-   else if(!strcmp(headcode, "1SET"))
-      printf("Stabled unit.\n");
-   else if(!strcmp(headcode, "2SET"))
-      printf("Two stabled units.\n");
-   else
-      printf("Not found.\n");
+
+   dword * key = (dword *) headcode;
+
+   switch(*key)
+   {
+   case 0x20323431: /* 142  */ printf("Stabled Class 142 unit.\n"); break;
+   case 0x20303531: /* 150  */ printf("Stabled Class 150 unit.\n"); break;
+   case 0x20363531: /* 156  */ printf("Stabled Class 156 unit.\n"); break;
+   case 0x20383531: /* 158  */ printf("Stabled Class 158 unit.\n"); break;
+   case 0x20353831: /* 185  */ printf("Stabled Class 185 unit.\n"); break;
+   case 0x20393133: /* 319  */ printf("Stabled Class 319 unit.\n"); break;
+   case 0x20303933: /* 390  */ printf("Stabled Class 390 unit.\n"); break;
+   case 0x2020424c: /* LB   */
+   case 0x4b4f4c42: /* BLOK */ printf("Line blocked.\n"); break;
+   case 0x434d4544: /* DEMC */
+   case 0x494d4544: /* DEMI */ printf("Failed train.\n"); break;
+   case 0x54455331: /* 1SET */ printf("Stabled unit.\n"); break;
+   case 0x54455332: /* 2SET */ printf("Two stabled units.\n"); break;
+   case 0x20544d45: /* EMT  */ printf("Stabled East Midlands Trains unit.\n"); break;
+   default: printf("Not found.\n"); break;
+   }
 }
 
 static char * location_name(const char * const tiploc)
@@ -511,3 +546,24 @@ static char * location_name(const char * const tiploc)
    }
    return response;
 }
+
+static char * show_handle(const dword h)
+{
+   const char convert[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+   static char result[16];
+   dword v = h;
+   word i = 15;
+
+   if(!v) 
+   {
+      return "0";
+   }
+   while(v)
+   {
+      result[i--] = convert[v%36];
+      v /= 36;
+   }
+   return result + i + 1;
+}
+
+      

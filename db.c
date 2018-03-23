@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2013, 2014, 2015 Phil Wieland
+    Copyright (C) 2013, 2014, 2015, 2016 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -27,6 +27,7 @@
 
 static MYSQL * mysql_object;
 static char server[256], user[256], password[256], database[256];
+static word mode_flags;
 
 /* Public data */
 word db_errored;
@@ -45,6 +46,7 @@ word db_init(const char * const s, const char * const u, const char * const p, c
    strcpy(database, d);
    mysql_object = 0;
    db_errored = false;
+   mode_flags = DB_MODE_NORMAL;
 
    // Test if database is there
    return db_connect();
@@ -87,6 +89,16 @@ MYSQL_RES * db_use_result(void)
    return NULL;
 }
 
+qword db_affected_rows(void)
+{
+   _log(PROC, "db_affected_rows()");
+   if(db_connect()) return 0LL;
+
+   if(mysql_object) return mysql_affected_rows(mysql_object);
+   
+   return 0LL;
+}
+
 word db_row_count(void)
 {
    // Returns number of rows affected by immediately preceding DELETE or UPDATE.
@@ -97,6 +109,7 @@ word db_row_count(void)
    MYSQL_ROW row;
    word rows;
 
+   _log(PROC, "db_row_count()");
    if(db_connect()) return 9;
 
    if (mysql_query(mysql_object, "SELECT row_count()"))
@@ -118,6 +131,7 @@ word db_row_count(void)
 
 word db_connect(void)
 {
+   dword flags;
    _log(PROC, "db_connect()");
 
    if(!mysql_object)
@@ -131,7 +145,10 @@ word db_connect(void)
          return 1;
       }
    
-      if(mysql_real_connect(mysql_object, server, user, password, database, 0, NULL, 0) == NULL) 
+      flags = 0;
+      if(mode_flags & 0x0001) flags += CLIENT_FOUND_ROWS;
+
+      if(mysql_real_connect(mysql_object, server, user, password, database, 0, NULL, flags) == NULL) 
       {
          _log(CRITICAL, "db_connect() error 2: Connect failed:  Error %u: %s", mysql_errno(mysql_object), mysql_error(mysql_object));
          db_errored = true;
@@ -224,6 +241,7 @@ dword db_insert_id(void)
 
 word db_real_escape_string(char * to, const char * const from, const size_t size)
 {
+   // NOTE:  Does not check whether to is large enough!
    if(db_connect()) return 9;
    
    return mysql_real_escape_string(mysql_object, to, from, size);
@@ -257,3 +275,13 @@ word db_rollback_transaction(void)
    return r;
 }
 
+extern void db_mode(const word flags)
+{
+   mode_flags = flags;
+
+   if(mysql_object) 
+   {
+      db_disconnect();
+      db_connect();
+   }
+}

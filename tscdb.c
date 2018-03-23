@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2013, 2014, 2015, 2016 Phil Wieland
+    Copyright (C) 2013, 2014, 2015, 2016, 2017 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -26,29 +26,31 @@
 #include <unistd.h>
 #include <sys/resource.h>
 #include <curl/curl.h>
+#include <sys/stat.h>
+#include <dirent.h>
 
 #include "misc.h"
 #include "jsmn.h"
 #include "db.h"
 #include "database.h"
+#include "build.h"
 
-#define NAME  "tscdb"
-#define BUILD "X328"
+#define NAME "tscdb"
 
-static void process_object(const char * object);
-static void process_timetable(const char * string, const jsmntok_t * tokens);
-static void process_schedule(const char * string, const jsmntok_t * tokens);
-static void process_create_schedule(const char * string, const jsmntok_t * tokens);
-static void jsmn_dump_tokens(const char * string, const jsmntok_t * tokens, const word object_index);
-static word fetch_file(void);
-static size_t cif_write_data(void *buffer, size_t size, size_t nmemb, void *userp);
+#ifndef RELEASE_BUILD
+#define BUILD "Y827p"
+#else
+#define BUILD RELEASE_BUILD
+#endif
 
-static word debug, fetch_all, run, tiploc_ignored, test_mode, verbose, opt_insecure, used_insecure;
+static word debug, fetch_all, run, tiploc_ignored, test_mode, opt_print, opt_insecure, used_insecure;
 static char * opt_filename;
 static char * opt_url;
 static char last_update_id[16];
 
-static time_t start_time;
+static time_t start_time, last_reported_time;
+
+#define TEMP_DIRECTORY "/var/tmp"
 
 // Stats
 enum stats_categories {Fetches, Sequence, 
@@ -88,6 +90,15 @@ static char* match_strings[MATCHES] =
       "\"sequence\":([[:digit:]]{1,12})",   // 1
    };
 
+static int file_is_tscdb_cif_download(const struct dirent *d);
+static void process_object(const char * object);
+static void process_timetable(const char * string, const jsmntok_t * tokens);
+static void process_schedule(const char * string, const jsmntok_t * tokens);
+static void process_create_schedule(const char * string, const jsmntok_t * tokens);
+static void jsmn_dump_tokens(const char * string, const jsmntok_t * tokens, const word object_index);
+static word fetch_file(void);
+static size_t cif_write_data(void *buffer, size_t size, size_t nmemb, void *userp);
+
 int main(int argc, char **argv)
 {
    char config_file_path[256];
@@ -95,14 +106,14 @@ int main(int argc, char **argv)
    opt_url = NULL;
    fetch_all = false;
    test_mode = false;
-   verbose = false;
+   opt_print = false;
    opt_insecure = false;
    used_insecure = false;
 
    strcpy(config_file_path, "/etc/openrail.conf");
    word usage = false;
    int c;
-   while ((c = getopt (argc, argv, ":c:u:f:tpih")) != -1)
+   while ((c = getopt (argc, argv, ":c:u:f:tpiah")) != -1)
       switch (c)
       {
       case 'c':
@@ -121,7 +132,7 @@ int main(int argc, char **argv)
          test_mode = true;
          break;
       case 'p':
-         verbose = true;
+         opt_print = true;
          break;
       case 'i':
          opt_insecure = true;
@@ -153,6 +164,7 @@ int main(int argc, char **argv)
              "default    Fetch latest update.\n"
              "-u <url>   Fetch from specified URL.\n"
              "-f <file>  Use specified file.  (Must already be decompressed.)\n"
+             "-a         Fetch latest full timetable.\n"
              "Actions:\n"
              "default    Apply data to database.\n"
              "-t         Report datestamp on download or file, do not apply to database.\n"
@@ -169,7 +181,7 @@ int main(int argc, char **argv)
 
    debug = *conf[conf_debug];
   
-   _log_init(debug?"/tmp/tscdb.log":"/var/log/garner/tscdb.log", (debug?1:(verbose?4:0)));
+   _log_init(debug?"/tmp/tscdb.log":"/var/log/garner/tscdb.log", (debug?1:(opt_print?4:0)));
    
    _log(GENERAL, "");
    _log(GENERAL, "%s %s", NAME, BUILD);
@@ -213,21 +225,38 @@ int main(int argc, char **argv)
       for(i = 0; i < MAXStats; i++) { stats[i] = 0; }
    }
 
-   if(fetch_file())
+   word fetched = false;
+   while(run && !fetched)
    {
-      if(opt_url || opt_filename)
+      if(stats[Fetches])
       {
-         _log(GENERAL, "Failed to find data.");
-         exit(1);
+         _log(GENERAL, "Waiting before retry...");
+         time_t delay = 60 * 32;
+         while(run && delay--) sleep(1);
       }
+
+      if(fetch_file())
       {
-         char report[256];
-         _log(GENERAL, "Failed to fetch file.");
+         if(opt_url || opt_filename)
+         {
+            _log(GENERAL, "Failed to find data.");
+            exit(1);
+         }
          
-         sprintf(report, "Failed to collect timetable update after %lld attempts.", stats[Fetches]);
-         email_alert(NAME, BUILD, "Timetable Update Failure Report", report);
+         _log(GENERAL, "Failed to fetch file.");
+            
+         if(stats[Fetches] > 6)
+         {
+            char report[256];
+            sprintf(report, "Failed to collect timetable update after %lld attempts.", stats[Fetches]);
+            email_alert(NAME, BUILD, "Timetable Update Failure Report", report);
+            exit(1);
+         }
       }
-      exit(1);
+      else
+      {
+         fetched = true;
+      }
    }
 
    char in_q = 0;
@@ -259,6 +288,7 @@ int main(int argc, char **argv)
       exit(1);
    }
 
+   last_reported_time = time(NULL);
 
    if(test_mode)
    {
@@ -274,6 +304,17 @@ int main(int argc, char **argv)
       if(db_start_transaction()) _log(CRITICAL, "Failed to initiate database transaction.");
       while((buf_end = fread(buffer, 1, MAX_BUF, fp_result)) && run && !db_errored)
       {
+         // Comfort report
+#define COMFORT_REPORT_PERIOD ((opt_print?1:10) * 60)
+         time_t now = time(NULL);
+         if(now - last_reported_time > COMFORT_REPORT_PERIOD)
+         {
+            char zs[64];
+            strcpy(zs, commas_q(stats[ScheduleCreate]));
+            _log(GENERAL, "Progress:  Processed %s schedules, updated %s TSCs.  Working...", zs, commas_q(stats[TSCUpdate]));
+            last_reported_time += COMFORT_REPORT_PERIOD;
+         }
+
          for(ibuf = 0; ibuf < buf_end && run && !db_errored; ibuf++)
          {
             c = buffer[ibuf];
@@ -354,7 +395,46 @@ int main(int argc, char **argv)
 
    email_alert(NAME, BUILD, "Timetable Update Report", report);
 
+   _log(GENERAL, "Tidying temporary files.");
+   {
+      struct dirent **eps;
+      char filepath[1024];
+      struct stat buf;
+      word i;
+      int rr;
+      int n = scandir(TEMP_DIRECTORY, &eps, file_is_tscdb_cif_download, NULL);
+      if(n >= 0)
+      {
+         for(i = 0; i < n; i++)
+         {
+            sprintf(filepath, "%s/%s", TEMP_DIRECTORY, eps[i]->d_name);
+            stat(filepath, &buf);
+            // Keep n day's files          v--Put keep-1 here
+            if(buf.st_mtime < start_time - 1*24*60*60 - 4*60*60)
+            {
+               _log(GENERAL, "   Deleting \"%s\".", filepath);
+               rr = unlink(filepath);
+               _log(rr?MAJOR:DEBUG, "   unlink returned %d.", rr);
+            }
+            free(eps[i]);
+         }
+         free(eps);
+      }
+      else
+      {
+         _log(MAJOR, "scandir() returned %d", n);
+      }
+   }
+
    exit(0);
+}
+
+static int file_is_tscdb_cif_download(const struct dirent *d)
+{
+   if((strlen(d->d_name) < 17) ||
+      (strncmp(d->d_name, "tscdb-cif-", 10))) return 0;
+   
+   return 1;
 }
 
 static void process_object(const char * object_string)
@@ -457,9 +537,6 @@ static void process_schedule(const char * string, const jsmntok_t * tokens)
    }
 }
 
-#define EXTRACT_APPEND_SQL(a) { jsmn_find_extract_token(string, tokens, 0, a, zs, sizeof( zs )); sprintf(zs1, ", \"%s\"", zs); strcat(query, zs1); }
-
-
 static void process_create_schedule(const char * string, const jsmntok_t * tokens)
 {
    char zs[128];
@@ -479,8 +556,14 @@ static void process_create_schedule(const char * string, const jsmntok_t * token
    time_t end_date   = parse_datestamp(zs);
    EXTRACT("CIF_train_service_code", tsc);
 
-   sprintf(query, "SELECT id FROM cif_schedules WHERE CIF_stp_indicator = '%s' AND CIF_train_uid = '%s' AND schedule_start_date = %ld AND schedule_end_date = %ld AND CIF_train_service_code = '' AND update_id = %s", stp_indicator, uid, start_date, end_date, last_update_id);
-
+   if(fetch_all)
+   {
+      sprintf(query, "SELECT id FROM cif_schedules WHERE CIF_stp_indicator = '%s' AND CIF_train_uid = '%s' AND schedule_start_date = %ld AND schedule_end_date = %ld AND CIF_train_service_code = '' AND deleted > %ld", stp_indicator, uid, start_date, end_date, start_time);
+   }
+   else
+   {
+      sprintf(query, "SELECT id FROM cif_schedules WHERE CIF_stp_indicator = '%s' AND CIF_train_uid = '%s' AND schedule_start_date = %ld AND schedule_end_date = %ld AND CIF_train_service_code = '' AND update_id = %s AND deleted > %ld", stp_indicator, uid, start_date, end_date, last_update_id, start_time);
+   }
    if(!db_query(query))
    {
       result0 = db_store_result();
@@ -489,12 +572,11 @@ static void process_create_schedule(const char * string, const jsmntok_t * token
          sprintf(query, "UPDATE cif_schedules SET CIF_train_service_code = '%s' WHERE id = %s", tsc, row0[0]);
          db_query(query);
          stats[TSCUpdate]++;
-         _log(GENERAL, "Updated schedule %s (%s %s) with TSC \"%s\".", row0[0], uid, stp_indicator, tsc);
+         _log(DEBUG, "Updated schedule %s (%s %s) with TSC \"%s\".", row0[0], uid, stp_indicator, tsc);
       }
       mysql_free_result(result0);
    }        
 }
-
 
 static void jsmn_dump_tokens(const char * string, const jsmntok_t * tokens, const word object_index)
 {
@@ -588,18 +670,18 @@ static word fetch_file(void)
 
       if(opt_url || debug)
       {
-         sprintf(filepathz, "/tmp/tscdb-cif-fetch-%ld.gz", now);
-         sprintf(filepath,  "/tmp/tscdb-cif-fetch-%ld",    now);
+         sprintf(filepathz, "%s/tscdb-cif-fetch-%ld.gz", TEMP_DIRECTORY, now);
+         sprintf(filepath,  "%s/tscdb-cif-fetch-%ld",    TEMP_DIRECTORY, now);
       }
       else if(fetch_all)
       {
-         sprintf(filepathz, "/tmp/tscdb-cif-all-%02d-%02d-%02d-%s.gz", broken->tm_year%100, broken->tm_mon + 1, broken->tm_mday, weekdays[broken->tm_wday]);
-         sprintf(filepath,  "/tmp/tscdb-cif-all-%02d-%02d-%02d-%s",    broken->tm_year%100, broken->tm_mon + 1, broken->tm_mday, weekdays[broken->tm_wday]);
+         sprintf(filepathz, "%s/tscdb-cif-all-%02d-%02d-%02d-%s.gz", TEMP_DIRECTORY, broken->tm_year%100, broken->tm_mon + 1, broken->tm_mday, weekdays[broken->tm_wday]);
+         sprintf(filepath,  "%s/tscdb-cif-all-%02d-%02d-%02d-%s",    TEMP_DIRECTORY, broken->tm_year%100, broken->tm_mon + 1, broken->tm_mday, weekdays[broken->tm_wday]);
       }
       else
       {
-         sprintf(filepathz, "/tmp/tscdb-cif-%02d-%02d-%02d-%s.gz", broken->tm_year%100, broken->tm_mon + 1, broken->tm_mday, weekdays[broken->tm_wday]);
-         sprintf(filepath,  "/tmp/tscdb-cif-%02d-%02d-%02d-%s",    broken->tm_year%100, broken->tm_mon + 1, broken->tm_mday, weekdays[broken->tm_wday]);
+         sprintf(filepathz, "%s/tscdb-cif-%02d-%02d-%02d-%s.gz", TEMP_DIRECTORY, broken->tm_year%100, broken->tm_mon + 1, broken->tm_mday, weekdays[broken->tm_wday]);
+         sprintf(filepath,  "%s/tscdb-cif-%02d-%02d-%02d-%s",    TEMP_DIRECTORY, broken->tm_year%100, broken->tm_mon + 1, broken->tm_mday, weekdays[broken->tm_wday]);
       }
 
       if(!(fp_result = fopen(filepathz, "w")))
@@ -618,7 +700,7 @@ static word fetch_file(void)
       curl_easy_setopt(curlh, CURLOPT_CONNECTTIMEOUT,       128L);
 
       // Debugging prints.
-      // curl_easy_setopt(curlh, CURLOPT_VERBOSE,               1L);
+      if(debug) curl_easy_setopt(curlh, CURLOPT_VERBOSE,               1L);
 
       // URL and login
       curl_easy_setopt(curlh, CURLOPT_URL,     url);
@@ -690,7 +772,7 @@ static word fetch_file(void)
          }
          return 1;
       }
-      _log(GENERAL, "Decompressed.");
+      _log(GENERAL, "Decompressed.  Checking file contents...");
    }
    else
    {

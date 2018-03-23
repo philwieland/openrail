@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2013, 2014, 2015 Phil Wieland
+    Copyright (C) 2013, 2014, 2015, 2017 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -23,12 +23,13 @@ var tick_period = 1024; /* ms between ticks */
 var refresh_tick_limit = 4; /* Ticks between updates */ 
 var refresh_tick_count = refresh_tick_limit;
 var updating_timeout = 0;
-var got_handle = 32767;
+var reset_handle = 'ZZZZZ';
+var got_handle = reset_handle;
 var req;
 var req_cache = null;
 var req_cache_k = '';
 var req_cache_timeout = 0;
-var feed_failed = 0;
+var feed_fault = 0; // 0-OK, 1-Latency problem, 2-Failed to contact server, 3-Server closed.
 var progress = 0;
 var tick_timer;
 var saved_caption = 'livesig';
@@ -42,6 +43,9 @@ var clock_object;
 // This contains <describer>/<describer>/<describer> ...
 var describers;
 var tiplocs;
+var tt1;
+var tt2;
+var ttb;
 
 var SLOTS = 32;
 var displayed = new Array(SLOTS);
@@ -56,6 +60,8 @@ var cache_c   = new Array(SLOTS); // Created.
 var qt = 0;
 var qc = 0;
 var lcd = 'None';
+var dfull = 'None';
+var flag = 0;
 
 function startup()
 {
@@ -77,18 +83,38 @@ function startup()
    // Get describers and tiplocs
    describers = svg_doc.getElementById('info0').textContent;
    tiplocs = svg_doc.getElementById('info1').textContent;
-   for(i=0; i < SLOTS; i++)
+   // "Tooltip" elements for berth and signal popups
+   tt1 = svg_doc.getElementById('tt1');
+   tt2 = svg_doc.getElementById('tt2');
+   ttb = svg_doc.getElementById('ttb');
+   for(i = 0; i < SLOTS; i++)
    {
       displayed[i] = '';
       cache_k[i] = '';
    }
-   tick_timer = setInterval('tick()', tick_period);
+   if(describers === '')
+   {
+      // Non-updating map
+      var cap = svg_doc.getElementById('caption');
+      cap.style.fill = 'black';
+      cap.textContent = 'There is no live data on this diagram.';
+      var b  = svg_doc.getElementById('banner');
+      var b0 = svg_doc.getElementById('banner0');
+      var b1 = svg_doc.getElementById('banner1');
+      if(b ) {  b.textContent = ''; }
+      if(b0) { b0.textContent = ''; }
+      if(b1) { b1.textContent = ''; }
+   }
+   else
+   {
+      tick_timer = setInterval('tick()', tick_period);
+   }
 }
 
 function tick()
 {
    // Check if display is visible
-   if ((typeof document.hidden !== "undefined") && (document.hidden))
+   if (((typeof document.hidden !== "undefined") && (document.hidden)))
    {
       if(visible)
       {
@@ -97,11 +123,11 @@ function tick()
          visible = false;
       }
       hidden_count++;
-      if(hidden_count == 4096)
+      if(hidden_count === 4096)
       {
          // Been hidden for over an hour.  Clear expired data.
          var i;
-         for(i=0; i < SLOTS; i++)
+         for(i = 0; i < SLOTS; i++)
          {
             displayed[i] = '';
             cache_k[i] = '';
@@ -110,7 +136,6 @@ function tick()
                svg_doc.getElementById('info' + i).textContent = '';
             }
          }
-         feed_failed = 0;
       }
    }
    else
@@ -118,30 +143,21 @@ function tick()
       if(!visible)
       {
          // Becoming visible
-         got_handle = 32767;
+         got_handle = reset_handle;
          refresh_tick_count = refresh_tick_limit;
          visible = true;
       }
    }
 
    display_debug();
+   if(visible) display_caption();
 
-   if(++refresh_tick_count < refresh_tick_limit) return;
-   refresh_tick_count = 0;
-
-   // Update clock
-   if(visible && clock_object)
-   {
-      var now = new Date();
-      clock_object.textContent = now.toTimeString().substring(0, 5);
-   }
-   
    if(req_cache_timeout)
    {
       if(req_cache_timeout++ > 10)
       {
          // Cache update has timed out
-         qt++; // Debug
+         qt++; // Debug count query request timeouts.
          if(req_cache) req_cache.abort();
          req_cache = null;
          req_cache_timeout = 0;
@@ -157,12 +173,23 @@ function tick()
          if(req) req.abort();
          req = null;
          updating_timeout = 0;
-         svg_doc.getElementById('caption').style.fill = 'red';
-         svg_doc.getElementById('caption').textContent = " Unable to contact server.";
-         got_handle = 32767;
+         feed_fault = 2;
+         got_handle = reset_handle;
+         progress_colour('red');
       }
    }
-   else if(visible)
+
+   if(++refresh_tick_count < refresh_tick_limit) return;
+   refresh_tick_count = 0;
+
+   // Update clock
+   if(visible && clock_object)
+   {
+      var now = new Date();
+      clock_object.textContent = now.toTimeString().substring(0, 5);
+   }
+   
+   if(visible && !updating_timeout)
    {
       updating_timeout = 1;
 
@@ -174,18 +201,23 @@ function tick()
          {
             if(req.status == 200)
             {
+               progress_colour('limegreen');
                process_updates(req.responseText);
+               updating_timeout = 0;
                req = null;
             }
             else
             {
                // Failed.  No action, leave for timeout to sort it out.
                req = null;
+               feed_fault = 2;
+               progress_colour('red');
             }
          }
       }
       req.open('GET', url_base + 'U/' + got_handle + '/' + describers, true);
       req.send(null);
+      progress_colour('orange');
    }
 }
 
@@ -196,7 +228,7 @@ function process_updates(text)
 
    var index = 1; // Index of first data line.
 
-   if(text.substring(0, 8) != '<!DOCTYP')
+   if(text.substring(0, 8) !== '<!DOCTYP')
    {
       got_handle = results[index - 1];
       while(results.length > index && results[index].length > 4 && (results[index].substr(2, 1) === 'b' || results[index].substr(2, 1) === 's'))
@@ -208,38 +240,51 @@ function process_updates(text)
             {
                update_berth(parts[0], parts[1]);
             }
-            else
+            else if(parts[0].length == 5)
             {
-               update_signal(parts[0], parts[1]);
+               update_signals(parts[0], parts[1]);
             }
          }
       }
-   }
-   
-   update_panel();
-   var caption = results[index].split('|');
-   if((text.substring(0, 8) == '<!DOCTYP') || caption[0] > 0)
-   {
-      feed_failed = 10;
-   }
-   if(caption.length > 4)
-   {
-      saved_caption = 'Updated to ' + caption[1] + ' by ' + caption[2] + ' ' + caption[3] + ' at ' + caption[4];
-   }
-   
-   if(feed_failed)
-   {
-      feed_failed--;
-      svg_doc.getElementById('caption').style.fill = 'red';
-      svg_doc.getElementById('caption').textContent = saved_caption + " - Data feed problems.";
+
+      var caption = results[index].split('|');
+      if(caption[0] > 0) 
+      {
+         feed_fault = 1;
+      }
+      else
+      {
+         feed_fault = 0;
+      }
+      if(caption.length > 4)
+      {
+         saved_caption = 'Updated to ' + caption[1] + ' by ' + caption[2] + ' ' + caption[3] + ' at ' + caption[4];
+      }
+
+      var b  = svg_doc.getElementById('banner');
+      var b0 = svg_doc.getElementById('banner0');
+      var b1 = svg_doc.getElementById('banner1');
+      if(caption.length > 6)
+      {
+         if(b ) {  b.textContent = caption[5] + '  ' + caption[6]; }
+         if(b0) { b0.textContent = caption[5]; }
+         if(b1) { b1.textContent = caption[6]; }
+      }
+      else
+      {
+         if(b ) {  b.textContent = ''; }
+         if(b0) { b0.textContent = ''; }
+         if(b1) { b1.textContent = ''; }
+      }
+
+      display_panel();
    }
    else
    {
-      svg_doc.getElementById('caption').style.fill = 'black';
-      svg_doc.getElementById('caption').textContent = saved_caption;
+      feed_fault = 3;
+      progress_colour('red');
    }
-   updating_timeout = 0;
-
+   
    // Progress wheel
    progress += 40;
    if(progress > 359) progress -= 360;
@@ -247,37 +292,61 @@ function process_updates(text)
    svg_doc.getElementById('progress').setAttribute('transform', 'rotate(' + progress + ',' + progress_points[0] + ',' + progress_points[1] + ')');
 }
 
+function display_caption()
+{
+   var cap = svg_doc.getElementById('caption');
+   switch(feed_fault)
+   {
+   case 0: // Good
+      cap.style.fill = 'black';
+      cap.textContent = saved_caption;
+      break;
+   case 1: // Latency problem
+      cap.style.fill = 'red';
+      cap.textContent = saved_caption + " - Data feed problems.";
+      break;
+   case 2: // Connect timeout
+      cap.style.fill = 'red';
+      cap.textContent = 'Unable to contact server.  Retrying...';
+      break;
+   case 3: // Server closed.
+      cap.style.fill = 'red';
+      cap.textContent = 'Data feed is shut down.';
+      break;
+   }
+}
 function update_berth(k, v)
 {
    var i;
    if(svg_doc.getElementById(k))
    {
       var old = svg_doc.getElementById(k).textContent;
-      if(old != '')
+      if(old !== '')
       {
-         for(i=0; i < SLOTS; i++)
+         for(i = 0; i < SLOTS; i++)
          {
-            if(displayed[i] == old)
+            if(displayed[i] === old)
             {
                displayed[i] = '';
-               i = SLOTS;
+               i = SLOTS * 2;
             }
          }
       }
-      if(v != '' && v != 'SLOW' && v != 'FAST')
+      if(v !== '' && v !== 'SLOW' && v !== 'FAST')
       {
          // Insert new value into displayed list.  If list is full, ignore the new value.
          // Note - If there are two locations with the same headcode, it will appear in the list twice.
-         for(i=0; i < SLOTS; i++)
+         for(i = 0; i < SLOTS; i++)
          {
-            if(!displayed[i] || displayed[i] == '')
+            if(displayed[i] === '')
             {
                displayed[i] = v;
-               i = SLOTS;
+               i = SLOTS * 2;
             }
          }
+         if(i == SLOTS) dfull = v;
       }
-      if(v == '')
+      if(v === '')
       {
          svg_doc.getElementById(k).textContent = v;
          svg_doc.getElementById(k).style.opacity = '0.0';
@@ -289,6 +358,18 @@ function update_berth(k, v)
          svg_doc.getElementById(k).style.opacity = '1.0';
          if(svg_doc.getElementById(k + 'off')) svg_doc.getElementById(k + 'off').style.opacity = '0.0';
       }
+   }
+}
+
+function update_signals(k, v)
+{
+   var i;
+   for(i=0; i<8; i++)
+   {
+      if(v === '')
+         update_signal('' + k + i, '');
+      else
+         update_signal('' + k + i, '' + ((v>>i) & 0x01));
    }
 }
 
@@ -314,7 +395,7 @@ function update_signal(k, v)
    }
 }
 
-function update_panel()
+function display_panel()
 {
    var i;
    var j;
@@ -325,15 +406,16 @@ function update_panel()
    displayed.sort();
 
    j = 0;
-   for(i=0; i < SLOTS; i++)
+   for(i = 0; i < SLOTS; i++)
    {
-      if(displayed[i] != '' && displayed[i] != last)
+      if(displayed[i] !== '' && displayed[i] !== last)
       {
          last = displayed[i];
          panel_row = svg_doc.getElementById('info' + j);
          if(panel_row)
          {
             cache_result = cached(displayed[i]);
+            /* panel_row.textContent = i + ' ' + displayed[i] + '-' + cache_result[0]; */
             panel_row.textContent = displayed[i] + ' ' + cache_result[0];
             if(cache_result[1])
             {
@@ -365,7 +447,7 @@ function cached(k)
    var result = ['', 1];
    for(i = 0; i < SLOTS; i++)
    {
-      if(cache_k[i] == k)
+      if(cache_k[i] === k)
       {
          // Cache hit.
          cache_u[i] = now;
@@ -373,7 +455,7 @@ function cached(k)
          {
             // We've got a hit but it needs refreshing
             // Leave it in the cache and return it as the result, but request a reload.
-            lcd = k; // Debug
+            lcd = k; // Debug Last cache entry timed out
             result = [cache_v[i], 0];
          }
          else
@@ -400,16 +482,16 @@ function cached(k)
       {
          if(req_cache.readyState == 4)
          {
-            if(req_cache.status == 200)
+            if(req_cache.status == 200 && req_cache.responseText.substring(0, 8) !== '<!DOCTYP')
             {
                update_cache(req_cache_k,req_cache.responseText);
                req_cache = null;
                req_cache_timeout = 0;
-               if(visible) update_panel();
+               if(visible) display_panel();
             }
             else
             {
-               // Failed.  No action, try again on next tick.
+               // Failed, or site shut down.  No action, try again on next tick.
                req_cache = null;
                req_cache_timeout = 0;
             }
@@ -418,7 +500,6 @@ function cached(k)
       req_cache.open('GET', url_base + 'Q/' + k + '/' + tiplocs, true);
       req_cache.send(null);
       req_cache_timeout = 1;
-      return result;
    }
    return result;
 }
@@ -434,19 +515,13 @@ function update_cache(k, v)
    var empty = SLOTS;
    var results = v.split("\n");
 
-   // Handle closed down web site
-   if(v.substring(0, 8) == '<!DOCTYP')
-   {
-      return;
-   }
-
    for(i = 0; i < SLOTS; i++)
    {
-      if(cache_k[i] == k)
+      if(cache_k[i] === k)
       {
          hit = i;
       }
-      else if(cache_k[i] == '')
+      else if(cache_k[i] === '')
       {
          empty = i;
       }
@@ -473,7 +548,7 @@ function update_cache(k, v)
    {
       cache_c[chosen] = now;
    }
-   if(results[0] == 'Not found.')
+   if(results[0] === 'Not found.')
    {
       cache_e[chosen] = now + 8*60*1000; // 8 minutes.
    }
@@ -482,27 +557,99 @@ function update_cache(k, v)
       cache_e[chosen] = now + 64*60*1000; // 64 minutes.
    }
    cache_e[chosen] += Math.floor(Math.random() * 256 * 1000); // Up to 256 seconds.
+   
 }
 
 function display_debug()
 {
+   if(!svg_doc.getElementById('debug')) return;
+
    var i;
    var cache_occupancy = 0;
    var display_count = 0;
 
-   if(!svg_doc.getElementById('debug')) return;
+   flag++;
+   flag %= 10;
 
    for(i = 0; i < SLOTS; i++)
    {
-      if(cache_k[i] != '')
+      if(cache_k[i] !== '')
       {
          cache_occupancy++;
       }
-      if(displayed[i] != '')
+      if(displayed[i] !== '')
       {
          display_count++;
       }
    }
 
-   svg_doc.getElementById('debug').textContent = 'QC' + qc + ' LQ' + req_cache_k + ' QT' + qt + ' RQT' + req_cache_timeout + ' D' + display_count + ' CO' + cache_occupancy + '/' + SLOTS + ' LCD(E)' + lcd + ' H' + got_handle;
+   svg_doc.getElementById('debug').textContent = 'QC' + qc + ' LQ' + req_cache_k + ' QT' + qt + ' RQT' + req_cache_timeout + ' D' + display_count + ' Df' + dfull + ' CO' + cache_occupancy + ' LCD' + lcd + ' H' + got_handle + ' Ff' + feed_fault + ' ' + flag%10;
+}
+
+function tt_on(evt, text)
+{
+   tt1.firstChild.data = text;
+   tt2.firstChild.data = '';
+   if(!evt.currentTarget.id)
+   {
+   }
+   else if(evt.currentTarget.id.substring(2,3) === 'b')
+   {
+      var bid = evt.currentTarget.id.substring(3,7);
+      var des = evt.currentTarget.id.substring(0,2);
+      tt1.firstChild.data = 'Describer ' + des + ' Berth ' + bid;
+      var occ_id = evt.currentTarget.id.substring(0,7);
+      var headcode = svg_doc.getElementById(occ_id).textContent;
+      if(headcode.length === 4 && headcode !== 'FAST' && headcode !== 'SLOW')
+      {
+         var cache_result = cached(headcode);
+         tt2.firstChild.data = headcode + ' ' + cache_result[0];
+      }
+   }
+   else if(evt.currentTarget.id.substring(2,3) === 's')
+   {
+      tt1.firstChild.data = 'Signal ' + text;
+   }
+
+   length = tt1.getComputedTextLength();
+   if(tt2.getComputedTextLength() > length) length = tt2.getComputedTextLength();
+   if(evt.clientX + length > 1240) 
+   {
+      tt1.setAttribute('x',1260-length-11);
+      tt2.setAttribute('x',1260-length-11);
+      ttb.setAttribute('x',1260-length-14);
+   }
+   else
+   {
+      tt1.setAttribute('x',evt.clientX+11);
+      tt2.setAttribute('x',evt.clientX+11);
+      ttb.setAttribute('x',evt.clientX+8);
+   }
+   tt1.setAttribute('y',evt.clientY+27);
+   tt2.setAttribute('y',evt.clientY+27+16);
+   tt1.setAttribute('visibility','visible');
+   if(tt2.firstChild.data === '')
+   {
+      ttb.setAttribute('height', 18);
+   }
+   else
+   {
+      tt2.setAttribute('visibility','visible');
+      ttb.setAttribute('height', 33);
+   }
+
+   ttb.setAttribute('width',length+6);
+   ttb.setAttribute('y',evt.clientY+14);
+   ttb.setAttribute('visibility','visible');
+}
+function tt_off(evt)
+{
+   tt1.setAttribute('visibility','hidden');
+   tt2.setAttribute('visibility','hidden');
+   ttb.setAttribute('visibility','hidden');
+}
+function progress_colour(col)
+{
+   var progc = svg_doc.getElementById('progc');
+   if(progc) progc.style.fill = col;
 }

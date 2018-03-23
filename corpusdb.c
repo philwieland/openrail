@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2013, 2015, 2016 Phil Wieland
+    Copyright (C) 2013, 2015, 2016, 2017 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -26,17 +26,26 @@
 #include <unistd.h>
 #include <sys/resource.h>
 #include <curl/curl.h>
+#include <sys/stat.h>
+#include <dirent.h>
 
 #include "jsmn.h"
 #include "misc.h"
 #include "db.h"
 #include "database.h"
+#include "build.h"
 
 #define NAME  "corpusdb"
-#define BUILD "X328"
 
-#define FILEPATH       "/tmp/corpusdb"
-#define FILEPATH_DEBUG "/tmp/corpusdb-debug"
+#ifndef RELEASE_BUILD
+#define BUILD "YB07p"
+#else
+#define BUILD RELEASE_BUILD
+#endif
+
+#define TEMP_DIRECTORY "/var/tmp"
+#define FILE_NAME      "corpusdb-downloaded.json"
+#define FILEPATH_DEBUG "/tmp/corpusdb-debug.json"
 
 char filepath[128], filepath_z[128];
 
@@ -45,17 +54,23 @@ FILE * fp_result;
 static size_t total_bytes;
 word debug;
 
+// Stats
+enum stats_categories {Locations, FriendlyNames,
+                       MAXStats };
+static qword stats[MAXStats];
+static const char * const stats_category[MAXStats] = 
+   {
+      "Locations loaded", "Friendly names loaded",  
+   };
+
 static word fetch_corpus(void);
 static size_t corpus_write_data(void *buffer, size_t size, size_t nmemb, void *userp);
 static word process_corpus(void);
 static void process_corpus_object(const char * object_string);
 static word update_friendly_names(void);
 
-// Database table
-
-dword count_locations, count_fns;
-
 word opt_insecure, used_insecure, opt_verbose;
+word id_number;
 
 int main(int argc, char **argv)
 {
@@ -105,8 +120,6 @@ int main(int argc, char **argv)
    char zs[1024];
 
    time_t start_time = time(NULL);
-   count_locations = 0;
-   count_fns = 0;
 
    fp_result = NULL;
 
@@ -116,7 +129,7 @@ int main(int argc, char **argv)
    sprintf(zs, "%s %s", NAME, BUILD);
    _log(GENERAL, zs);
 
-   if(debug == 1)
+   if(debug)
    {
       _log(GENERAL, "Debug mode selected.");
 
@@ -124,7 +137,9 @@ int main(int argc, char **argv)
    }
    else
    {
-      strcpy(filepath, FILEPATH);
+      strcpy(filepath, TEMP_DIRECTORY);
+      strcat(filepath, "/");
+      strcat(filepath, FILE_NAME);
    }
    strcpy(filepath_z, filepath);
    strcat(filepath_z, ".gz");
@@ -135,6 +150,12 @@ int main(int argc, char **argv)
    {
       limit.rlim_cur = RLIM_INFINITY;
       setrlimit(RLIMIT_CORE, &limit);
+   }
+
+   // Zero the stats
+   {
+      word i;
+      for(i = 0; i < MAXStats; i++) { stats[i] = 0; }
    }
 
    // Initialise database
@@ -152,27 +173,28 @@ int main(int argc, char **argv)
          strcat(report, "*** Warning: Insecure download used.\n");
          _log(GENERAL, "*** Warning: Insecure download used.");
       }
-      sprintf(zs, "Elapsed time             : %ld minutes", (time(NULL) - start_time + 30) / 60);
+      sprintf(zs, "%25s: %ld minutes", "Elapsed time", (time(NULL) - start_time + 30) / 60);
       _log(GENERAL, zs);
       strcat(report, zs);
       strcat(report, "\n");
-      sprintf(zs, "Locations loaded         : %ld", count_locations);
-      _log(GENERAL, zs);
-      strcat(report, zs);
-      strcat(report, "\n");
-      sprintf(zs, "Friendly names loaded    : %ld", count_fns);
-      _log(GENERAL, zs);
-      strcat(report, zs);
-      strcat(report, "\n");
-      
-      email_alert(NAME, BUILD, "Corpus Update Report", report);
-      exit(0);
-   }
+      word i;
+      for(i = 0; i < MAXStats; i++)
+      {
+         sprintf(zs, "%25s: %s", stats_category[i], commas_q(stats[i]));
+         _log(GENERAL, zs);
+         strcat(report, zs);
+         strcat(report, "\n");
+      }
 
-   email_alert(NAME, BUILD, "Corpus Update Failure Report", "Corpus update failed.  See log file for details.");
-   
+      email_alert(NAME, BUILD, "Corpus Update Report", report);
+   }
+   else
+   {
+      email_alert(NAME, BUILD, "Corpus Update Failure Report", "Corpus update failed.  See log file for details.");
+   }
    db_disconnect();
-   exit(1);
+
+   exit(0);
 }
 
 static word fetch_corpus(void)
@@ -328,7 +350,9 @@ static word process_corpus(void)
 
    // Reset the database
    database_upgrade(corpusdb);
+   db_start_transaction();
    db_query("DELETE FROM corpus");
+   id_number = 1;
 
    _log(GENERAL, "Processing CORPUS data.");
 
@@ -337,7 +361,6 @@ static word process_corpus(void)
 
    while((buf_end = fread(buffer, 1, MAX_BUF, fp)))
    {
-      // printf("Read %zd bytes.\n", buf_end);
       for(ibuf = 0; ibuf < buf_end; ibuf++)
       {
          char c = buffer[ibuf];
@@ -369,6 +392,10 @@ static word process_corpus(void)
 if(zs[1] == '\0' && zs[0] == ' ') zs[0] = '\0'; \
 db_real_escape_string(zs1, zs, strlen(zs)); \
 strcat(query, ", '"); strcat(query, zs1); strcat(query, "'"); }
+#define EXTRACT_APPEND_SQL_INT(a) { jsmn_find_extract_token(object_string, tokens, 0, a, zs, sizeof( zs )); \
+if(zs[1] == '\0' && zs[0] == ' ') zs[0] = '0'; \
+db_real_escape_string(zs1, zs, strlen(zs)); \
+strcat(query, ", "); strcat(query, zs1); }
 
 static void process_corpus_object(const char * object_string)
 {
@@ -399,22 +426,27 @@ static void process_corpus_object(const char * object_string)
       return;
    }
 
-   // jsmn_dump_tokens(object_string, tokens, 0);
-   // printf("|%s|\n", object_string);
-
    char query[2048];
-   strcpy(query, "INSERT INTO corpus VALUES(0, ''"); // ID and friendly name
-   EXTRACT_APPEND_SQL("stanox");
+   char nlcdesc16[1024];
+
+   sprintf(query, "INSERT INTO corpus VALUES(%d, ''", id_number++); // ID and friendly name
+   EXTRACT_APPEND_SQL_INT("stanox");
    EXTRACT_APPEND_SQL("uic");
    EXTRACT_APPEND_SQL("3alpha");
-   EXTRACT_APPEND_SQL("nlcdesc16");
+   
+   jsmn_find_extract_token(object_string, tokens, 0, "nlcdesc16", nlcdesc16, sizeof(nlcdesc16));
+   db_real_escape_string(zs1, nlcdesc16, strlen(nlcdesc16));
+   strcat(query, ", '"); 
+   if(zs1[0] == ' ') strcat(query, zs1 + 1); 
+   else strcat(query, zs1);
+      strcat(query, "'");
    EXTRACT_APPEND_SQL("tiploc");
    EXTRACT_APPEND_SQL("nlc");
    EXTRACT_APPEND_SQL("nlcdesc");
 
    strcat(query, ")");
 
-   if(!db_query(query)) count_locations++;
+   if(!db_query(query)) stats[Locations]++;
 
    return;
 }
@@ -461,7 +493,7 @@ static word update_friendly_names(void)
             db_real_escape_string(location, row1[0], strlen(row1[0]));
             sprintf(query, "UPDATE corpus set fn = '%s' where id = %s", location, row0[0]);
             db_query(query);
-            count_fns++;
+            stats[FriendlyNames]++;
             done = true;
          }
          mysql_free_result(result1);
@@ -477,7 +509,7 @@ static word update_friendly_names(void)
             db_real_escape_string(location, row1[0], strlen(row1[0]));
             sprintf(query, "UPDATE corpus set fn = '%s' where id = %s", location, row0[0]);
             db_query(query);
-             count_fns++;
+            stats[FriendlyNames]++;
            done = true;
          }
           mysql_free_result(result1);
@@ -493,7 +525,7 @@ static word update_friendly_names(void)
             db_real_escape_string(location, row1[0], strlen(row1[0]));
             sprintf(query, "UPDATE corpus set fn = '%s' where id = %s", location, row0[0]);
             db_query(query);
-            count_fns++;
+            stats[FriendlyNames]++;
             done = true;
          }
          mysql_free_result(result1);
@@ -509,6 +541,9 @@ static word update_friendly_names(void)
    }
 
    mysql_free_result(result0);
+
+   _log(GENERAL, "Commit database updates...");
+   db_commit_transaction();
 
    return result;
 }

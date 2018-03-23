@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2015 Phil Wieland
+    Copyright (C) 2015, 2016, 2017 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -15,7 +15,6 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
     phil@philwieland.com
-
 */
 
 #include <stdio.h>
@@ -31,6 +30,16 @@
 
 #include "misc.h"
 #include "db.h"
+#include "build.h"
+
+#define NAME "railquery"
+#define DISPLAY_NAME "Open Rail Query"
+
+#ifndef RELEASE_BUILD
+#define BUILD "YB07p"
+#else
+#define BUILD RELEASE_BUILD
+#endif
 
 static void display_menu(void);
 static void report_b(void);
@@ -42,9 +51,6 @@ static void report_f(void);
 static char * location_name(const char * const tiploc);
 static char * location_name_stanox(const word stanox);
 static char * describe_schedule(const dword id);
-
-#define NAME "Live Rail Query"
-#define BUILD "X328"
 
 #define URL_BASE "/rail/query/"
 #define LIVERAIL_URL_BASE "/rail/liverail/"
@@ -117,10 +123,10 @@ int main()
 
    // Set up log
    {
-      struct tm * broken = localtime(&now);
       char logfile[128];
 
-      sprintf(logfile, "/tmp/railquery-%04d-%02d-%02d.log", broken->tm_year + 1900, broken->tm_mon + 1, broken->tm_mday);
+      sprintf(logfile, "/var/log/garner/web/%s.log", NAME);
+      // Set to no logging at all (3) in normal mode.
       _log_init(logfile, debug?2:3);
    }
 
@@ -141,11 +147,11 @@ int main()
    printf("<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.01 Transitional//EN\" \"http://www.w3.org/TR/html4/loose.dtd\">\n");
    printf("<html xmlns=\"http://www.w3.org/1999/xhtml\" lang=\"en\" xml:lang=\"en\">\n");
    printf("<head>\n");
-   printf("<title>%s %s</title>\n", NAME, BUILD);
-   printf("<link rel=\"stylesheet\" type=\"text/css\" href=\"/auxy/railquery.css\">\n");
+   printf("<title>%s %s</title>\n", DISPLAY_NAME, BUILD);
+   printf("<link rel=\"stylesheet\" type=\"text/css\" href=\"/auxy/liverail.css\">\n");
+   printf("<script type=\"text/javascript\" src=\"/auxy/railquery.js\"></script>\n");
    printf("</head>\n");
    printf("<body style=\"font-family: arial,sans-serif;\" onload=\"startup();\">\n");
-   printf("<script type=\"text/javascript\" src=\"/auxy/railquery.js\"></script>\n");
 
    // Initialise database
    db_init(conf[conf_db_server], conf[conf_db_user], conf[conf_db_password], conf[conf_db_name]);
@@ -192,7 +198,10 @@ int main()
    char host[256];
    if(gethostname(host, sizeof(host))) host[0] = '\0';
    qword elapsed = time_ms() - start_time;
-   printf("<p id=\"bottom-line\">Completed at %s by %s %s at %s.  Elapsed time %s ms.</p>\n", time_text(time(NULL), 1), NAME, BUILD, host, commas_q(elapsed));
+   printf("<p><div id=\"bottom-line\">Completed at %s by %s %s at %s.  Elapsed time %s ms.</div>", time_text(time(NULL), 1), DISPLAY_NAME, BUILD, host, commas_q(elapsed));
+   printf("<br><div class=\"licence\">Contains Information of Network Rail Infrastructure Limited licensed under the following licence: <a href=\"http://www.networkrail.co.uk/data-feeds/terms-and-conditions\"> Click Here</a>.</br>");
+   printf("These pages are provided strictly for non-commercial, non-safety critical purposes; no responsibility is accepted for any inaccurate or out of date information.");
+   printf("</div></p>");
 
    printf("</body></html>\n\n");
    
@@ -210,56 +219,58 @@ static void display_menu(void)
 
    printf(
           "<table>"
-          "<tr valign=\"top\"><td class=\"control-panel\" colspan=7>"
+          "<tr valign=\"top\"><td class=\"control-panel-row\" colspan=7>"
           "<table><tr><td><h4>Return to Live Trains: </h4></td><td>"
-          "&nbsp;Show trains at <input type=\"text\" id=\"search_loc\" size=\"24\" maxlength=\"64\" placeholder=\"Location name / TIPLOC / 3-alpha\" value=\"\" onkeydown=\"if(event.keyCode == 13) search_onclick();\">"
+          "&nbsp;Show trains at <input type=\"text\" id=\"search_loc\" size=\"28\" maxlength=\"64\" placeholder=\"Location name / TIPLOC / 3-alpha\" value=\"\" onkeydown=\"if(event.keyCode == 13) search_onclick();\">"
           " on <input type=\"text\" id=\"search_date\" size=\"8\" maxlength=\"8\" placeholder=\"dd/mm/yy\" value=\"\" onkeydown=\"if(event.keyCode == 13) search_onclick();\">"
-          " <button id=\"search\" class=\"cp-button\" onclick=\"search_onclick();\">Full</button>"
+          " <button id=\"search\" class=\"cp-button\" onclick=\"search_onclick();\">All</button>"
+          " <button id=\"search\" class=\"cp-button\" onclick=\"freight_onclick();\">Freight</button>"
           " <button id=\"search\" class=\"cp-button\" onclick=\"summary_onclick();\">Summary</button>"
           " <button id=\"search\" class=\"cp-button\" onclick=\"depart_onclick();\">Departures</button>"
           "</td></tr></table></tr>"
-          "<tr valign=\"top\"><td class=\"control-panel\" colspan=7>"
+          /*
+          "<tr valign=\"top\"><td class=\"control-panel-row\" colspan=7>"
           "<h4>Options</h4>\n"
           "Display results in plain text.<input type=\"checkbox\" id=\"plain-text\" value=\"0\">"
-          "</td></tr\n"
-          "<tr valign=\"top\"><td class=\"control-panel\">"
+          "</td></tr>\n"
+          */
+          "<tr valign=\"top\"><td class=\"control-panel-row\">"
           "<h4>[A]Go direct to schedule</h4>\n");
-   printf("Garner schedule ID <input type=\"text\" id=\"A-id\" size=\"7\" maxlength=\"9\" value=\"%s\" onkeydown=\"if(event.keyCode == 13) A_onclick();\">&nbsp; &nbsp\n", parameters[1]);
+   printf("Schedule ID number <input type=\"text\" id=\"A-id\" size=\"7\" maxlength=\"9\" value=\"%s\" onkeydown=\"if(event.keyCode == 13) A_onclick();\">&nbsp; &nbsp\n", parameters[1]);
    printf("<br><button class=\"cp-button\" onclick=\"A_onclick();\">Go</button>\n"
 
-          "</td><td width=\"5%%\">&nbsp;</td><td class=\"control-panel\">\n"
-   
+          "</td><td width=\"5%%\">&nbsp;</td><td class=\"control-panel-row\">\n"
           "<h4>[B]Schedules by CIF UID</h4>\n");
    printf("CIF UID <input type=\"text\" id=\"B-u\" size=\"16\" maxlength=\"64\" value=\"%s\" onkeydown=\"if(event.keyCode == 13) B_onclick();\">\n", parameters[2]);
    printf("<br>Only if valid this week.<input type=\"checkbox\" id=\"B-w\" value=\"0\">\n"
-
           "<br><button class=\"cp-button\" onclick=\"B_onclick();\">Search</button>\n"
 
-          "</td><td width=\"5%%\">&nbsp;</td><td class=\"control-panel\">\n"
+          "</td><td width=\"5%%\">&nbsp;</td><td class=\"control-panel-row\">\n"
           "<h4>[C]TRUST Activations by Headcode</h4>\n"
           "Headcode (or pseudo-headcode)<input type=\"text\" id=\"C-h\" size=\"3\" maxlength=\"4\" value=\"\" onkeydown=\"if(event.keyCode == 13) C_onclick();\">" 
           "<br>Only this week <input type=\"checkbox\" id=\"C-w\" value=\"0\">"
           "<br><button class=\"cp-button\" onclick=\"C_onclick();\">Search</button>\n"
-          "</td><td width=\"5%%\">&nbsp;</td><td class=\"control-panel\">\n"
 
+          "</td><td width=\"5%%\">&nbsp;</td><td class=\"control-panel-row\">\n"
           "<h4>[D]TRUST Activations by Schedule</h4>\n");
-   printf("Garner schedule ID <input type=\"text\" id=\"D-s\" size=\"7\" maxlength=\"9\" value=\"%s\" onkeydown=\"if(event.keyCode == 13) D_onclick();\">", parameters[1]);
+   printf("Schedule ID number <input type=\"text\" id=\"D-s\" size=\"7\" maxlength=\"9\" value=\"%s\" onkeydown=\"if(event.keyCode == 13) D_onclick();\">", parameters[1]);
    printf("<br>Only this week <input type=\"checkbox\" id=\"D-w\" value=\"0\">"
           "<br><button class=\"cp-button\" onclick=\"D_onclick();\">Search</button>\n"
           "</td></tr>\n"
 
-          "<tr valign=\"top\"><td class=\"control-panel\">"
+          "<tr valign=\"top\"><td class=\"control-panel-row\">"
           "<h4>[E]Schedules by headcode</h4>\n"
           "Headcode <input type=\"text\" id=\"E-v\" size=\"3\" maxlength=\"4\" value=\"\" onkeydown=\"if(event.keyCode == 13) E_onclick();\">\n"
           "<br>Only if valid this week.<input type=\"checkbox\" id=\"E-w\" value=\"0\">\n"
           "<br><button class=\"cp-button\" onclick=\"E_onclick();\">Search</button>\n"
 
-          "</td><td width=\"5%%\">&nbsp;</td><td class=\"control-panel\">\n"
+          "</td><td width=\"5%%\">&nbsp;</td><td class=\"control-panel-row\">\n"
           "<h4>[F]Historical Analysis</h4>\n");
-   printf("Garner schedule ID <input type=\"text\" id=\"F-id\" size=\"7\" maxlength=\"9\" value=\"%s\" onkeydown=\"if(event.keyCode == 13) F_onclick();\">&nbsp; &nbsp\n", parameters[1]);
+   printf("Schedule ID number <input type=\"text\" id=\"F-id\" size=\"7\" maxlength=\"9\" value=\"%s\" onkeydown=\"if(event.keyCode == 13) F_onclick();\">&nbsp; &nbsp\n", parameters[1]);
    printf("<br>Location <input type=\"text\" id=\"F-l\" size=\"20\" maxlength=\"50\" value=\"\" onkeydown=\"if(event.keyCode == 13) F_onclick();\">&nbsp; &nbsp\n");
    printf("<br><button class=\"cp-button\" onclick=\"F_onclick();\">Report</button>\n"
    
+          /*
           "</td><td width=\"5%%\">&nbsp;</td><td class=\"control-panel-off\">\n"
           "<h4>[G]Overlay Differences</h4>\n");
    printf("Overlay garner schedule ID <input type=\"text\" id=\"G-id\" size=\"7\" maxlength=\"9\" value=\"%s\" onkeydown=\"if(event.keyCode == 13) G_onclick();\">&nbsp; &nbsp\n", parameters[1]);
@@ -269,11 +280,23 @@ static void display_menu(void)
           "<h4>[H]Database Checks</h4>\n"
           "Check for duplicate schedules.\n"
           "<br><button class=\"cp-button\" onclick=\"H_onclick();\">Report</button>\n"
+          */
+          "</td><td width=\"5%%\">&nbsp;</td><td class=\"control-panel-row\">\n"
+          "</td><td width=\"5%%\">&nbsp;</td><td class=\"control-panel-row\">\n"
 
           "</td></tr></table>\n"
           );
 
    printf("<input type=\"hidden\" id=\"date\" value=\"%s\"/>\n", date_text(time(NULL), true));
+
+   printf("<div class=\"help-text-box\">");
+   printf("<p><b>Open Rail real time railway data advanced database queries.</b></p>"
+          "<p>This part of the Open Rail system is experimental, and still under development.  Some queries may return incorrect or confusing results.  A degree of understanding of the inner workings of the railway systems behind this data (The &quot;CIF&quot; schedule database, and &quot;TRUST&quot;.) may be needed to understand the results of some queries.</p>"
+          "<p>A schedule ID number is a unique identification number for a schedule in the Open Rail database.  When you see one in the results of one of these queries, click on it and you will be returned to this page with the number filled in ready for queries [A], [D] and [F].</p>"
+"<p>A CIF UID is the ID for a schedule in Network Rail's database, it consists of a letter or a space followed by five digits, e.g. Y63320.</p>"
+"<p>The Open Rail database contains live running data for the last four hundred days, and future schedule information up to the limit of Network Rail's information.</p>"
+          );
+   printf("</div>\n");
 }
 
 
@@ -382,7 +405,7 @@ static void report_be(void)
             }
                
             // From
-            sprintf(query, "SELECT tiploc_code, departure, public_departure FROM cif_schedule_locations where cif_schedule_id = %ld AND record_identity = 'LO'", id);
+            sprintf(query, "SELECT tiploc_code, departure, public_departure FROM cif_schedule_locations where cif_schedule_id = %u AND record_identity = 'LO'", id);
             printf("<td>");
             if(!db_query(query))
             {
@@ -398,7 +421,7 @@ static void report_be(void)
                printf("</td>");
                
                // To
-               sprintf(query, "SELECT tiploc_code, arrival, public_arrival FROM cif_schedule_locations where cif_schedule_id = %ld AND record_identity = 'LT'", id);
+               sprintf(query, "SELECT tiploc_code, arrival, public_arrival FROM cif_schedule_locations where cif_schedule_id = %u AND record_identity = 'LT'", id);
                printf("<td>");
                if(!db_query(query))
                {
@@ -481,7 +504,7 @@ static void report_c(void)
       }
       else
       {
-         printf("<table class=\"result-table\"><tr><th>Activated</th><th>TRUST ID</th><th>Garner Schedule ID</th><th>From</th><th>To</th></tr>\n");
+         printf("<table class=\"result-table\"><tr><th>Activated</th><th>TRUST ID</th><th>Schedule ID Number</th><th>From</th><th>To</th></tr>\n");
       }
       while((db_row[0] = mysql_fetch_row(db_result[0])))
       {
@@ -496,7 +519,7 @@ static void report_c(void)
          dword id = atol(db_row[0][1]);
          if(id)
          {
-            sprintf(query, "SELECT tiploc_code, departure, public_departure FROM cif_schedule_locations where cif_schedule_id = %ld AND record_identity = 'LO'", id);
+            sprintf(query, "SELECT tiploc_code, departure, public_departure FROM cif_schedule_locations where cif_schedule_id = %u AND record_identity = 'LO'", id);
             if(!text_mode) printf("<td>");
             if(!db_query(query))
             {
@@ -512,7 +535,7 @@ static void report_c(void)
             if(!text_mode) printf("</td>");
             
             // To
-            sprintf(query, "SELECT tiploc_code, arrival, public_arrival FROM cif_schedule_locations where cif_schedule_id = %ld AND record_identity = 'LT'", id);
+            sprintf(query, "SELECT tiploc_code, arrival, public_arrival FROM cif_schedule_locations where cif_schedule_id = %u AND record_identity = 'LT'", id);
             if(text_mode) printf("  to  ");
             else printf("<td>");
             if(!db_query(query))
@@ -574,7 +597,7 @@ static void report_d(void)
       }
       else
       {
-         printf("<table class=\"result-table\"><tr><th>Activated</th><th>TRUST ID</th><th>Garner Schedule ID</th></tr>\n");
+         printf("<table class=\"result-table\"><tr><th>Activated</th><th>TRUST ID</th><th>Schedule ID Number</th></tr>\n");
       }
       while((db_row[0] = mysql_fetch_row(db_result[0])))
       {
@@ -696,7 +719,7 @@ static void report_f(void)
    if(!done)
    {
       // Try fn
-      sprintf(query, "SELECT stanox, fn FROM corpus WHERE fn like '%%%s%%' and stanox != '' order by fn", location);
+      sprintf(query, "SELECT stanox, fn FROM corpus WHERE fn like '%%%s%%' and stanox != 0 order by fn", location);
       if(!db_query(query))
       {
          db_result[0] = db_store_result();
@@ -753,7 +776,7 @@ static void report_f(void)
          time_t when = atol(db_row[0][0]);
          printf("<tr class=\"result-table\"><td>%s</td><td>%s</td>", day_date_text(when, true), db_row[0][1]);
       
-         sprintf(query, "SELECT timetable_variation, variation_status FROM trust_movement where trust_id = '%s' AND loc_stanox = %d AND created < %ld AND created > %ld ORDER BY event_type DESC",db_row[0][1], stanox, when + 8*24*60*60, when - 8*24*60*60);
+         sprintf(query, "SELECT timetable_variation, flags FROM trust_movement where trust_id = '%s' AND loc_stanox = %d AND created < %ld AND created > %ld ORDER BY (flags & 0x3) DESC",db_row[0][1], stanox, when + 8*24*60*60, when - 8*24*60*60);
          if(db_query(query))
          {
          }
@@ -762,7 +785,15 @@ static void report_f(void)
             db_result[1] = db_store_result();
             if((db_row[1] = mysql_fetch_row(db_result[1])))
             {
-               printf("<td>%s %s</td>\n", db_row[1][0], db_row[1][1]);
+               printf("<td>%s \n", db_row[1][0]);
+               word flags = atoi(db_row[1][1]);
+               switch(flags & 0x0018)
+               {
+               case 0x0000: printf("Early</td>"); break;
+               case 0x0008: printf("On time</td>"); break;
+               case 0x0010: printf("Late</td>"); break;
+               case 0x0018: printf("Off route</td>"); break;
+               }
             }
             else
             {
@@ -857,7 +888,7 @@ static char * describe_schedule(const dword id)
    
    result[0] = '\0';
 
-   sprintf(query, "SELECT tiploc_code, departure, public_departure FROM cif_schedule_locations where cif_schedule_id = %ld AND record_identity = 'LO'", id);
+   sprintf(query, "SELECT tiploc_code, departure, public_departure FROM cif_schedule_locations where cif_schedule_id = %u AND record_identity = 'LO'", id);
    if(!db_query(query))
    {
       db_result[1] = db_store_result();
@@ -869,7 +900,7 @@ static char * describe_schedule(const dword id)
       mysql_free_result(db_result[1]);
    }
 
-   sprintf(query, "SELECT tiploc_code, arrival, public_arrival FROM cif_schedule_locations where cif_schedule_id = %ld AND record_identity = 'LT'", id);
+   sprintf(query, "SELECT tiploc_code, arrival, public_arrival FROM cif_schedule_locations where cif_schedule_id = %u AND record_identity = 'LT'", id);
    if(!db_query(query))
    {
       db_result[1] = db_store_result();

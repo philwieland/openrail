@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2016 Phil Wieland
+    Copyright (C) 2016, 2017 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -40,9 +40,15 @@
 #include "misc.h"
 #include "db.h"
 #include "database.h"
+#include "build.h"
 
 #define NAME  "limed"
-#define BUILD "X328"
+
+#ifndef RELEASE_BUILD
+#define BUILD "Z205p"
+#else
+#define BUILD RELEASE_BUILD
+#endif
 
 typedef enum {LVRPLSH, HUYTON, PAGES} page_t;
 
@@ -56,6 +62,7 @@ static char berths_lime[32][8];
 // Time in hours (local) when daily statistical report is produced.
 // (Set > 23 to disable daily report.)
 #define REPORT_HOUR 4
+#define REPORT_MINUTE 4
 
 #define MAX_PAGE 4096
 #define PAGE_LIMIT (MAX_PAGE - 512)
@@ -68,6 +75,7 @@ typedef struct {
    word k;
    char d[PAGES][64];
    word c;
+   char trust_id[16];
 } train;
 static train trains[MAX_CACHE];
 
@@ -86,6 +94,7 @@ static const char * const targets[] = { "/var/www/LVRPLSH.html", "/var/www/HUYTO
 //static const char * const targets[] = { "/var/www/friedbread/LVRPLSH.html", "/var/www/friedbread/HUYTON.html"};
 
 static char top[2048];
+static const char * const bot = "<button onclick=\"location.reload(true)\">Refresh</button></body></html>\n";
 
 static void perform(void);
 static void create_page_lime(void);
@@ -93,12 +102,13 @@ static void create_page_huyton(void);
 static train * train_from_berth_value(const char * const v, const page_t p);
 static train * train_from_hc(const char * const hc, const page_t p);
 static train * train_from_time(const char * const hc, const page_t p);
-static train * train_from_schedule(const dword id, const word key, const page_t p);
+static train * train_from_schedule(const dword id, const word key, const page_t p, const char * const hc);
 static char * location_name(const char * const tiploc);
 static word cache_next_free(void);
 static train * dummy_cache(const char * const d, const word c);
 static void write_page(const char * const target);
 static word feed_bad(const char * const d);
+static char * train_status(const train * const t);
 
 // Signal handling
 void termination_handler(int signum)
@@ -206,6 +216,25 @@ int main(int argc, char *argv[])
 
       for (i=getdtablesize(); i>=0; --i) close(i); /* close all descriptors */
 
+      if ((i = open("/dev/null",O_RDONLY)) == -1)
+      {
+         _log(ABEND, "Failed to reopen stdin while daemonising (errno=%d)",errno);
+         exit(1);
+      }
+      _log(GENERAL, "Re-open stdin returned %d", i);
+      if ((i = open("/dev/null",O_WRONLY)) == -1) 
+      {
+         _log(ABEND, "Failed to reopen stdout while daemonising (errno=%d)",errno);
+         exit(1);
+      }
+      _log(GENERAL, "Re-open stdout returned %d", i);
+      if ((i = open("/dev/null",O_WRONLY)) == -1) 
+      {
+         _log(ABEND, "failed to reopen stderr while daemonising (errno=%d)",errno);
+         exit(1);
+      }
+      _log(GENERAL, "Re-open stderr returned %d", i);
+
       umask(022); // Created files will be rw for root, r for all others
 
       i = chdir("/var/run/");  
@@ -269,7 +298,7 @@ int main(int argc, char *argv[])
       struct sysinfo info;
       word logged = false;
       word i;
-      while(run && !debug && (sysinfo(&info) || info.uptime < (512 + 192)))
+      while(run && !debug && !sysinfo(&info) && info.uptime < (512 + 192))
       {
          if(!logged) _log(GENERAL, "Startup delay...");
          logged = true;
@@ -293,7 +322,7 @@ static void perform(void)
 {
    time_t update_due = 0;
    word page = 0;
-   word last_report_day = 9;
+   word last_report_day;
 
    // Initialise database connection
    while(db_init(conf[conf_db_server], conf[conf_db_user], conf[conf_db_password], conf[conf_db_name]) && run) 
@@ -319,10 +348,7 @@ static void perform(void)
    {
       now = time(NULL);
       struct tm * broken = localtime(&now);
-      if(broken->tm_hour >= REPORT_HOUR)
-      {
-         last_report_day = broken->tm_wday;
-      }
+      last_report_day = broken->tm_wday;
       start_time = now;
    }
 
@@ -348,7 +374,7 @@ static void perform(void)
 
       {
          struct tm * broken = localtime(&now);
-         if(broken->tm_hour >= REPORT_HOUR && broken->tm_wday != last_report_day)
+         if(broken->tm_wday != last_report_day && broken->tm_hour >= REPORT_HOUR && broken->tm_min >= REPORT_MINUTE)
          {
             last_report_day = broken->tm_wday;
             _log(GENERAL, "");
@@ -373,7 +399,7 @@ static void perform(void)
       }
 
       elapsed = time_ms() - elapsed;
-      _log((elapsed > 999)?GENERAL:DEBUG, "Update of page %d took %s ms, highest used cache entry %d, largest page written:  %d characters.", page, commas_q(elapsed), max_cache, max_page);
+      _log((elapsed > 1999)?GENERAL:DEBUG, "Update of page %d took %s ms, highest used cache entry %d, largest page written:  %d characters.", page, commas_q(elapsed), max_cache, max_page);
    }
 }
 
@@ -385,7 +411,7 @@ static void create_page_lime(void)
    MYSQL_ROW row;
    train * t;
 
-   if(!db_query("SELECT k,v FROM td_states WHERE k LIKE 'XZb0AP%' OR k LIKE 'XZb0BP%' OR k LIKE 'XZb000%'"))
+   if(!db_query("SELECT k,v FROM td_states WHERE k LIKE 'XZb0AP%' OR k LIKE 'XZb0BP%'"))
    {
       result = db_store_result();
       while((row = mysql_fetch_row(result)) && run) 
@@ -395,15 +421,6 @@ static void create_page_lime(void)
          {
          case 'B': key = 0x10 + row[0][6] - '0'; break;
          case 'A': key = 0x00 + row[0][6] - '0'; break;
-         case '0': 
-            switch(row[0][6])
-            {
-            case '1': key = 0x0f; break;
-            case '3': key = 0x0e; break;
-            case '5': key = 0x1f; break;
-            case '6': key = 0x1e; break;
-            }
-            break;
          }
          if(key > 0x1f)
          {
@@ -419,55 +436,72 @@ static void create_page_lime(void)
    // Header
    strcpy(page, top);
    strcat(page, "<table class=\"table\">");
-   if(feed_bad("XZ")) strcat(page, "<tr class=\"table-alert\"><td colspan=\"3\">Data feed degraded.</td></tr>");
-   strcat(page, "<tr class=\"table-p-head\"><th></th><th>Buffers</th><th>Front</th></tr>");
+   if(feed_bad("XZ")) strcat(page, "<tr class=\"table-alert\"><td colspan=\"4\">Data feed degraded.</td></tr>");
+   strcat(page, "<tr class=\"table-p-head\"><th></th><th>Buffers</th><th colspan=\"2\">Front</th></tr>");
 
    for(i = 1; i < 10 && strlen(page) < PAGE_LIMIT; i++)
    {
-      t = train_from_berth_value(berths_lime[0x10+i], LVRPLSH);
-      sprintf(zs, "<tr class=\"table-p\"><td>P%d</td><td%s>%s</td>", i, class[t->c], t->d[LVRPLSH]);
-      strcat(page, zs);
-      t = train_from_berth_value(berths_lime[i], LVRPLSH);
-      sprintf(zs, "<td%s>%s</td></tr>", class[t->c], t->d[LVRPLSH]);
-      strcat(page, zs);
+      if((berths_lime[i][0] || berths_lime[0x10+i][0]) && i != 6)
+      {
+         t = train_from_berth_value(berths_lime[0x10+i], LVRPLSH);
+         sprintf(zs, "<tr class=\"table-p\"><td>P%d</td><td%s>%s</td>", i, class[t->c], t->d[LVRPLSH]);
+         strcat(page, zs);
+         t = train_from_berth_value(berths_lime[i], LVRPLSH);
+         sprintf(zs, "<td%s colspan=\"2\">%s</td></tr>", class[t->c], t->d[LVRPLSH]);
+         strcat(page, zs);
+      }
    }
-   if(strlen(page) < PAGE_LIMIT)
+
+   // Arrange a consistent read so that trains don't move between berths while we are reading them.
+   if(db_start_transaction()) return;
    {
-      t = train_from_berth_value(berths_lime[0x1e], LVRPLSH);
-      strcat(page, "<tr class=\"table-a-head\"><th></th><th>Approaching</th><th>Passed Edge Hill</th></tr>");
-      sprintf(zs, "<tr class=\"table-a\"><td>Slow</td><td%s>%s</td>", class[t->c], t->d[LVRPLSH]);
-      strcat(page, zs);
-      t = train_from_berth_value(berths_lime[0x0e], LVRPLSH);
-      sprintf(zs, "<td%s>%s</td></tr>", class[t->c], t->d[LVRPLSH]);
-      strcat(page, zs);
+      char * berths[][3] = { {"XZb0006", "Slow", "Approaching"} ,
+                             {"XZb0005", "Fast", "Approaching"} ,
+                             {"XZb0003", "Slow", "Passed Edge Hill"} ,
+                             {"XZb0001", "Fast", "Passed Edge Hill"} ,
+                             {"XZbE053", "Slow", "Edge Hill"} ,
+                             {"XZbE049", "Fast", "Edge Hill"} ,
+                             {"XZbE045", "Slow", "Bootle BJ"} ,
+                             {"XZbE043", "Fast", "Bootle BJ"} ,
+                             {"",        "", ""  } };
+      word berth_i = 0;
+      word trains = 0;
+      while(strlen(page) < PAGE_LIMIT && berths[berth_i][0][0] && run)
+      {
+         sprintf(zs, "SELECT v from td_states WHERE k = '%s' AND v != ''", berths[berth_i][0]);
+         if(!db_query(zs))
+         {
+            result = db_store_result();
+            if((row = mysql_fetch_row(result)))
+            {
+               if(!trains) strcat(page, "<tr class=\"table-a-head\"><th colspan=\"4\">Incoming</th></tr>");
+               t = train_from_berth_value(row[0], LVRPLSH);
+               sprintf(zs,"<tr class=\"table-a\"><td>%s</td><td %s>%s</td><td>%s</td><td>%s</td></tr>", berths[berth_i][1], class[t->c], t->d[LVRPLSH], berths[berth_i][2], train_status(t));
+               strcat(page, zs);
+               trains++;
+            }
+            mysql_free_result(result);
+         }
+         berth_i++;
+      }
    }
-   if(strlen(page) < PAGE_LIMIT)
-   {
-      t = train_from_berth_value(berths_lime[0x1f], LVRPLSH);
-      sprintf(zs, "<tr class=\"table-a\"><td>Fast</td><td%s>%s</td>", class[t->c], t->d[LVRPLSH]);
-      strcat(page, zs);
-      t = train_from_berth_value(berths_lime[0x0f], LVRPLSH);
-      sprintf(zs, "<td%s>%s</td></tr>", class[t->c], t->d[LVRPLSH]);
-      strcat(page, zs);
-   }
-   else
-   {
-      strcat(page, "<tr class=\"table-p\"><td colspan=\"3\">PAGE BUFFER OVERFLOW</td></tr>");
-      _log(CRITICAL, "Page buffer overflow.");
-   }
-   strcat(page, "<tr class=\"table-p\"><td colspan=\"3\"><span class=\"ecs\">&nbsp; E.C.S. &nbsp;</span> &nbsp; &nbsp; <span class=\"freight\">&nbsp; Freight &nbsp;</span> &nbsp; &nbsp; <b>&lt;</b> Arrival from</td></tr>");
-   sprintf(zs, "<tr class=\"table-p\"><td colspan=\"3\">Updated %s by %s %s</td></tr>", time_text(now, true), NAME, BUILD);
+   // End the consistent read.
+   (void) db_commit_transaction();
+
+
+   strcat(page, "<tr class=\"table-p\"><td colspan=\"4\"><span class=\"ecs\">&nbsp; E.C.S. &nbsp;</span> &nbsp; &nbsp; <span class=\"freight\">&nbsp; Freight &nbsp;</span> &nbsp; &nbsp; <b>&lt;</b> Arrival from</td></tr>");
+   sprintf(zs, "<tr class=\"table-p\"><td colspan=\"4\">Updated %s by %s %s</td></tr>", time_text(now, true), NAME, BUILD);
    strcat(page, zs);
    strcat(page, "</table>");
    // Footer
-   strcat(page, "</body></html>\n");
+   strcat(page, bot);
 
    // Write it
    write_page(targets[LVRPLSH]);
 }
 
 #define SHOW_TRAIN t = train_from_berth_value(row[0], HUYTON); \
-   sprintf(zs,"<tr class=\"table-p\"><td>%d</td><td%s>%s</td><td>%s</td></tr>", trains + 1, class[t->c], t->d[HUYTON], berths[berth_i][1]); \
+   sprintf(zs,"<tr class=\"table-p\"><td>%d</td><td%s>%s</td><td>%s</td><td>%s</td></tr>", trains + 1, class[t->c], t->d[HUYTON], berths[berth_i][1], train_status(t)); \
    strcat(page, zs);
 
 static void create_page_huyton(void)
@@ -475,22 +509,25 @@ static void create_page_huyton(void)
    MYSQL_RES * result;
    MYSQL_ROW row;
    char huyton_route[64];
-   _log(PROC, "create_page_huyton()");
+   char roby_route[64];
    train * t;
+   _log(PROC, "create_page_huyton()");
 
    strcpy(page, top);
    strcat(page, "<table class=\"table\">");
    //strcat(page, "<tr class=\"table-p-head\"><th>&nbsp;</th><th>Train</th><th>Location</th></tr>");
-   if(feed_bad("M1")) strcat(page, "<tr class=\"table-alert\"><td colspan=\"3\">Data feed degraded.</td></tr>");
+   if(feed_bad("M1")) strcat(page, "<tr class=\"table-alert\"><td colspan=\"4\">Data feed degraded.</td></tr>");
 
    // Arrange a consistent read so that trains don't move between berths while we are reading them.
    if(db_start_transaction()) return;
+
    {
       char * berths[][2] = { {"M1b3587", "P1"} ,
                              {"M1b5579", "P2"} ,
                              {"M1b9588", "P2 UP"} ,
                              {"M1b3586", "P3"} ,
-                             {"M1b9591", "P3 DN"} ,
+                             {"M1b9593", "P4 DN"} ,
+                             {"M1b5580", "P4"} ,
                              {"",        ""  } };
       word berth_i = 0;
       word trains = 0;
@@ -502,9 +539,9 @@ static void create_page_huyton(void)
             result = db_store_result();
             if((row = mysql_fetch_row(result)))
             {
-               if(!trains) strcat(page, "<tr class=\"table-a-head\"><th colspan=\"3\">Huyton Station</th></tr>");
+               if(!trains) strcat(page, "<tr class=\"table-a-head\"><th colspan=\"4\">Huyton Station</th></tr>");
                t = train_from_berth_value(row[0], HUYTON);
-               sprintf(zs,"<tr class=\"table-a\"><td>%s</td><td colspan=\"2\"%s>%s</td></tr>", berths[berth_i][1], class[t->c], t->d[HUYTON]);
+               sprintf(zs,"<tr class=\"table-a\"><td>%s</td><td colspan=\"2\"%s>%s</td><td>%s</td></tr>", berths[berth_i][1], class[t->c], t->d[HUYTON], train_status(t));
                strcat(page, zs);
                trains++;
             }
@@ -514,8 +551,24 @@ static void create_page_huyton(void)
       }
    }
 
+   // Up Route at Roby Jn
+   strcpy(roby_route, "DB Error");
+   if(strlen(page) < PAGE_LIMIT && !db_query("SELECT k,v FROM td_states WHERE k = 'M1s06'"))
    {
-      char * berths[][2] = { { "M1b3590", "Roby"                } , // Change to "Roby FAST" in the future.
+      result = db_store_result();
+      if(result && (row = mysql_fetch_row(result)) && run) 
+      {
+         strcpy(roby_route, "None");
+         word v = atoi(row[1]);
+         if(v & 0x80)      strcpy(roby_route, "To fast line (P3)");
+         else if(v & 0x40) strcpy(roby_route, "To slow line (P4)");
+      }
+      mysql_free_result(result);
+   }
+
+   {
+      char * berths[][2] = { { "M1b3590", "Roby Fast"           } , 
+                             { "M1b5582", "Roby Slow"           } ,
                              { "M1b3592", "App. Roby"           } ,
                              { "M1bE296", "Broad Green"         } ,
                              { "M1bE298", "Passed Olive Mount"  } ,
@@ -526,6 +579,7 @@ static void create_page_huyton(void)
 
       word berth_i = 0;
       word trains = 0;
+      word route = 0;
       while(strlen(page) < PAGE_LIMIT && berths[berth_i][0][0] && trains < 3 && run)
       {
          sprintf(zs, "SELECT v from td_states WHERE k = '%s' AND v != ''", berths[berth_i][0]);
@@ -534,7 +588,13 @@ static void create_page_huyton(void)
             result = db_store_result();
             if((row = mysql_fetch_row(result)))
             {
-               if(!trains) strcat(page, "<tr class=\"table-p-head\"><th colspan=\"3\">UP from Liverpool</th></tr>");
+               if(!trains) strcat(page, "<tr class=\"table-p-head\"><th colspan=\"4\">UP from Liverpool</th></tr>");
+               if(!route && berth_i > 1)
+               {
+                  sprintf(zs, "<tr class=\"table-p\"><td colspan=\"4\">Route selected: %s.</td></tr>", roby_route);
+                  strcat(page, zs);
+                  route++;
+               }
                SHOW_TRAIN;
                trains++;
             }
@@ -565,7 +625,7 @@ static void create_page_huyton(void)
             result = db_store_result();
             if((row = mysql_fetch_row(result)))
             {
-               if(!trains) strcat(page, "<tr class=\"table-p-head\"><th colspan=\"3\">DOWN from St Helens</th></tr>");
+               if(!trains) strcat(page, "<tr class=\"table-p-head\"><th colspan=\"4\">DOWN from St Helens</th></tr>");
                SHOW_TRAIN;
                trains++;
             }
@@ -577,14 +637,15 @@ static void create_page_huyton(void)
 
    // Down Chat Moss Route
    strcpy(huyton_route, "DB Error");
-   if(strlen(page) < PAGE_LIMIT && !db_query("SELECT k,v from td_states WHERE k = 'M1s052' OR k = 'M1s053'"))
+   if(strlen(page) < PAGE_LIMIT && !db_query("SELECT k,v from td_states WHERE k = 'M1s05'"))
    {
       result = db_store_result();
-      strcpy(huyton_route, "None");
-      while((row = mysql_fetch_row(result)) && run) 
+      if((row = mysql_fetch_row(result)) && run) 
       {
-         if(row[1][0] == '1' && row[0][5] == '2') strcpy(huyton_route, "To fast line (P1)");
-         else if (row[1][0] == '1' && row[0][5] == '3') strcpy(huyton_route, "To slow line (P2)");
+         strcpy(huyton_route, "None");
+         word v = atoi(row[1]);
+         if(v & 0x04)      strcpy(huyton_route, "To fast line (P1)");
+         else if(v & 0x08) strcpy(huyton_route, "To slow line (P2)");
       }
       mysql_free_result(result);
    }
@@ -620,8 +681,8 @@ static void create_page_huyton(void)
             {
                if(!trains)
                {
-                  strcat(page, "<tr class=\"table-p-head\"><th colspan=\"3\">DOWN from Chat Moss</th></tr>");
-                  sprintf(zs, "<tr class=\"table-p\"><td colspan=\"3\">Route selected: %s.</td></tr>", huyton_route);
+                  strcat(page, "<tr class=\"table-p-head\"><th colspan=\"4\">DOWN from Chat Moss</th></tr>");
+                  sprintf(zs, "<tr class=\"table-p\"><td colspan=\"4\">Route selected: %s.</td></tr>", huyton_route);
                   strcat(page, zs);
                }
                SHOW_TRAIN;
@@ -638,18 +699,18 @@ static void create_page_huyton(void)
 
    if(strlen(page) < PAGE_LIMIT)
    {
-      strcat(page, "<tr class=\"table-p\"><td colspan=\"3\"><span class=\"ecs\">&nbsp; E.C.S. &nbsp;</span> &nbsp; &nbsp; <span class=\"freight\">&nbsp; Freight &nbsp;</span> &nbsp; &nbsp; <span class=\"pass\">&nbsp; Pass &nbsp;</span> &nbsp; &nbsp;<b>&lt;</b> From</td></tr>");
-      sprintf(zs, "<tr class=\"table-p\"><td colspan=\"3\">Updated %s by %s %s</td></tr>", time_text(now, true), NAME, BUILD);
+      strcat(page, "<tr class=\"table-p\"><td colspan=\"4\"><span class=\"ecs\">&nbsp; E.C.S. &nbsp;</span> &nbsp; &nbsp; <span class=\"freight\">&nbsp; Freight &nbsp;</span> &nbsp; &nbsp; <span class=\"pass\">&nbsp; Pass &nbsp;</span> &nbsp; &nbsp;<b>&lt;</b> From</td></tr>");
+      sprintf(zs, "<tr class=\"table-p\"><td colspan=\"4\">Updated %s by %s %s</td></tr>", time_text(now, true), NAME, BUILD);
       strcat(page, zs);
    }
    else
    {
-      strcat(page, "<tr class=\"table-p\"><td colspan=\"3\">PAGE BUFFER OVERFLOW</td></tr>");
+      strcat(page, "<tr class=\"table-p\"><td colspan=\"4\">PAGE BUFFER OVERFLOW</td></tr>");
       _log(CRITICAL, "Page buffer overflow.");
    }
    strcat(page, "</table>");
    // Footer
-   strcat(page, "</body></html>\n\n");
+   strcat(page, bot);
 
    // Write it
    write_page(targets[HUYTON]);
@@ -678,7 +739,7 @@ static train * train_from_hc(const char * const hc, const page_t p)
    MYSQL_RES * result0, * result1;
    MYSQL_ROW row0;
    dword schedule_id;
-   char query[128];
+   char query[1024];
    char headcode[8];
 
    word key = 1 + hc[3] - '0' + 10*(hc[2] - '0') + 100*(hc[0] - '0') + 1000*(hc[1] - 'A' + 10);
@@ -705,7 +766,7 @@ static train * train_from_hc(const char * const hc, const page_t p)
       mysql_free_result(result0);
    }
 
-   sprintf(query, "SELECT cif_schedule_id FROM trust_activation WHERE created > %ld AND SUBSTR(trust_id,3,4) = '%s' ORDER BY created DESC", now-(24*60*60), headcode);
+   sprintf(query, "SELECT cif_schedule_id, trust_id FROM trust_activation WHERE created > %ld AND SUBSTR(trust_id,3,4) = '%s' ORDER BY created DESC", now-(24*60*60), headcode);
 
    if(db_query(query))
    {
@@ -721,9 +782,9 @@ static train * train_from_hc(const char * const hc, const page_t p)
 
       switch(p)
       {
-      case LVRPLSH: sprintf(query, "SELECT * from cif_schedule_locations WHERE cif_schedule_id = %ld AND tiploc_code = 'LVRPLSH'", schedule_id); break;
+      case LVRPLSH: sprintf(query, "SELECT * from cif_schedule_locations WHERE cif_schedule_id = %u AND tiploc_code = 'LVRPLSH'", schedule_id); break;
       case HUYTON:  
-      default:      sprintf(query, "SELECT * from cif_schedule_locations WHERE cif_schedule_id = %ld AND (tiploc_code = 'HUYTON' OR tiploc_code = 'HUYTJUN')", schedule_id); break;
+      default:      sprintf(query, "SELECT * from cif_schedule_locations WHERE cif_schedule_id = %u AND (tiploc_code = 'HUYTON' OR tiploc_code = 'HUYTJUN')", schedule_id); break;
       }
 
       if(db_query(query))
@@ -738,9 +799,11 @@ static train * train_from_hc(const char * const hc, const page_t p)
       if(mysql_num_rows(result1))
       {
          // HIT!
+         train * t = train_from_schedule(schedule_id, key, p, hc);
+         strcpy(t->trust_id, row0[1]);
          mysql_free_result(result1);
          mysql_free_result(result0);
-         return train_from_schedule(schedule_id, key, p);
+         return t;
       }
       else
       {
@@ -765,7 +828,6 @@ static train * train_from_hc(const char * const hc, const page_t p)
 
 static train * train_from_time(const char * const hc, const page_t p)
 {
-
    // Only works on page lime
    static const char * days_runs[8] = {"runs_su", "runs_mo", "runs_tu", "runs_we", "runs_th", "runs_fr", "runs_sa", "runs_su"};
    char query[1024];
@@ -797,7 +859,7 @@ static train * train_from_time(const char * const hc, const page_t p)
       {
          dword schedule_id = atol(row0[0]);
          mysql_free_result(result0);
-         return train_from_schedule(schedule_id, key, p);
+         return train_from_schedule(schedule_id, key, p, "");
       }
       mysql_free_result(result0);
    }
@@ -814,11 +876,11 @@ static train * train_from_time(const char * const hc, const page_t p)
    return &trains[free];
 }
 
-static train * train_from_schedule(const dword id, const word key, const page_t p)
+static train * train_from_schedule(const dword id, const word key, const page_t p, const char * const hc)
 {
    _log(PROC, "train_from_schedule(%ld, %d)", id, key);
    word free;
-   char query[256];
+   char query[1024];
    MYSQL_RES * result0;
    MYSQL_ROW row0;
    char time[64];
@@ -832,35 +894,29 @@ static train * train_from_schedule(const dword id, const word key, const page_t 
    page_t j;
    for(j = 0; j < PAGES; j++) strcpy(trains[free].d[j], "DB Error");
    strcpy(train, "DB Error");
+   strcpy(trains[free].trust_id, "");
 
    // Type
-   sprintf(query, "SELECT cif_train_category FROM cif_schedules WHERE id = %ld", id);
-   if(!db_query(query))
+   switch(hc[0])
    {
-      result0 = db_store_result();
-      if((row0 = mysql_fetch_row(result0)))
-      {
-         switch(row0[0][0])
-         {
-         case 'O':
-         case 'X':
-            type = 0; 
-         break;
-         case 'E':
-            type = 1;
-            break;
-         default:
-            type = 2;
-            break;
-         }
-      }
-      mysql_free_result(result0);
+   case 0:
+   case '1':
+   case '2':
+   case '9':
+      type = 0; // Passenger or unknown
+   break;
+   case '5':
+      type = 1; // ECS
+      break;
+   default:
+      type = 2; // Freight
+      break;
    }
-
+   
    // Build lime description
 
    // Destination
-   sprintf(query, "SELECT tiploc_code FROM cif_schedule_locations WHERE record_identity = 'LT' AND cif_schedule_id = %ld", id);
+   sprintf(query, "SELECT tiploc_code FROM cif_schedule_locations WHERE record_identity = 'LT' AND cif_schedule_id = %u", id);
    if(!db_query(query))
    {
       result0 = db_store_result();
@@ -883,7 +939,7 @@ static train * train_from_schedule(const dword id, const word key, const page_t 
       // From
       if(incoming || down)
       {
-         sprintf(query, "SELECT tiploc_code FROM cif_schedule_locations WHERE record_identity = 'LO' AND cif_schedule_id = %ld", id);
+         sprintf(query, "SELECT tiploc_code FROM cif_schedule_locations WHERE record_identity = 'LO' AND cif_schedule_id = %u", id);
          if(!db_query(query))
          {
             result0 = db_store_result();
@@ -898,7 +954,7 @@ static train * train_from_schedule(const dword id, const word key, const page_t 
       // Arrival time
       if(incoming)
       {
-         sprintf(query, "SELECT public_arrival, arrival FROM cif_schedule_locations WHERE cif_schedule_id = %ld AND tiploc_code = 'LVRPLSH'", id);
+         sprintf(query, "SELECT public_arrival, arrival FROM cif_schedule_locations WHERE cif_schedule_id = %u AND tiploc_code = 'LVRPLSH'", id);
          if(!db_query(query))
          {
             result0 = db_store_result();
@@ -912,7 +968,7 @@ static train * train_from_schedule(const dword id, const word key, const page_t 
       else
          // Departure time
       {
-         sprintf(query, "SELECT public_departure, departure FROM cif_schedule_locations WHERE cif_schedule_id = %ld AND tiploc_code = 'LVRPLSH'", id);
+         sprintf(query, "SELECT public_departure, departure FROM cif_schedule_locations WHERE cif_schedule_id = %u AND tiploc_code = 'LVRPLSH'", id);
          if(!db_query(query))
          {
             result0 = db_store_result();
@@ -931,7 +987,7 @@ static train * train_from_schedule(const dword id, const word key, const page_t 
 
       // find time
       time[0] = '\0';
-      sprintf(query, "SELECT public_departure, departure, pass FROM cif_schedule_locations WHERE (tiploc_code = 'HUYTON' OR tiploc_code = 'HUYTJUN') AND cif_schedule_id = %ld ORDER BY tiploc_code DESC", id);
+      sprintf(query, "SELECT public_departure, departure, pass FROM cif_schedule_locations WHERE (tiploc_code = 'HUYTON' OR tiploc_code = 'HUYTJUN') AND cif_schedule_id = %u ORDER BY tiploc_code DESC", id);
       if(!db_query(query))
       {
          result0 = db_store_result();
@@ -965,7 +1021,7 @@ static char * location_name(const char * const tiploc)
 {
    char r[32];
    static char response[32];
-   char query[128];
+   char query[1024];
    MYSQL_RES * result;
    MYSQL_ROW row;
 
@@ -1056,6 +1112,7 @@ static train * dummy_cache(const char * const d, const word c)
    word free = cache_next_free();
    trains[free].k = 0;
    trains[free].c = c;
+   trains[free].trust_id[0] = '\0';
    for(j = 0; j < PAGES; j++) strcpy(trains[free].d[j], d);
    return &trains[free];
 }
@@ -1094,12 +1151,12 @@ static void write_page(const char * const target)
 
 static word feed_bad(const char * const d)
 {
-   char query[256];
+   char query[1024];
    MYSQL_RES * result;
    MYSQL_ROW row;
    time_t last_actual = 0;
 
-   sprintf(query, "SELECT last_timestamp FROM td_status WHERE d = '%s'", d);
+   sprintf(query, "SELECT last_timestamp FROM describers WHERE id = '%s'", d);
    if(!db_query(query))
    {
       result = db_store_result();
@@ -1110,4 +1167,35 @@ static word feed_bad(const char * const d)
       mysql_free_result(result);
    }
    return ((now - last_actual) > 96);
+}
+
+static char * train_status(const train * const t)
+{
+   static char reply[8];
+   char query[1024];
+   MYSQL_RES * result;
+   MYSQL_ROW row;
+   
+   reply[0] = '\0';
+   if(t->trust_id[0])
+   {
+      sprintf(query, "SELECT timetable_variation, flags FROM trust_movement WHERE trust_id = '%s' ORDER BY created DESC", t->trust_id);
+      if(!db_query(query))
+      {
+         result = db_store_result();
+         if((row = mysql_fetch_row(result)))
+         {
+            word flags = atoi(row[1]);
+            switch(flags & 0x0018)
+            {
+            case 0x0000: sprintf(reply, "%sE", row[0]); break;
+            case 0x0008: strcpy(reply, "OT"); break;
+            case 0x0010: sprintf(reply, "%sL", row[0]); break;
+            case 0x0018: strcpy(reply, "??");
+            }
+         }
+         mysql_free_result(result);
+      }
+   }
+   return reply;
 }

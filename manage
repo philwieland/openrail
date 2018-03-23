@@ -1,0 +1,387 @@
+#!/usr/bin/perl -w
+
+use strict;
+use DBI;
+
+my $name = 'manage';
+my $title = 'Open Rail Manager';
+my $build = 'Y805n';
+
+my ($command);
+$| = 1; # perform flush after each write to STDOUT
+
+print "\n$title  -  Build $build\n\n";
+
+# Read config
+my $config_path = '/etc/openrail.conf';
+my ($conf_db_server, $conf_db_name, $conf_db_user, $conf_db_pass) = ('','','','');
+
+open(CFG, $config_path) or print "Failed to read config file \"$config_path\".\n";
+while(<CFG>)
+{
+   chomp;
+   if($_ =~ m/^db_server\s*(.*)$/)   { $conf_db_server = $1; }
+   if($_ =~ m/^db_name\s*(.*)$/)     { $conf_db_name = $1; }
+   if($_ =~ m/^db_user\s*(.*)$/)     { $conf_db_user = $1; }
+   if($_ =~ m/^db_password\s*(.*)$/) { $conf_db_pass = $1; }
+}
+
+print "Database server: $conf_db_server\n";
+print "       Database: $conf_db_name\n";
+print "  Database user: $conf_db_user\n";
+
+# Main Menu
+while(1)
+{
+   print "\nMain Menu\n\n";
+   print "B - Banner control.\n";
+   print "C - Stompy control.\n";
+   print "D - Daemon control.\n";
+   print "L - View logs.\n";
+   print "M - MySQL database access.\n";
+   print "S - Status.\n";
+   print "A - Diagram control.\n";
+   print "Q - Quit.\n";
+   print "\nCommand > ";
+   chomp($command = uc(substr(<>, 0, 1)));
+
+   &stompy   if($command eq 'C');
+   &daemon   if($command eq 'D');
+   &viewlogs if($command eq 'L');
+   &database if($command eq 'M');
+   &status   if($command eq 'S');
+   &banner   if($command eq 'B');
+   &diagram  if($command eq 'A');
+
+   exit(0) if($command eq 'Q');
+
+}
+
+#########################################################################
+sub stompy
+{
+   my $command;
+   print "Stompy Control\n\n";
+   print "V Start VSTP flow.\n";
+   print "v Stop VSTP flow.\n";
+   print "T Start TRUST flow.\n";
+   print "t Stop TRUST flow.\n";
+   print "D Start TD flow.\n";
+   print "d Stop TD flow.\n";
+   print "q Query stompy status.\n";
+   print "s Clean shutdown.\n";
+   print "z Delete all message files.\n";
+
+   print "\nCommand > ";
+   chomp($command = <>);
+
+   if($command eq 'z' or $command eq 'Z')
+   {
+      print "Warning.  Data will be lost.  Not recommended if stompy is running.\n";
+      if(&confirm())
+      {
+         print `rm -rf /var/spool/stompy/*`;
+      }
+      return;
+   }
+
+   if(($command ne 's' and $command ne 'S') or &confirm)
+   {
+      # All commands except z.  s needs a confirm.
+      print `sudo echo $command >> /tmp/stompy.cmd`;
+      print `sudo pkill -SIGUSR1 ^stompy\$`;
+   }
+
+   if($command eq 'q' or $command eq 'Q')
+   {
+      print "working...\n";
+      sleep 4;
+      print `tail -n20 /var/log/garner/stompy.log`;
+   }
+}
+
+#########################################################################
+sub daemon
+{
+   my ($daemon, $command);
+   print "Daemon Control\n\n";
+   print "S stompy.\n";
+   print "V vstpdb.\n";
+   print "T trustdb.\n";
+   print "D tddb.\n";
+   print "L limed.\n";
+   print "J jiankong.\n";
+   print "\nDaemon > ";
+   chomp($daemon = uc(substr(<>, 0, 1)));
+
+   print "\n";
+   print "R - Restart.\n";
+   print "S - Stop.\n";
+   print "\nCommand > ";
+   chomp($command = uc(substr(<>, 0, 1)));
+
+   if($command eq 'R') { $command = 'restart'; }
+   elsif($command eq 'S') { $command = 'stop'; }
+   else { return; }
+
+   if(&confirm())
+   {
+      system("sudo /etc/init.d/stompy $command")   if($daemon eq 'S');
+      system("sudo /etc/init.d/vstpdb $command")   if($daemon eq 'V');
+      system("sudo /etc/init.d/trustdb $command")  if($daemon eq 'T');
+      system("sudo /etc/init.d/tddb $command")     if($daemon eq 'D');
+      system("sudo /etc/init.d/limed $command")    if($daemon eq 'L');
+      system("sudo /etc/init.d/jiankong $command") if($daemon eq 'J');
+   }
+}
+
+#########################################################################
+sub viewlogs
+{
+   my ($command, $sudo);
+   print "View log file\n\n";
+   print "C - cifdb.\n";
+   print "S - stompy.\n";
+   print "M - stompy messages.\n";
+   print "R - stompy message receive rate.\n";
+   print "V - vstpdb.\n";
+   print "T - trustdb.\n";
+   print "D - tddb.\n";
+   print "E - tddb analysis.\n";
+   print "A - archdb.\n";
+   print "W - Web server log.\n";
+   print "L - limed.\n";
+   print "X - tscdb.\n";
+   print "J - jiankong.\n";
+   print "\nCommand > ";
+   chomp($command = uc(substr(<>, 0, 1)));
+
+   my %filenames = (
+                    C => '/var/log/garner/cifdb.log',
+                    S => '/var/log/garner/stompy.log',
+                    M => '/var/log/garner/stompy.messagelog',
+                    R => '/var/log/garner/stompy.rates',
+                    V => '/var/log/garner/vstpdb.log',
+                    T => '/var/log/garner/trustdb.log',
+                    D => '/var/log/garner/tddb.log',
+                    A => '/var/log/garner/archdb.log',
+                    E => '/var/log/garner/tddb-detail.log',
+                    L => '/var/log/garner/limed.log',
+                    X => '/var/log/garner/tscdb.log',
+                    W => '/var/log/apache2/access.log',
+                    J => '/var/log/garner/jiankong.log',
+                   );
+
+   return unless (defined($filenames{$command}));
+
+   if(!(-f $filenames{$command}))
+   {
+      print "File not found.\n";
+      return;
+   }
+   if(-r $filenames{$command})
+   {
+      $sudo = '';
+   }
+   else
+   {
+      $sudo = 'sudo';
+   }
+
+   if($command eq 'W')
+   {
+      system("$sudo tail -F -n999 $filenames{$command} | grep -v 80.229.14.237 | grep -v 88.215.61.57");
+   }
+   else
+   {
+      system("$sudo tail -F -n99 $filenames{$command}");
+   }
+}
+
+
+#########################################################################
+sub status
+{
+   print "Open Rail System Status\n";
+   system('sudo /etc/init.d/stompy status');
+   system('sudo /etc/init.d/vstpdb status');
+   system('sudo /etc/init.d/trustdb status');
+   system('sudo /etc/init.d/tddb status');
+   system('sudo /etc/init.d/limed status');
+}
+
+#########################################################################
+sub banner
+{
+# Connect to database
+
+   my $dbh = DBI->connect("DBI:mysql:host=$conf_db_server;database=$conf_db_name",
+                          $conf_db_user, $conf_db_pass,{PrintError => 0, RaiseError => 1, AutoCommit => 1})
+      or die (DBI::errstr);
+
+   #         |                                                                |
+   my @b0 = ('Live data services are currently unavailable owing to problems',
+             'Live data services are currently unreliable owing to problems',
+             'Due to a software upgrade, all live data services are liable to',
+            );
+   my @b1 = ('at Network Rail or its suppliers.',
+             'at Network Rail or its suppliers.',
+             'disruption.  Normal service will be resumed as soon as possible.',
+            );
+
+   my ($new_banner_0, $new_banner_1, $command);
+   my @banner = $dbh->selectrow_array("SELECT banner0, banner1, expires FROM display_banner");
+
+   if(defined($banner[0]) and defined($banner[1]))
+   {
+      printf("Current banner:\n       |%-64s|\n       |%-64s|\n", $banner[0], $banner[1]);
+      if($banner[2] > 0)
+      {
+         print('Expires ' . &date_time($banner[2]) . "\n");
+      }
+      else
+      {
+         print("No expiry set.\n");
+      }
+   }
+
+   print("\nSelect new banner:\n");
+   print("B - Blank banner.\n");
+   print("N - Type in a new banner.\n");
+   print("E - Retain existing banner, change expiry setting.\n");
+   my $bi = 0;
+   for($bi = 0; defined($b0[$bi]); $bi++)
+   {
+      printf("%d - %s %s\n", $bi, $b0[$bi], $b1[$bi]);
+   }
+
+   print("\nBanner > ");
+   chomp($command = uc(substr(<>, 0, 1)));
+
+   if($command eq 'B')
+   {
+      $new_banner_0 = '';
+      $new_banner_1 = '';
+   }
+   elsif($command eq 'E')
+   {
+      $new_banner_0 = $banner[0];
+      $new_banner_1 = $banner[1];
+   }
+   elsif($command eq 'N')
+   {
+
+      printf("New banner:\n       |%64s|\n", "");
+      printf("Line 0 >");
+      chomp($new_banner_0 = <>);
+      printf("Line 1 >");
+      chomp($new_banner_1 = <>);
+   }
+   elsif($command =~ /^\d$/ and $command <= $#b0)
+   {
+      $new_banner_0 = $b0[$command];
+      $new_banner_1 = $b1[$command];
+   }
+   else
+   {
+      print("Invalid request.\n");
+      $dbh->disconnect;
+      return;
+   }
+
+   my $expires = 0;
+
+   if($command ne 'B')
+   {
+      print("\nMinutes to expiry, or 0 for indefinite.\nExpiry > ");
+      chomp($command = uc(<>));
+
+      if($command > 0) { $expires = time() + ($command * 60); }
+   }
+   $dbh->do("UPDATE display_banner SET banner0 = '$new_banner_0', banner1 = '$new_banner_1', expires = $expires");
+
+   @banner = $dbh->selectrow_array("SELECT banner0, banner1, expires FROM display_banner");
+
+   if(defined($banner[0]) and defined($banner[1]))
+   {
+      printf("\nNew banner:\n       |%-64s|\n       |%-64s|\n", $banner[0], $banner[1]);
+      if($banner[2] > 0)
+      {
+         print('Expires ' . &date_time($banner[2]) . "\n");
+      }
+      else
+      {
+         print("No expiry set.\n");
+      }
+   }
+
+   $dbh->disconnect;
+
+}
+
+#########################################################################
+sub database
+{
+   my $command = "mysql -p$conf_db_pass -u $conf_db_user -h $conf_db_server $conf_db_name";
+   print $command, "\n";
+   system($command);
+}
+
+#########################################################################
+sub diagram
+{
+   my($d, $m);
+# Connect to database
+   my $dbh = DBI->connect("DBI:mysql:host=$conf_db_server;database=$conf_db_name",
+                          $conf_db_user, $conf_db_pass,{PrintError => 0, RaiseError => 1, AutoCommit => 1})
+      or die (DBI::errstr);
+
+   printf("Modes: 0 - Normal\n");
+   printf("       1 - Clear database.\n");
+   printf("       2 - Blank diagram but retain data in database.\n");
+   printf("Current modes:\n");
+   my $sth = $dbh->prepare('SELECT id, control_mode, description, process_mode FROM describers WHERE process_mode > 0 ORDER BY id')
+                or die "Couldn't prepare statement: " . $dbh->errstr;
+   $sth->execute();
+   my %menu;
+   my @row;
+   while(@row = $sth->fetchrow_array())
+   {
+      printf("%2s  %2s  %s\n", $row[0], $row[1], $row[2]);
+      $menu{$row[0]}++;
+   }
+   printf("Describer > ");
+   chomp($d = uc(<>));
+   printf("New mode > ");
+   chomp($m = <>);
+   if(($m eq '0' or $m eq '1' or $m eq '2') and defined($menu{$d}))
+   {
+      $dbh->do("UPDATE describers SET control_mode_cmd = $m WHERE id = '$d'");
+      $dbh->do("UPDATE describers SET control_mode_cmd = 1 WHERE id = ''");
+   }
+   else
+   {
+      printf("Invalid request.\n");
+   }
+   $dbh->disconnect;
+}
+
+#########################################################################
+sub confirm
+{
+   my $command;
+   print "Confirm? (Y/N) > ";
+   chomp($command = uc(substr(<>, 0, 1)));
+   ($command eq 'Y') and return 1;
+   return 0;
+}
+
+#########################################################################
+sub date_time
+{
+   my ($s,$m,$h,$mday,$mon,$year,$wday,$yday,$isdst) = localtime(shift @_);
+
+   my $result = sprintf("%02d/%02d/%02d %02d:%02d:%02d", $mday, $mon + 1, $year % 100, $h, $m, $s);
+
+   return $result;
+}

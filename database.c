@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2015 Phil Wieland
+    Copyright (C) 2015, 2016, 2017 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -39,11 +39,16 @@
 #include "misc.h"
 #include "db.h"
 #include "database.h"
+#include "build.h"
 
 #define NAME  "database"
-#define BUILD "X320"
 
-#define NEW_VERSION 1
+#ifndef RELEASE_BUILD
+#define BUILD "Z322p"
+#else
+#define BUILD RELEASE_BUILD
+#endif
+#define NEW_VERSION 6
 
 static word table_exists(const char * const table_like);
 
@@ -53,12 +58,13 @@ word database_upgrade(const word caller)
    MYSQL_RES * res;
    MYSQL_ROW row;
    word lock, result, old_version;
+   word describers_upgrade = false;
 
    result = 0;
 
    // Lock the upgrade process.
-   // NOTE - This DOES NOT lock the database from normal data processing, it merely prevents
-   // simultaneous database_upgrade processing.
+   // NOTE - This DOES NOT lock the database for normal data processing or any other activity.
+   // It merely prevents simultaneous database_upgrade processing.
    lock = 0;
    while(!lock)
    {
@@ -95,7 +101,7 @@ word database_upgrade(const word caller)
    // to the table creation below.
    if(old_version < NEW_VERSION)
    {
-      _log(GENERAL, "Upgrading database from version %d to version %d.", old_version, NEW_VERSION);
+      _log(GENERAL, "Database build %s:  Upgrading database from version %d to version %d.", BUILD, old_version, NEW_VERSION);
 
       // Upgrade to 1
       if(old_version < 1)
@@ -103,6 +109,60 @@ word database_upgrade(const word caller)
          db_query("CREATE TABLE database_version (v INT UNSIGNED NOT NULL ) ENGINE = InnoDB");
          db_query("INSERT INTO  database_version VALUES(0)");
          _log(GENERAL, "Created database table \"database_version\".");
+      }
+
+      // Upgrade to 2
+      if(old_version < 2)
+      {
+         if(table_exists("corpus"))
+         {
+            db_query("ALTER TABLE corpus ADD INDEX (stanox)");
+            db_query("ALTER TABLE corpus ADD INDEX (3alpha)");
+            db_query("ALTER TABLE corpus CHANGE COLUMN nlcdesc16 nlcdesc16 CHAR(32) NOT NULL");
+            _log(GENERAL, "Upgraded database table \"corpus\".");
+         }
+      }
+
+      // Upgrade to 3
+      if(old_version < 3)
+      {
+         if(table_exists("td_status"))
+         {
+            db_query("DROP TABLE td_status");
+            _log(GENERAL, "Dropped database table \"td_status\".");
+            describers_upgrade = true;
+         }
+      }
+
+      // Upgrade to 4
+      if(old_version < 4)
+      {
+         if(table_exists("display_banner"))
+         {
+            db_query("ALTER TABLE display_banner ADD COLUMN expires INT UNSIGNED NOT NULL");
+            _log(GENERAL, "Upgraded database table \"display_banner\".");
+         }
+      }
+
+      // Upgrade to 5
+      if(old_version < 5)
+      {
+         if(table_exists("describers"))
+         {
+            db_query("ALTER TABLE describers ADD COLUMN control_mode_cmd INT UNSIGNED NOT NULL AFTER last_timestamp");
+            _log(GENERAL, "Upgraded database table \"describers\".");
+         }
+      }
+
+      if(old_version < 6)
+      {
+         db_query("DROP TABLE IF EXISTS display_banner");
+         if(table_exists("corpus"))
+         {
+            db_query("UPDATE corpus SET stanox = '0' WHERE stanox = ''");
+            db_query("ALTER TABLE corpus CHANGE COLUMN stanox stanox int unsigned not null");
+            _log(GENERAL, "Upgraded database table \"corpus\".");
+         }
       }
 
       // Upgrade to x
@@ -123,16 +183,16 @@ word database_upgrade(const word caller)
    {
       db_query(
 "CREATE TABLE corpus(                         "
-"id INT(10) UNSIGNED NOT NULL AUTO_INCREMENT, "
+"id INT(10) UNSIGNED NOT NULL,                "
 "fn                     VARCHAR(255) NOT NULL,"
-"stanox                 CHAR(16) NOT NULL,    "
+"stanox                 INT UNSIGNED NOT NULL,"
 "uic                    CHAR(16) NOT NULL,    "
 "3alpha                 CHAR(16) NOT NULL,    "
-"nlcdesc16              CHAR(30) NOT NULL,    "
+"nlcdesc16              CHAR(32) NOT NULL,    "
 "tiploc                 CHAR(16) NOT NULL,    "
 "nlc                    CHAR(16) NOT NULL,    "
 "nlcdesc                VARCHAR(255) NOT NULL,"
-"PRIMARY KEY (id), INDEX(TIPLOC)              "
+"PRIMARY KEY (id), INDEX(tiploc), INDEX(stanox), INDEX(3alpha)              "
 ") ENGINE = InnoDB"
                );
       _log(GENERAL, "Created database table \"corpus\".");
@@ -197,7 +257,7 @@ word database_upgrade(const word caller)
 "location                CHAR(7) NOT NULL,       "
 "base_location_suffix    CHAR(1) NOT NULL,       "
 "assoc_location_suffix   CHAR(1) NOT NULL,       "
-"diagram_type            CHAR(1) NOT NULL,       "
+"diagram_type            CHAR(1) NOT NULL,       "  /* This column stores Association Type, not Diagram Type. */
 "CIF_stp_indicator       CHAR(1) NOT NULL        "
 ") ENGINE = InnoDB"
                );
@@ -315,6 +375,29 @@ word database_upgrade(const word caller)
       _log(GENERAL, "Created database table \"cif_changes_en_route\".");
    }
 
+   if((caller == cifdb) && !table_exists("cif_tiplocs"))
+   {
+      db_query(
+"CREATE TABLE cif_tiplocs"
+"(                                               "
+"update_id                     SMALLINT UNSIGNED NOT NULL,  "
+"created                       INT UNSIGNED NOT NULL, "
+"deleted                       INT UNSIGNED NOT NULL, "
+"tiploc_code                   CHAR(7) NOT NULL, "
+"capitals                      CHAR(2) NOT NULL, "
+"nalco                         CHAR(6) NOT NULL, "
+"nlc_check                     CHAR(1) NOT NULL, "
+"tps_description               CHAR(26) NOT NULL, "
+"stanox                        CHAR(5) NOT NULL, "
+// PO MCP Code not used
+"CRS                           CHAR(3) NOT NULL, "
+"CAPRI_description             CHAR(16) NOT NULL, "
+"INDEX(tiploc_code)      "
+") ENGINE = InnoDB"
+               );
+      _log(GENERAL, "Created database table \"cif_tiplocs\".");
+   }
+
    ///////////////////////////////////////////////////////////////////////////////////////////////////
    // trust tables
    if((caller == trustdb) && !table_exists("trust_activation"))
@@ -329,6 +412,34 @@ word database_upgrade(const word caller)
 ") ENGINE = InnoDB"
                );
       _log(GENERAL, "Created database table \"trust_activation\".");
+   }
+   if((caller == trustdb) && !table_exists("trust_activation_extra"))
+   {
+      db_query(
+"CREATE TABLE trust_activation_extra "
+"(created                       INT UNSIGNED NOT NULL, "
+"trust_id                       CHAR(16) NOT NULL, "
+"schedule_source                CHAR(1) NOT NULL, "
+"train_file_address             CHAR(8) NOT NULL, "
+"schedule_end_date              INT UNSIGNED NOT NULL, "
+"tp_origin_timestamp            INT UNSIGNED NOT NULL, "
+"creation_timestamp             INT UNSIGNED NOT NULL, "
+"tp_origin_stanox               CHAR(8) NOT NULL, "
+"origin_dep_timestamp           INT UNSIGNED NOT NULL, "
+"train_service_code             CHAR(8) NOT NULL, "
+"toc_id                         CHAR(2) NOT NULL, "
+"d1266_record_number            CHAR(8) NOT NULL, "
+"train_call_type                CHAR(16) NOT NULL, "
+"train_uid                      CHAR(6) NOT NULL, "
+"train_call_mode                CHAR(16) NOT NULL, "
+"schedule_type                  CHAR(16) NOT NULL, "
+"sched_origin_stanox            CHAR(8) NOT NULL, "
+"schedule_wtt_id                CHAR(8) NOT NULL, "
+"schedule_start_date            INT UNSIGNED NOT NULL, "
+"INDEX(trust_id), INDEX(created)"
+") ENGINE = InnoDB"
+               );
+      _log(GENERAL, "Created database table \"trust_activation_extra\".");
    }
    if((caller == trustdb) && !table_exists("trust_cancellation"))
    {
@@ -352,20 +463,15 @@ word database_upgrade(const word caller)
 "CREATE TABLE trust_movement "
 "(created            INT UNSIGNED NOT NULL, "
 "trust_id            VARCHAR(16) NOT NULL, "
-"event_type          VARCHAR(16) NOT NULL, "
-"planned_event_type  VARCHAR(16) NOT NULL, "
 "platform            VARCHAR(8) NOT NULL, "
 "loc_stanox          VARCHAR(8) NOT NULL, "
 "actual_timestamp    INT UNSIGNED NOT NULL, "
 "gbtt_timestamp      INT UNSIGNED NOT NULL, "
 "planned_timestamp   INT UNSIGNED NOT NULL, "
-"timetable_variation INT NOT NULL, "
-"event_source        VARCHAR(16) NOT NULL, "
-"offroute_ind        BOOLEAN NOT NULL, "
-"train_terminated    BOOLEAN NOT NULL, "
-"variation_status    VARCHAR(16) NOT NULL, "
+"timetable_variation SMALLINT UNSIGNED NOT NULL, "
 "next_report_stanox  VARCHAR(8) NOT NULL, "
-"next_report_run_time INT UNSIGNED NOT NULL, "
+"next_report_run_time SMALLINT UNSIGNED NOT NULL, "
+"flags               SMALLINT UNSIGNED NOT NULL,  "
 "INDEX(trust_id), INDEX(created) "
 ") ENGINE = InnoDB"
                );
@@ -397,6 +503,20 @@ word database_upgrade(const word caller)
 ") ENGINE = InnoDB"
                );
       _log(GENERAL, "Created database table \"trust_changeid\".");
+   }
+
+   if((caller == trustdb) && !table_exists("trust_changelocation"))
+   {
+      db_query(
+"CREATE TABLE trust_changelocation "
+"(created INT UNSIGNED NOT NULL, "
+"trust_id VARCHAR(16) NOT NULL, "
+"original_stanox VARCHAR(8) NOT NULL, "
+"stanox VARCHAR(8) NOT NULL, "
+"INDEX(trust_id), INDEX(created) "
+") ENGINE = InnoDB"
+               );
+      _log(GENERAL, "Created database table \"trust_changelocation\".");
    }
 
    if((caller == vstpdb || caller == trustdb || caller == tddb) && !table_exists("status"))
@@ -457,15 +577,29 @@ word database_upgrade(const word caller)
       _log(GENERAL, "Created database table \"td_states\".");
    }
 
-   if(caller == tddb && !table_exists("td_status"))
+   if(caller == tddb && !table_exists("describers"))
    {
       db_query(
-"CREATE TABLE td_status "
-"(d             CHAR(4) NOT NULL, "
-"last_timestamp INT UNSIGNED NOT NULL "
+"CREATE TABLE describers "
+"(id              CHAR(3) NOT NULL, "
+"last_timestamp   INT UNSIGNED NOT NULL, "
+"control_mode_cmd INT UNSIGNED NOT NULL, "
+"control_mode     INT UNSIGNED NOT NULL, "
+"no_sig_address   INT UNSIGNED NOT NULL, "
+"process_mode     INT UNSIGNED NOT NULL, "
+"description      VARCHAR(255) NOT NULL, "
+"PRIMARY KEY(id) "
 ") ENGINE = InnoDB"
                );
-      _log(GENERAL, "Created database table \"td_status\".");
+      db_query("INSERT INTO describers (id,last_timestamp,control_mode_cmd,control_mode,no_sig_address,process_mode,description) VALUES ('', 0, 0, 0, 0, 0, 'Control record')");
+      if(describers_upgrade)
+      {
+         // If this is an upgrade, provide the same functionality as was previously hard-coded into tddb.c
+         db_query("INSERT INTO describers (id,last_timestamp,control_mode_cmd,control_mode,no_sig_address,process_mode,description) VALUES ('M1', 0, 0, 0,  8, 2, 'Liverpool WestCAD')");
+         db_query("INSERT INTO describers (id,last_timestamp,control_mode_cmd,control_mode,no_sig_address,process_mode,description) VALUES ('XZ', 0, 0, 0,  0, 2, 'Liverpool Lime Street')");
+         db_query("INSERT INTO describers (id,last_timestamp,control_mode_cmd,control_mode,no_sig_address,process_mode,description) VALUES ('WA', 0, 0, 0, 15, 2, 'Warrington PSB')");
+      }
+      _log(GENERAL, "Created database table \"describers\".");
    }
 
    if(caller == tddb && !table_exists("friendly_names_20"))
@@ -495,6 +629,34 @@ word database_upgrade(const word caller)
       _log(GENERAL, "Created database table \"trust_activation_arch\".");
    } 
 
+   if((caller == archdb) && !table_exists("trust_activation_extra_arch"))
+   {
+      db_query(
+"CREATE TABLE trust_activation_extra_arch "
+"(created                       INT UNSIGNED NOT NULL, "
+"trust_id                       CHAR(16) NOT NULL, "
+"schedule_source                CHAR(1) NOT NULL, "
+"train_file_address             CHAR(8) NOT NULL, "
+"schedule_end_date              INT UNSIGNED NOT NULL, "
+"tp_origin_timestamp            INT UNSIGNED NOT NULL, "
+"creation_timestamp             INT UNSIGNED NOT NULL, "
+"tp_origin_stanox               CHAR(8) NOT NULL, "
+"origin_dep_timestamp           INT UNSIGNED NOT NULL, "
+"train_service_code             CHAR(8) NOT NULL, "
+"toc_id                         CHAR(2) NOT NULL, "
+"d1266_record_number            CHAR(8) NOT NULL, "
+"train_call_type                CHAR(16) NOT NULL, "
+"train_uid                      CHAR(6) NOT NULL, "
+"train_call_mode                CHAR(16) NOT NULL, "
+"schedule_type                  CHAR(16) NOT NULL, "
+"sched_origin_stanox            CHAR(8) NOT NULL, "
+"schedule_wtt_id                CHAR(8) NOT NULL, "
+"schedule_start_date            INT UNSIGNED NOT NULL "
+") ENGINE = InnoDB"
+               );
+      _log(GENERAL, "Created database table \"trust_activation_extra_arch\".");
+   }
+
    if(caller == archdb && !table_exists("trust_cancellation_arch"))
    {
       db_query(
@@ -516,20 +678,15 @@ word database_upgrade(const word caller)
 "CREATE TABLE trust_movement_arch "
 "(created            INT UNSIGNED NOT NULL, "
 "trust_id            VARCHAR(16) NOT NULL, "
-"event_type          VARCHAR(16) NOT NULL, "
-"planned_event_type  VARCHAR(16) NOT NULL, "
 "platform            VARCHAR(8) NOT NULL, "
 "loc_stanox          VARCHAR(8) NOT NULL, "
 "actual_timestamp    INT UNSIGNED NOT NULL, "
 "gbtt_timestamp      INT UNSIGNED NOT NULL, "
 "planned_timestamp   INT UNSIGNED NOT NULL, "
-"timetable_variation INT NOT NULL, "
-"event_source        VARCHAR(16) NOT NULL, "
-"offroute_ind        BOOLEAN NOT NULL, "
-"train_terminated    BOOLEAN NOT NULL, "
-"variation_status    VARCHAR(16) NOT NULL, "
+"timetable_variation SMALLINT UNSIGNED NOT NULL, "
 "next_report_stanox  VARCHAR(8) NOT NULL, "
-"next_report_run_time INT UNSIGNED NOT NULL "
+"next_report_run_time SMALLINT UNSIGNED NOT NULL, "
+"flags               SMALLINT UNSIGNED NOT NULL  "
 ") ENGINE = InnoDB"               );
       _log(GENERAL, "Created database table \"trust_movement_arch\".");
    } 
@@ -558,6 +715,19 @@ word database_upgrade(const word caller)
                );
       _log(GENERAL, "Created database table \"trust_changeid_arch\".");
    } 
+
+   if((caller == archdb) && !table_exists("trust_changelocation_arch"))
+   {
+      db_query(
+"CREATE TABLE trust_changelocation_arch "
+"(created INT UNSIGNED NOT NULL, "
+"trust_id VARCHAR(16) NOT NULL, "
+"original_stanox VARCHAR(8) NOT NULL, "
+"stanox VARCHAR(8) NOT NULL "
+") ENGINE = InnoDB"
+               );
+      _log(GENERAL, "Created database table \"trust_changelocation_arch\".");
+   }
 
    if(caller == archdb && !table_exists("cif_associations_arch"))
    {
@@ -703,6 +873,24 @@ word database_upgrade(const word caller)
 ") ENGINE = InnoDB"
                );
       _log(GENERAL, "Created database table \"obfus_lookup\".");
+   } 
+
+   if(!table_exists("banners"))
+   {
+      db_query(
+"CREATE TABLE banners"
+"("
+"type                ENUM('diagram', 'webpage','diagram_s', 'webpage_s') NOT NULL,"
+"banner              VARCHAR(512) NOT NULL,"
+"banner1             CHAR(64) NOT NULL,"
+"expires             INT UNSIGNED NOT NULL,"
+"id                  INT UNSIGNED NOT NULL AUTO_INCREMENT,"
+"PRIMARY KEY(id)"
+") ENGINE = InnoDB"
+               );
+      db_query("INSERT INTO banners VALUES('diagram','','',0,0)");
+      db_query("INSERT INTO banners VALUES('webpage','','',0,0)");
+      _log(GENERAL, "Created database table \"banners\".");
    } 
 
    // Unlock the upgrade process

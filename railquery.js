@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2015 Phil Wieland
+    Copyright (C) 2015, 2017 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -27,6 +27,12 @@ function search_onclick()
    window.location = result;
 }
 
+function freight_onclick()
+{
+   var result = liverail_url_base + "frt" + '/' + document.getElementById("search_loc").value + '/' + document.getElementById("search_date").value;
+   window.location = result;
+}
+
 function summary_onclick()
 {
    result = liverail_url_base + "sum" + '/' + document.getElementById("search_loc").value + '/' + document.getElementById("search_date").value;
@@ -47,13 +53,13 @@ function menu_onclick()
 
 function A_onclick()
 {
-   result = liverail_url_base + (document.getElementById("plain-text").checked?"train_text":"train") + '/' + document.getElementById("A-id").value + '/' + document.getElementById("date").value;
+   result = liverail_url_base + 'train/' + document.getElementById("A-id").value + '/' + document.getElementById("date").value;
    window.location = result;
 }
 
 function B_onclick()
 {
-   result = url_base + 'B' + (document.getElementById("plain-text").checked?"T":"") + '/' + document.getElementById("B-u").value;
+   result = url_base + 'B/' + document.getElementById("B-u").value;
    if(document.getElementById("B-w").checked)
    {
       result += '/W';
@@ -63,7 +69,7 @@ function B_onclick()
 
 function C_onclick()
 {
-   result = url_base + 'C' + (document.getElementById("plain-text").checked?"T":"") + '/' + document.getElementById("C-h").value;
+   result = url_base + 'C/' + document.getElementById("C-h").value;
    if(document.getElementById("C-w").checked)
    {
       result += '/W';
@@ -74,7 +80,7 @@ function C_onclick()
 
 function D_onclick()
 {
-   result = url_base + 'D' + (document.getElementById("plain-text").checked?"T":"") + '/' + document.getElementById("D-s").value;
+   result = url_base + 'D/' + document.getElementById("D-s").value;
    if(document.getElementById("D-w").checked)
    {
       result += '/W';
@@ -85,7 +91,7 @@ function D_onclick()
 
 function E_onclick()
 {
-   result = url_base + 'E' + (document.getElementById("plain-text").checked?"T":"") + '/' + document.getElementById("E-v").value;
+   result = url_base + 'E/' + document.getElementById("E-v").value;
    if(document.getElementById("E-w").checked)
    {
       result += '/W';
@@ -95,7 +101,7 @@ function E_onclick()
 
 function F_onclick()
 {
-   result = url_base + 'F' + (document.getElementById("plain-text").checked?"T":"") + '/' + 
+   result = url_base + 'F/' + 
       document.getElementById("F-id").value + '/' +
       document.getElementById("F-l").value;
    window.location = result;

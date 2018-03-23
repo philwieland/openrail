@@ -1,5 +1,5 @@
 DROP TABLE IF EXISTS cape_reasons;
-CREATE TABLE cape_reasons ( code CHAR(2) NOT NULL, reason VARCHAR(255) NOT NULL) Engine = InnoDB;
+CREATE TABLE cape_reasons ( code CHAR(2) NOT NULL, reason VARCHAR(256) NOT NULL) Engine = InnoDB;
 INSERT INTO  cape_reasons VALUES
 ('AA','Waiting Terminal/Yard acceptance'), 
 ('AB','Waiting Customer release of documentation'), 
@@ -130,7 +130,7 @@ INSERT INTO  cape_reasons VALUES
 ('MV','Engineer\'s on-track equipment failure outside possession'), 
 ('MW','Weather - effect on T&amp;RS equipment'), 
 ('MX','Diesel loco failure/defect/attention: brakes'), 
-('MY','Mishap - T&RS cause'), 
+('MY','Mishap - T&amp;RS cause'), 
 ('MZ','Other Fleet Engineer causes/initial attribution'), 
 ('NA','Ontrain TASS Failure'), 
 ('NB','TASS - No fault found'), 
@@ -301,7 +301,7 @@ INSERT INTO  cape_reasons VALUES
 ('YO','Waiting platform/station congestion/platform change'), 
 ('YP','Delayed by diverted train'), 
 ('YQ','Passenger overcrowding caused by a train being of short- formation'), 
-('YU','Prime cause of most unit swaps'), 
+('YU','Service recovery - Booked rolling stock not available'), 
 ('YX','Passenger overcrowding caused by delay/cancellation of another train'), 
 ('ZW','Unattributed Cancellations'), 
 ('ZX','Unexplained late start'), 

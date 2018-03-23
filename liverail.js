@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2013, 2014, 2015 Phil Wieland
+    Copyright (C) 2013, 2014, 2015, 2016, 2017 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -43,6 +43,13 @@ function summary_onclick()
    window.location = result;
 }
 
+function freight_onclick()
+{
+   ar_off();
+   var result = url_base + "frt" + '/' + document.getElementById("search_loc").value + '/' + document.getElementById("search_date").value;
+   window.location = result;
+}
+
 function depart_onclick()
 {
    ar_off();
@@ -80,10 +87,19 @@ function status_onclick()
    window.location = result;
 }
 
+
+
 function train_date_onclick(schedule_id)
 {
    ar_off();
    var result = url_base + "train" + '/' + schedule_id + '/' + document.getElementById("train_date").value;
+   window.location = result;
+}
+
+function train_onclick(id_date)
+{
+   ar_off();
+   var result = url_base + "train" + '/' + id_date;
    window.location = result;
 }
 
@@ -93,11 +109,11 @@ function ar_onclick()
    {
       timer_refresh = 1;
       show_progress(); 
-      document.getElementById("progress").style.display='';
+      document.getElementById("progress").style.visibility='';
    }
    else
    {
-      document.getElementById("progress").style.display='none';
+      document.getElementById("progress").style.visibility='hidden';
       timer_refresh = 0;
    }
 }
@@ -107,7 +123,7 @@ function ar_off()
    if(document.getElementById("ar"))
    {
       document.getElementById("ar").checked = false;
-      document.getElementById("progress").style.display='none';
+      document.getElementById("progress").style.visibility='hidden';
    }
    if(smart_update_req) smart_update_req.abort();
    smart_update_req = null;
@@ -119,6 +135,11 @@ function startup()
 {
    tick_timer = setInterval(tick, refresh_tick);
    
+   if(document.getElementById("display_handle") && document.getElementById("display_handle").value === "AROFF")
+   {
+      ar_off();
+   }
+
    if(document.getElementById("ar") && document.getElementById("ar").checked)
    {
       // Refresh has been enabled.
@@ -127,7 +148,7 @@ function startup()
       if(url_parts[5] == "sum" || url_parts[5] == "dep" || url_parts[5] == "panel")
       {
          // Smart update page.  Trigger an immediate update
-         document.getElementById("progress").style.display='none';
+         document.getElementById("progress").style.visibility='hidden';
          timer_refresh = 1;
       }
       else
@@ -140,7 +161,7 @@ function startup()
    {
       if(document.getElementById("progress") )
       {
-         document.getElementById("progress").style.display='none';
+         document.getElementById("progress").style.visibility='hidden';
       }
    }
 }
@@ -177,20 +198,33 @@ function tick()
          {
             show_progress();
             var url = document.URL;
-            if(url.substr(url.length - 2, 2) != "/r") { url += "/r"; }
+            var altered_url = false;
+            if(url.substr(url.length - 2, 2) != "/r") 
+            { 
+               url += "/r";
+               altered_url = true;
+            }
             var url_parts = url.split('/');
             if(url_parts[5] == "sum" || url_parts[5] == "dep" || url_parts[5] == "panel")
             {
                // Smart update
                smart_update(url);
-               document.getElementById("progress").style.display='';
+               document.getElementById("progress").style.visibility='';
             }
             else
             {
                clearInterval(tick_timer);
                document.getElementById("bottom-line").innerHTML += "&nbsp;&nbsp;Refreshing...";
-               // Just reload the page
-               window.location = url;
+               if(altered_url)
+               {
+                  // Can't use reload because the current URL doesn't have /r on the end.
+                  window.location = url;
+               }
+               else
+               {
+                  // Use reload so scroll position isn't changed.
+                  window.location.reload();
+               }
             }
             timer_refresh_timeout = now + refresh_timeout_period;
             timer_refresh = 0;
@@ -214,7 +248,7 @@ function tick()
 function show_progress()
 {
    var now = new Date().getTime();
-   var progress = '<div style="background-color:white;display:block;width:100%%;height:';
+   var progress = '<div style="background-color:white;display:block;width:100%;height:';
    var step = 25 - Math.round((timer_refresh - now) * 25 / refresh_period);
    if(step > 25) step = 25;
    if(step < 0 ) step = 0;
@@ -225,15 +259,14 @@ function show_progress()
 
 function smart_update(url)
 {
-
    if(smart_update_req)
    {
       smart_update_req.abort();
       smart_update_req = null;
    }
-   var update_url = url.replace('/sum', '/sumu');
-   update_url = update_url.replace('/dep', '/depu');
-   update_url = update_url.replace('/panel', '/panelu');
+   var update_url = url.replace('liverail/sum', 'liverail/sumu');
+   update_url = update_url.replace('liverail/dep', 'liverail/depu');
+   update_url = update_url.replace('liverail/panel', 'liverail/panelu');
    document.getElementById("bottom-line").innerHTML += "&nbsp;&nbsp;Updating...";
 
    smart_update_req = new XMLHttpRequest();

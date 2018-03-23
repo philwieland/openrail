@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2013, 2014, 2015, 2016 Phil Wieland
+    Copyright (C) 2013, 2014, 2015, 2016, 2017 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -41,9 +41,15 @@
 #include "misc.h"
 #include "db.h"
 #include "database.h"
+#include "build.h"
 
 #define NAME  "vstpdb"
-#define BUILD "X329"
+
+#ifndef RELEASE_BUILD
+#define BUILD "Y305p"
+#else
+#define BUILD RELEASE_BUILD
+#endif
 
 static void perform(void);
 static void process_frame(const char * body);
@@ -76,6 +82,7 @@ static jsmntok_t tokens[NUM_TOKENS];
 // Time in hours (local) when daily statistical report is produced.
 // (Set > 23 to disable daily report.)
 #define REPORT_HOUR 4
+#define REPORT_MINUTE 1
 
 // Stats
 static time_t start_time;
@@ -276,7 +283,7 @@ int main(int argc, char *argv[])
       struct sysinfo info;
       word logged = false;
       word i;
-      while(run && !debug && (sysinfo(&info) || info.uptime < (512 + 128)))
+      while(run && !debug && !sysinfo(&info) && info.uptime < (512 + 128))
       {
          if(!logged) _log(GENERAL, "Startup delay...");
          logged = true;
@@ -293,8 +300,7 @@ int main(int argc, char *argv[])
 
 static void perform(void)
 {
-   word last_report_day = 9;
-
+   word last_report_day;
    // Initialise database
    {
       db_init(conf[conf_db_server], conf[conf_db_user], conf[conf_db_password], conf[conf_db_name]);
@@ -310,10 +316,7 @@ static void perform(void)
    {
       time_t now = time(NULL);
       struct tm * broken = localtime(&now);
-      if(broken->tm_hour >= REPORT_HOUR)
-      {
-         last_report_day = broken->tm_wday;
-      }
+      last_report_day = broken->tm_wday;
    }
    while(run)
    {   
@@ -325,7 +328,7 @@ static void perform(void)
          {
             time_t now = time(NULL);
             struct tm * broken = localtime(&now);
-            if(broken->tm_hour >= REPORT_HOUR && broken->tm_wday != last_report_day)
+            if(broken->tm_wday != last_report_day && broken->tm_hour >= REPORT_HOUR && broken->tm_min >= REPORT_MINUTE)
             {
                last_report_day = broken->tm_wday;
                report_stats();
@@ -517,24 +520,18 @@ static void process_delete_schedule(const char * string, const jsmntok_t * token
       id = atol(row0[0]);
       update_id = atoi(row0[1]);
 
-      //sprintf(query, "DELETE FROM cif_schedule_locations WHERE cif_schedule_id = %ld", id);
-      //if(!db_query(query))
-      //{
-      //}
-
-      sprintf(query, "UPDATE cif_schedules SET deleted = %ld where id = %ld", time(NULL), id);
-   
+      sprintf(query, "UPDATE cif_schedules SET deleted = %ld where id = %u", time(NULL), id);
       if(!db_query(query))
       {
          deleted++;
          if(update_id)
          {
             // Can never happen!
-            _log(MAJOR, "Deleted non-VSTP schedule %ld.", id);
+            _log(MAJOR, "Deleted non-VSTP schedule %u.", id);
          }
          else
          {
-            _log(DEBUG, "Deleted VSTP schedule %ld \"%s\".", id, CIF_train_uid);
+            _log(DEBUG, "Deleted VSTP schedule %u \"%s\".", id, CIF_train_uid);
          }
       }
    }
@@ -555,7 +552,7 @@ static void process_delete_schedule(const char * string, const jsmntok_t * token
 static void process_create_schedule(const char * string, const jsmntok_t * tokens, const word update)
 {
    // update true indicates this is as the result of a VSTP update.
-   char zs[128], zs1[128];
+   char zs[1024], zs1[1024];
    char query[2048];
    word i;
    char uid[16], stp_indicator[2];
@@ -652,14 +649,14 @@ static void process_create_schedule(const char * string, const jsmntok_t * token
          result = db_store_result();
          if((row = mysql_fetch_row(result)))
          {
-            sprintf(query, "UPDATE cif_schedules SET deduced_headcode = '%s', deduced_headcode_status = 'D' WHERE id = %ld", row[0], id);
+            sprintf(query, "UPDATE cif_schedules SET deduced_headcode = '%s', deduced_headcode_status = 'D' WHERE id = %u", row[0], id);
             db_query(query);
-            _log(DEBUG, "Deduced headcode \"%s\" applied to overlay schedule %ld, uid \"%s\".", row[0], id, uid);
+            _log(DEBUG, "Deduced headcode \"%s\" applied to overlay schedule %u, uid \"%s\".", row[0], id, uid);
             stats[HeadcodeDeduced]++;
          }
          else
          {
-            _log(DEBUG, "Deduced headcode not found for overlay schedule %ld, uid \"%s\".", id, uid);
+            _log(DEBUG, "Deduced headcode not found for overlay schedule %u, uid \"%s\".", id, uid);
          }
          mysql_free_result(result);
       }
@@ -670,7 +667,7 @@ static void process_create_schedule(const char * string, const jsmntok_t * token
 
    if(huyton_flag) 
    {
-      _log(DEBUG, "Created schedule %ld%s.  +++ Passes Huyton +++", id, update?" as a result of an Update transaction":"");
+      _log(DEBUG, "Created schedule %u%s.  +++ Passes Huyton +++", id, update?" as a result of an Update transaction":"");
    }
 
    if(huyton_flag)
@@ -685,10 +682,10 @@ static void process_create_schedule(const char * string, const jsmntok_t * token
       strcat(message, "\n\n");
       EXTRACT("CIF_train_uid", zs1);
       EXTRACT("CIF_stp_indicator", stp);
-      sprintf(zs, "%ld (%s %s) ", id, zs1, stp);
+      sprintf(zs, "%u (%s %s) ", id, zs1, stp);
       EXTRACT("signalling_id", zs1);
       strcat(zs, zs1);
-      sprintf(query, "SELECT tiploc_code, departure FROM cif_schedule_locations WHERE record_identity = 'LO' AND cif_schedule_id = %ld", id);
+      sprintf(query, "SELECT tiploc_code, departure FROM cif_schedule_locations WHERE record_identity = 'LO' AND cif_schedule_id = %u", id);
       if(!db_query(query))
       {
          result0 = db_store_result();
@@ -699,7 +696,7 @@ static void process_create_schedule(const char * string, const jsmntok_t * token
          }
          mysql_free_result(result0);
       }
-      sprintf(query, "SELECT tiploc_code FROM cif_schedule_locations WHERE record_identity = 'LT' AND cif_schedule_id = %ld", id);
+      sprintf(query, "SELECT tiploc_code FROM cif_schedule_locations WHERE record_identity = 'LT' AND cif_schedule_id = %u", id);
       if(!db_query(query))
       {
          result0 = db_store_result();
@@ -712,7 +709,7 @@ static void process_create_schedule(const char * string, const jsmntok_t * token
 
       strcat(message, zs);
 
-      sprintf(query, "SELECT schedule_start_date, schedule_end_date, CIF_stp_indicator FROM cif_schedules WHERE id = %ld", id);
+      sprintf(query, "SELECT schedule_start_date, schedule_end_date, CIF_stp_indicator FROM cif_schedules WHERE id = %u", id);
       if(!db_query(query))
       {
          result0 = db_store_result();
@@ -737,7 +734,7 @@ static void process_create_schedule(const char * string, const jsmntok_t * token
          }
          mysql_free_result(result0);
       }
-      sprintf(query, "SELECT departure, arrival, pass, tiploc_code FROM cif_schedule_locations WHERE (tiploc_code = 'HUYTON' OR tiploc_code = 'HUYTJUN') AND cif_schedule_id = %ld", id);
+      sprintf(query, "SELECT departure, arrival, pass, tiploc_code FROM cif_schedule_locations WHERE (tiploc_code = 'HUYTON' OR tiploc_code = 'HUYTJUN') AND cif_schedule_id = %u", id);
       if(!db_query(query))
       {
          result0 = db_store_result();
@@ -878,9 +875,7 @@ static void process_update_schedule(const char * string, const jsmntok_t * token
       {
          row0 = mysql_fetch_row(result0);
          id = atol(row0[0]);
-         //sprintf(query, "DELETE FROM cif_schedule_locations WHERE cif_schedule_id = %ld", id);
-         //db_query(query);
-         sprintf(query, "UPDATE cif_schedules SET deleted = %ld WHERE id = %ld", time(NULL), id);
+         sprintf(query, "UPDATE cif_schedules SET deleted = %ld WHERE id = %u", time(NULL), id);
          db_query(query);
       }
       mysql_free_result(result0);

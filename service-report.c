@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2013, 2014 Phil Wieland
+    Copyright (C) 2013, 2014, 2017 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -28,6 +28,7 @@
 
 #include "misc.h"
 #include "db.h"
+#include "build.h"
 
 static void report(const char * const tiploc, const word year, const word month);
 static void report_day(const char * const tiploc, time_t when);
@@ -35,7 +36,11 @@ static void report_train_day(const word index, const time_t when, const char * c
 static char * percentage(const dword num, const dword den);
 
 #define NAME "service-report"
-#define BUILD "X328"
+#ifndef RELEASE_BUILD
+#define BUILD "YB07p"
+#else
+#define BUILD RELEASE_BUILD
+#endif
 
 static word debug;
 static word bus;
@@ -476,7 +481,7 @@ static void report_train_day(const word index, const time_t when, const char * c
    _log(DEBUG, "report_train_day(%ld, %ld, \"%s\")", cif_schedule_id, when, tiploc);
    
    //                     0             1                    2                  3              4              5                  6           
-   sprintf(query, "SELECT train_status, schedule_start_date, schedule_end_date, signalling_id, CIF_train_uid, CIF_stp_indicator, update_id FROM cif_schedules WHERE id = %ld", cif_schedule_id);
+   sprintf(query, "SELECT train_status, schedule_start_date, schedule_end_date, signalling_id, CIF_train_uid, CIF_stp_indicator, update_id FROM cif_schedules WHERE id = %u", cif_schedule_id);
 
    if(!db_query(query))
    {
@@ -498,7 +503,7 @@ static void report_train_day(const word index, const time_t when, const char * c
             byte dom = broken->tm_mday;
 
             // Only accept activations where dom matches, and are +- 15 days (To eliminate last month's activation.)  YUK
-            sprintf(query, "SELECT created, trust_id, deduced FROM trust_activation WHERE cif_schedule_id = %ld AND substring(trust_id FROM 9) = '%02d' AND created > %ld AND created < %ld order by created", cif_schedule_id, dom, when - 15*24*60*60, when + 15*24*60*60);
+            sprintf(query, "SELECT created, trust_id, deduced FROM trust_activation WHERE cif_schedule_id = %u AND substring(trust_id FROM 9) = '%02d' AND created > %ld AND created < %ld order by created", cif_schedule_id, dom, when - 15*24*60*60, when + 15*24*60*60);
             if(!db_query(query))
             {
                result1 = db_store_result();
@@ -512,18 +517,19 @@ static void report_train_day(const word index, const time_t when, const char * c
 
             if(status)
             {
-               sprintf(query, "SELECT event_type, loc_stanox, actual_timestamp, timetable_variation, variation_status from trust_movement where trust_id='%s' AND created > %ld AND created < %ld order by actual_timestamp, planned_timestamp, created", trust_id, when - 15*24*60*60, when + 15*24*60*60);
+               sprintf(query, "SELECT flags, loc_stanox, actual_timestamp, timetable_variation from trust_movement where trust_id='%s' AND created > %ld AND created < %ld order by actual_timestamp, planned_timestamp, created", trust_id, when - 15*24*60*60, when + 15*24*60*60);
                if(!db_query(query))
                {
                   result1 = db_store_result();
                   while((row1 = mysql_fetch_row(result1)))
                   {
+                     word flags = atoi(row1[0]);
                      if(status < 4)
                      {
                         status = Moving;
                         strcpy(actual, row1[2]);
                         deviation = atoi(row1[3]);
-                        late = !strcasecmp("late", row1[4]);
+                        late = ((flags & 0x0018) == 0x0010);
                      }
                      if(status < Departed)
                      {
@@ -542,7 +548,7 @@ static void report_train_day(const word index, const time_t when, const char * c
                                     status = Departed;
                                     strcpy(actual, row1[2]);
                                     deviation = atoi(row1[3]);
-                                    late = !strcasecmp("late", row1[4]);
+                                    late = ((flags & 0x0018) == 0x0010);
                                  }
                                  else if(status < Arrived)
                                  {
@@ -627,7 +633,7 @@ static char * percentage(const dword num, const dword den)
    if(den)
    {
       dword permille = 1000 * num / den;
-      sprintf(result, "%ld.%ld", permille/10, permille%10);
+      sprintf(result, "%u.%u", permille/10, permille%10);
    }
    else
    {

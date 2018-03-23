@@ -5,7 +5,7 @@
 # Required-Stop:     $remote_fs $syslog stompy mysql
 # Default-Start:     2 3 4 5
 # Default-Stop:      0 1 6
-# Short-Description: vstpdb Process VSTP timetable data 
+# Short-Description: Process VSTP timetable data 
 # Description:       Receive VSTP STOMP frames from stompy and update the timetable
 #                    database accordingly
 ### END INIT INFO

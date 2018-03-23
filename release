@@ -1,9 +1,12 @@
 #!/bin/bash
 
+# Build Y813n
+
+shopt -s extglob
 host=`hostname`
 
 if [ "$1" = "all" ]; then
-    echo tv > /tmp/stompy.cmd
+    echo tvd > /tmp/stompy.cmd
     sudo pkill -SIGUSR1 stompy
 fi
 
@@ -62,12 +65,12 @@ if [ "$1" = "all" -o "$1" = "railquery" ]; then
     if [ "$host" = "friedbread" ]; then
         echo "Releasing railquery for friedbread"
         sudo cp railquery.cgi        /usr/lib/cgi-bin/railquery.cgi
-        sudo cp railquery.css        /var/www/friedbread/auxy/railquery.css
+        sudo cp liverail.css        /var/www/friedbread/auxy/liverail.css
         sudo cp railquery.js         /var/www/friedbread/auxy/railquery.js
     else
         echo "Releasing railquery"
         sudo cp railquery.cgi        /usr/lib/cgi-bin/railquery.cgi
-        sudo cp railquery.css        /var/www/auxy/railquery.css
+        sudo cp liverail.css        /var/www/auxy/liverail.css
         sudo cp railquery.js         /var/www/auxy/railquery.js
     fi
     DONE="railquery"
@@ -79,29 +82,63 @@ if [ "$1" = "all" -o "$1" = "livesig" ]; then
         sudo cp livesig.cgi        /usr/lib/cgi-bin/livesig.cgi
         sudo cp livesig.css        /var/www/friedbread/auxy/livesig.css
         sudo cp livesig.js         /var/www/friedbread/auxy/livesig.js
-        m4 livesig1.svg > /tmp/zzz.svg && sudo ./cpm /tmp/zzz.svg /var/www/friedbread/auxy/livesig1.svg
-        m4 livesig2.svg > /tmp/zzz.svg && sudo ./cpm /tmp/zzz.svg /var/www/friedbread/auxy/livesig2.svg
-        m4 livesig3.svg > /tmp/zzz.svg && sudo ./cpm /tmp/zzz.svg /var/www/friedbread/auxy/livesig3.svg
+        for f in livesig+([0-9]).svg
+        do
+            echo "   Diagram $f"
+            m4 $f > /tmp/zzz.svg && sudo ./cpm /tmp/zzz.svg /var/www/friedbread/auxy/$f
+        done
     else
         if [ "$host" = "oakwood" ]; then
             echo "Releasing livesig for oakwood"
-            sudo cp livesig.cgi        /usr/lib/cgi-bin-pub/livesig.cgi
+            sudo cp livesig.cgi        /usr/lib/cgi-bin/livesig.cgi
             sudo cp livesig.css        /var/www/auxy/livesig.css
             sudo cp livesig.js         /var/www/auxy/livesig.js
-            m4 livesig1.svg > /tmp/zzz.svg && sudo ./cpm /tmp/zzz.svg /var/www/auxy/livesig1.svg
-            m4 livesig2.svg > /tmp/zzz.svg && sudo ./cpm /tmp/zzz.svg /var/www/auxy/livesig2.svg
-            m4 livesig3.svg > /tmp/zzz.svg && sudo ./cpm /tmp/zzz.svg /var/www/auxy/livesig3.svg
+            for f in livesig+([0-9]).svg
+            do
+                echo "   Diagram $f"
+                m4 $f > /tmp/zzz.svg && sudo ./cpm /tmp/zzz.svg /var/www/auxy/$f
+            done
         else
             echo "Releasing livesig"
             sudo cp livesig.cgi        /usr/lib/cgi-bin/livesig.cgi
             sudo cp livesig.css        /var/www/auxy/livesig.css
             sudo cp livesig.js         /var/www/auxy/livesig.js
-            m4 livesig1.svg > /tmp/zzz.svg && sudo cp /tmp/zzz.svg /var/www/auxy/livesig1.svg
-            m4 livesig2.svg > /tmp/zzz.svg && sudo cp /tmp/zzz.svg /var/www/auxy/livesig2.svg
-            m4 livesig3.svg > /tmp/zzz.svg && sudo cp /tmp/zzz.svg /var/www/auxy/livesig3.svg
+            for f in livesig+([0-9]).svg
+            do
+                echo "   Diagram $f"
+                m4 $f > /tmp/zzz.svg && sudo cp /tmp/zzz.svg /var/www/auxy/$f
+            done
         fi
     fi
     DONE="livesig"
+fi
+
+if [ "$1" = "all" -o "$1" = "test-diags" ]; then
+    if [ "$host" = "friedbread" ]; then
+        echo "Releasing test diagrams for friedbread"
+        for f in livesig[0-9][0-9][0-9].svg
+        do
+            echo "   Diagram $f"
+            m4 $f > /tmp/zzz.svg && sudo ./cpm /tmp/zzz.svg /var/www/friedbread/auxy/$f
+        done
+    else
+        if [ "$host" = "oakwood" ]; then
+            echo "Releasing test diagrams for oakwood"
+            for f in livesig[0-9][0-9][0-9].svg
+            do
+                echo "   Diagram $f"
+                m4 $f > /tmp/zzz.svg && sudo ./cpm /tmp/zzz.svg /var/www/auxy/$f
+            done
+        else
+            echo "Releasing test diagrams"
+            for f in livesig[0-9][0-9][0-9].svg
+            do
+                echo "   Diagram $f"
+                m4 $f > /tmp/zzz.svg && sudo cp /tmp/zzz.svg /var/www/auxy/$f
+            done
+        fi
+    fi
+    DONE="test-diags"
 fi
 
 if [ "$1" = "all" -o "$1" = "dump-rail" ]; then
@@ -121,7 +158,7 @@ if [ "$1" = "all" -o "$1" = "stompy" ]; then
     sleep 4 
     sudo cp stompy /usr/sbin/stompy 
     sudo /etc/init.d/stompy start
-    DONE="vstpdb"
+    DONE="stompy"
 fi
 
 if [ "$1" = "all" -o "$1" = "vstpdb" ]; then
@@ -166,7 +203,38 @@ if [ "$1" = "all" -o "$1" = "limed" ]; then
     DONE="limed"
 fi
 
+if [ "$1" = "all" -o "$1" = "jiankong" ]; then
+    echo "Releasing jiankong"
+    sudo /etc/init.d/jiankong stop
+    sleep 4 
+    sudo cp jiankong /usr/sbin/jiankong 
+    sudo /etc/init.d/jiankong start
+    DONE="jiankong"
+fi
+
+if [ "$1" = "all" -o "$1" = "wtt" ]; then
+    echo "Releasing wtt"
+    if [ "$host" = "friedbread" ]; then
+        sudo cp wtt.php /var/www/friedbread/wtt.php 
+    else
+        sudo cp wtt.php /usr/lib/cgi-bin/wtt.php 
+    fi
+    DONE="wtt"
+fi
+
+if [ "$1" = "all" -o "$1" = "ops" ]; then
+    echo "Releasing ops"
+    if [ "$host" = "friedbread" ]; then
+        sudo cp ops.cgi /usr/lib/cgi-bin/secure/ops.cgi 
+        sudo cp liverail.css        /var/www/friedbread/auxy/liverail.css
+    else
+        sudo cp ops.cgi /usr/lib/cgi-bin/secure/ops.cgi 
+        sudo cp liverail.css        /var/www/auxy/liverail.css
+    fi
+    DONE="ops"
+fi
+
 if [ "$DONE" = "" ]; then
-    echo "Usage:  $0 cifdb|archdb|corpusdb|vstpdb|trustdb|tddb|liverail|livesig|railquery|stompy|limed|all    -    Release specified unit or all."
+    echo "Usage:  $0 cifdb|archdb|corpusdb|vstpdb|trustdb|tddb|liverail|livesig|railquery|stompy|limed|jiankong|test-diags|all    -    Release specified unit or all."
 fi
 

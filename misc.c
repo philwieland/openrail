@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2013, 2014, 2015, 2016 Phil Wieland
+    Copyright (C) 2013, 2014, 2015, 2016, 2017 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -28,6 +28,8 @@
 #include <netinet/in.h>
 #include <errno.h>
 #include <netdb.h>
+#include <wait.h>
+#include <sys/stat.h>
 #include "misc.h"
 
 static char log_file[512];
@@ -53,6 +55,7 @@ char * time_text(const time_t time, const byte local)
            local?"":"Z");
    return result;
 }
+
 
 char * day_date_text(const time_t time, const byte local)
 {
@@ -150,6 +153,7 @@ void _log(const byte level, const char * text, ...)
          case MINOR:   strcat(log, "[MINOR  ] "); break;
          case MAJOR:   strcat(log, "[MAJOR  ] "); break;
          case CRITICAL:strcat(log, "[CRIT.  ] "); break;
+         case ABEND:   strcat(log, "[ABEND  ] "); break;
          default:      strcat(log, "[       ] "); break;
          }
       }
@@ -179,7 +183,7 @@ void _log(const byte level, const char * text, ...)
       fprintf(fp, "\n");
       fclose(fp);
    }
-   
+
    // Print as well
    if(log_mode == 1 || log_mode == 4) 
    {
@@ -202,6 +206,8 @@ void _log_init(const char * l, const word d)
    // 2 debug, no print
    // 3 No logging at all.
    // 4 Normal running plus print.
+   // DANGER:  On a daemonised program, print WILL NOT WORK!
+
    if(strlen(l) < 500) strcpy(log_file, l);
    else log_file[0] = '\0';
    log_mode = d;
@@ -213,7 +219,7 @@ char * commas(const dword n)
    char zs[32];
    word i,j,k;
 
-   sprintf(zs, "%ld", n);
+   sprintf(zs, "%u", n);
    k = strlen(zs);
 
    j = 0;
@@ -253,7 +259,7 @@ char * show_spaces(const char * string)
    static char result[128];
    word i,j;
 
-   for(j=i=0; string[i] && j < 127; i++)
+   for(j=i=0; string[i] && j < 120; i++)
    {
       if(string[i] == ' ')
       {
@@ -276,41 +282,92 @@ char * show_spaces(const char * string)
 
 word email_alert(const char * const name, const char * const build, const char * const title, const char * const message)
 {
-   FILE * fp;
-   char command[1024], tmp_file[256], host[256];
-   int i;
-
    _log(PROC, "email_alert()");
-
    
-   if(!conf[conf_report_email][0]) return 0;
-   
-   sprintf(tmp_file, "/tmp/email-%lld", time_us());
-
-   if(gethostname(host, sizeof(host))) strcpy(host, "(unknown host)");
-
-   while(!(fp=fopen(tmp_file, "w")))
+   if(!(*conf[conf_report_email])) return 0; // NOT a failure.  User has elected to receive no emails.
    {
-      if(strlen(tmp_file) < 40) strcat(tmp_file, "x");
-      else
+      char * c;
+      for(c = conf[conf_report_email]; *c && *c != '@'; c++);
+      if(*c != '@')
       {
-         _log(MAJOR, "email_alert():  Failed to open email file.");
-         return 1;
+         _log(MAJOR, "Unable to send email report to invalid email address \"%s\".", conf[conf_report_email]);
+         return 2;
       }
    }
 
-   fprintf(fp, "Report from %s build %s at %s.\n\n%s\n", name, build, host, message);
-   fclose(fp);
-   sprintf(command, "/bin/cat %s | /usr/bin/mail -s \"[openrail-%s] %s\" %s >>/tmp/email_alert.log 2>&1", 
-           tmp_file, name, title, conf[conf_report_email]);
-   i = system(command);
-   
-   _log(DEBUG, "email_alert():  system(\"%s\") returned %d", command, i);
+   pid_t child_pid = fork();
+   if(child_pid < 0)
+   {
+      _log(MAJOR, "email_alert() failed to fork child.  Error %d %s.", errno, strerror(errno));
+      return 1;
+   }
+   if(child_pid)
+   {
+      // Parent
+      wait(NULL);
+      return 0;
+   }
 
-   unlink(tmp_file);
-           
-   // Success
-   return 0;
+   // Child
+   child_pid = fork();
+   if(child_pid < 0)
+   {
+      // Failed
+      _exit(1);
+   }
+   if(child_pid)
+   {
+      // Child
+      _exit(0);
+   }
+
+   // Grandchild
+   // What we have here is an orphaned process which can send the email and then will be reaped by the system.   
+
+   FILE * fp;
+   char tmp_file[512], host[256];
+   static word serial;
+   char * c;
+   time_t now = time(NULL);
+
+   sprintf(tmp_file, "/tmp/email-%s-%llx-%x", name, time_us(), serial++);
+   for(c = tmp_file; *c; c++) if(*c == ' ') *c = '_';
+
+   if(gethostname(host, sizeof(host))) strcpy(host, "(unknown host)");
+
+   while((!access(tmp_file, F_OK)) || !(fp=fopen(tmp_file, "w")))
+   {
+      if(strlen(tmp_file) < 40) 
+      {
+         strcat(tmp_file, "x");
+      }
+      else
+      {
+         _exit(1);
+      }
+   }
+
+   fprintf(fp, "#!/bin/sh\n");
+   fprintf(fp, "/usr/bin/mail -s \"[openrail:%s:%s] %s\" %s >/dev/null 2>&1 <<BoDyTeXt\n", 
+           host, name, title, conf[conf_report_email]);
+
+   fprintf(fp, "  From: Openrail %s build %s\n", name, build);
+   fprintf(fp, "Server: %s\n", host);
+   fprintf(fp, "  Time: %s\n\n%s\n", time_text(now, true), message);
+
+   fprintf(fp, "BoDyTeXt\n");
+   if(*conf[conf_debug]) fprintf(fp, "sleep 1024\n");
+   fprintf(fp, "rm %s\n", tmp_file);
+   fprintf(fp, "exit\n");
+
+   fclose(fp);
+   chmod(tmp_file, 0555);
+
+   char * argv[] = { "/bin/sh", "-c", tmp_file, NULL};
+   execv("/bin/sh", argv);
+
+   // Should never come here
+   _exit(1);       
 }
 
 char * abbreviated_host_id(void)
@@ -399,109 +456,6 @@ char * show_time_text(const char * const input)
    return output;
 }
 
-#if 0
-#define CONFIG_SIZE 4096
-int load_config(const char * const filepath)
-{
-   // Read config file.
-   // Notes:
-   // Blank lines and lines beginning with # will be ignored.
-   // Other than that, all lines must contain <setting>:<value>  
-   // Spaces either side of the : are optional and will be stripped.
-   // Value may be enclosed in quotes ("), these will be stripped.
-   // A correctly formatted line containing an unrecognised setting (e.g. foo: bar) will be silently ignored.
-   //
-   char *line_start, *val_start, *val_end, *line_end, *ic;
-   static char buf[CONFIG_SIZE];
-   char * options;
-   FILE * cfg;
-   if((cfg = fopen(filepath, "r")))
-   {
-      ssize_t z = fread(buf, 1, CONFIG_SIZE, cfg);
-      fclose(cfg);
-      if(z < 1) return 2;
-   }
-   else
-      return 1;
-
-   buf[CONFIG_SIZE - 1] = '\0';
-
-   conf.db_server = conf.db_name = conf.db_user = conf.db_pass = conf.nr_user = conf.nr_pass = conf.debug = conf.report_email = &buf[CONFIG_SIZE - 1];
-   conf.stomp_topics = conf.stomp_topic_names = conf.stomp_topic_log = options = &buf[CONFIG_SIZE - 1];
-
-   line_start=buf;
-   while(1)
-   {
-      ic = strchr(line_start, ':');
-      line_end = strchr(line_start, '\n');
-      
-      // config is finished
-      if (line_end == NULL)
-      {
-         // Determine options
-         conf.option_stompy_bin =            (strstr(options, "stompy_bin")    != NULL);
-         conf.option_trustdb_no_deduce_act = (strstr(options, "trustdb_no_deduce_act") != NULL);
-         conf.option_huyton_alerts         = (strstr(options, "huyton_alerts") != NULL);
-
-         return 0;
-      }
-
-      if(*line_start == '\n' || *line_start == '#')
-      {
-         // Blank line or comment
-      }
-      else
-      {
-         if(!ic || ic > line_end)
-         {
-            // Colon missing.  Error.
-            return 3;
-         }
-         val_start = ic;
-         val_end = line_end;
-         while (*(--ic) == ' ');
-         *(++ic) = 0;
-         while (*(++val_start) == ' ');
-         while (*(--val_end) == ' ');
-         *(++val_end) = 0;
-
-         if(*val_start == '"' && *(val_end-1) == '"')
-         {
-            val_start++;
-            val_end--;
-            *val_end=0;
-         }
-
-         if (strcmp(line_start, "db_server") == 0)
-            conf.db_server = val_start;
-         else if (strcmp(line_start, "db_name") == 0)
-            conf.db_name = val_start;
-         else if (strcmp(line_start, "db_user") == 0)
-            conf.db_user = val_start;
-         else if (strcmp(line_start, "db_password") == 0)
-            conf.db_pass = val_start;
-         else if (strcmp(line_start, "nr_user") == 0)
-            conf.nr_user = val_start;
-         else if (strcmp(line_start, "nr_password") == 0)
-            conf.nr_pass = val_start;
-         else if (strcmp(line_start, "report_email") == 0)
-            conf.report_email = val_start;
-         else if (strcmp(line_start, "debug") == 0)
-            conf.debug = val_start;
-         else if (strcmp(line_start, "stomp_topics") == 0)
-            conf.stomp_topics = val_start;
-         else if (strcmp(line_start, "stomp_topic_names") == 0)
-            conf.stomp_topic_names = val_start;
-         else if (strcmp(line_start, "stomp_topic_log") == 0)
-            conf.stomp_topic_log = val_start;
-         else if (strcmp(line_start, "options") == 0)
-            options = val_start;
-      }
-      line_start = line_end + 1;
-   }
-}
-#else
-
 #define CONFIG_SIZE 4096
 char * conf[MAX_CONF];
 static const char * const config_keys[MAX_CONF] = {"db_server", "db_name", "db_user", "db_password", 
@@ -509,26 +463,31 @@ static const char * const config_keys[MAX_CONF] = {"db_server", "db_name", "db_u
                                                    "report_email",
                                                    "stomp_topics", "stomp_topic_names", "stomp_topic_log",
                                                    "stompy_bin", "trustdb_no_deduce_act", "huyton_alerts",
-                                                   "debug",};
+                                                   "live_server", "tddb_report_new", "debug",};
 static const byte config_type[MAX_CONF] = { 0, 0, 0, 0,
                                             0, 0,
                                             0,
                                             0, 0, 0,
                                             1, 1, 1,
-                                            1,};
+                                            1, 1, 1,
+};
 
 char * load_config(const char * const filepath)
 {
    // Read config file.
    // Notes:
    // Blank lines and lines beginning with # will be ignored.
-   // Other than that, all lines must contain <setting> <value>  
-   // A correctly formatted line containing an unrecognised setting (e.g. foo bar) will be silently ignored.
+   // Other than that, all lines must contain <name>[ <value>]
+   // <name> is not case sensitive.
+   // For value settings a missing value = ""
+   // Boolean settings will be true if the name is present, any value is ignored.
+   // (This means that "foo false" will set foo to true!)
+   // A correctly formatted line containing an unrecognised setting name (e.g. "foo bar" or "foo") will be silently ignored.
    //
    static char buf[CONFIG_SIZE];
    char line[256], key[256], value[256];
    size_t ll;
-   word buf_index;
+   word buf_index, set_count;
    size_t i,j;
    FILE * cfg;
 
@@ -541,6 +500,7 @@ char * load_config(const char * const filepath)
    buf[0] = 'T';
    buf[1] = '\0';
    buf_index = 2;
+   set_count = 0;
 
    // Initialise.  Could code some default values here?
    for(i=0; i < MAX_CONF; i++)
@@ -585,6 +545,7 @@ char * load_config(const char * const filepath)
                strcpy(&buf[buf_index], value);
                buf_index += (j + 1);
             }
+            set_count++;
          }
          else
          {
@@ -595,9 +556,10 @@ char * load_config(const char * const filepath)
       }
    }
    fclose(cfg);
-   return NULL;
+   if(!set_count) return "Invalid config file.";
+
+   return NULL; // Success.
 }
-#endif
 
 qword time_ms(void)
 {
@@ -780,9 +742,7 @@ void extract_match(const char * const source, const regmatch_t * const matches, 
    size = matches[match].rm_eo - matches[match].rm_so;
    if(size > max_length - 1) 
    {
-      char zs[128];
-      sprintf(zs, "extract_match():  String length 0x%zx truncated to 0x%zx.", size, max_length - 1);
-      _log(MAJOR, zs);
+      _log(MAJOR, "extract_match():  String length 0x%zx truncated to 0x%zx.", size, max_length - 1);
       size = max_length - 1;
    }
 
@@ -847,4 +807,34 @@ char * system_call(const char * const command)
 
    unlink(filename);
    return NULL;
+}
+
+char * show_inst_percent(qword * s, qword * t, const qword l, const qword n)
+{
+   static char display[8];
+
+   if(*s)
+   {
+      // Currently active
+      *t += (n - *s);
+      *s = n;
+   }
+
+   qword permille = 0;
+
+   if(l)
+   {
+      permille = (((10000LL * (*t))/l) + 5) / 10;
+   }
+
+   if(permille < 1000)
+   {
+      sprintf(display, "%2llu.%llu%%", permille/10, permille%10);
+   } 
+   else
+   {
+      sprintf(display, " 100%%");
+   }
+
+   return display;
 }
