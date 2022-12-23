@@ -6,17 +6,17 @@ a virtual host if desired.
 
 	DocumentRoot /var/www
 	<Directory />
-		Options FollowSymLinks -Indexes
+		Options +FollowSymLinks -Indexes
 		AllowOverride None
 	</Directory>
 	<Directory /var/www/>
-		Options -Indexes FollowSymLinks MultiViews
+		Options -Indexes +FollowSymLinks +MultiViews
 		AllowOverride None
 		Order allow,deny
 		allow from all
 	</Directory>
 	<Directory /var/www/auxy>
-		Options -Indexes FollowSymLinks MultiViews
+		Options -Indexes +FollowSymLinks +MultiViews
 		AllowOverride None
 		Order allow,deny
 		allow from all
