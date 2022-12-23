@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2015, 2016 Phil Wieland
+    Copyright (C) 2015, 2016, 2018, 2022 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -38,7 +38,7 @@
 #define NAME  "smartdb"
 
 #ifndef RELEASE_BUILD
-#define BUILD "Y129p"
+#define BUILD "3721p"
 #else
 #define BUILD RELEASE_BUILD
 #endif
@@ -145,7 +145,7 @@ int main(int argc, char **argv)
    }
 
    // Initialise database
-   if(db_init(conf[conf_db_server], conf[conf_db_user], conf[conf_db_password], conf[conf_db_name])) exit(1);
+   if(db_init(conf[conf_db_server], conf[conf_db_user], conf[conf_db_password], conf[conf_db_name], DB_MODE_NORMAL)) exit(1);
 
    if(!fetch_file() && !process_file())
    {
@@ -207,7 +207,7 @@ static word fetch_file(void)
    if(!result)
    {
       char url[256];
-      sprintf(url, "https://datafeeds.networkrail.co.uk/ntrod/SupportingFileAuthenticate?type=SMART");
+      sprintf(url, "https://%s/ntrod/SupportingFileAuthenticate?type=SMART", conf[conf_nr_server]);
       _log(DEBUG, "Target URL \"%s\"", url);
 
       curl_easy_setopt(curlh, CURLOPT_HTTPHEADER, slist);
@@ -281,6 +281,17 @@ static word fetch_file(void)
       if((r = system_call(zs)))
       {
          _log(MAJOR, "Failed to uncompress file:  %s", r);
+         if((fp_result = fopen(filepath_z, "r")))
+         {
+            char error_message[2048];
+            size_t length;
+            if((length = fread(error_message, 1, 2047, fp_result)) && error_message[0] == '<')
+            {
+               error_message[length] = '\0';
+               _log(MAJOR, "Received message:\n%s", error_message);   
+            }
+            fclose(fp_result);
+         }
          result = 5;
       }
    }
@@ -329,8 +340,14 @@ static word process_file(void)
       return 11;
    }      
 
-   // Reset the database
-   database_upgrade(smartdb);
+   // Upgrade the database
+   word e;
+   if((e = database_upgrade(smartdb)))
+   {
+      _log(CRITICAL, "Error %d in database_upgrade().  Aborting.", e);
+      exit(1);
+   }
+
    db_query("DELETE FROM smart");
 
    // Bodge:  Bin off the array stuff

@@ -1,5 +1,5 @@
  /*
-    Copyright (C) 2014, 2015, 2016, 2017 Phil Wieland
+    Copyright (C) 2014, 2015, 2016, 2017, 2018, 2019, 2020 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -38,7 +38,7 @@
 #define NAME  "archdb"
 
 #ifndef RELEASE_BUILD
-#define BUILD "YB05p"
+#define BUILD "1515p"
 #else
 #define BUILD RELEASE_BUILD
 #endif
@@ -211,12 +211,12 @@ int main(int argc, char **argv)
    
    // Initialise database
    {
-      db_init(conf[conf_db_server], conf[conf_db_user], conf[conf_db_password], conf[conf_db_name]);
+      db_init(conf[conf_db_server], conf[conf_db_user], conf[conf_db_password], conf[conf_db_name], DB_MODE_NORMAL);
 
       word e;
       if((e=database_upgrade(archdb)))
       {
-         _log(CRITICAL, "Error %d in upgrade_database().  Aborting.", e);
+         _log(CRITICAL, "Error %d in database_upgrade().  Aborting.", e);
          exit(1);
       }
    }
@@ -432,8 +432,8 @@ int main(int argc, char **argv)
 
 #define MAX_QUANTITY 4096
 #define MIN_QUANTITY 1
-#define THRESHOLD_VL   4000
-#define THRESHOLD_L    8000
+#define THRESHOLD_VL   8000
+#define THRESHOLD_L   16000
 #define THRESHOLD_H   32000
 #define THRESHOLD_VH  48000
 
@@ -452,7 +452,7 @@ static int smart_loop(const word initial_quantity, int (*f)(word), const word st
       // Comfort report
       if(time(NULL) - last_report > COMFORT_REPORT_PERIOD)
       {
-         _log(GENERAL, "   Archived %s records so far.  Current batch size is %s.", commas_q(stats[stat]), commas(quantity));
+         _log(GENERAL, "   Processed %s records so far.  Current batch size is %s.", commas_q(stats[stat]), commas(quantity));
          last_report += COMFORT_REPORT_PERIOD;
       }
       elapsed = time_ms();
@@ -612,7 +612,7 @@ static int cif_associations(const word quantity)
    MYSQL_RES * result;
    MYSQL_ROW row;
 
-   sprintf(q, "SELECT DISTINCT(concat(created, main_train_uid)), created, main_train_uid FROM cif_associations WHERE deleted < %ld OR assoc_end_date < %ld LIMIT %d", threshold, threshold, quantity);
+   sprintf(q, "SELECT created, main_train_uid, assoc_train_uid, assoc_start_date, location, base_location_suffix FROM cif_associations WHERE deleted < %ld OR assoc_end_date < %ld LIMIT %d", threshold, threshold, quantity);
    r = db_query(q);
    if(r) return r;
 
@@ -625,7 +625,7 @@ static int cif_associations(const word quantity)
          db_start_transaction();
          if(opt_archive)
          {
-            sprintf(q, "INSERT INTO cif_associations_arch SELECT * FROM cif_associations WHERE created = %s AND main_train_uid = '%s'", row[1], row[2]);
+            sprintf(q, "INSERT INTO cif_associations_arch SELECT * FROM cif_associations WHERE created = %s AND main_train_uid = '%s' AND assoc_train_uid = '%s' AND assoc_start_date = %s AND location = '%s' AND base_location_suffix = '%s'", row[0], row[1], row[2], row[3], row[4], row[5]);
 
             r = db_query(q);
             if(r) 
@@ -636,7 +636,7 @@ static int cif_associations(const word quantity)
             }
          }
 
-         sprintf(q, "DELETE FROM cif_associations WHERE created = %s AND main_train_uid = '%s'", row[1], row[2]);
+         sprintf(q, "DELETE FROM cif_associations WHERE created = %s AND main_train_uid = '%s' AND assoc_train_uid = '%s' AND assoc_start_date = %s AND location = '%s' AND base_location_suffix = '%s'", row[0], row[1], row[2], row[3], row[4], row[5]);
          r = db_query(q);
          if(r) 
          {

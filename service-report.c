@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2013, 2014, 2017 Phil Wieland
+    Copyright (C) 2013, 2014, 2017, 2018, 2020, 2022 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -37,7 +37,7 @@ static char * percentage(const dword num, const dword den);
 
 #define NAME "service-report"
 #ifndef RELEASE_BUILD
-#define BUILD "YB07p"
+#define BUILD "3c06p"
 #else
 #define BUILD RELEASE_BUILD
 #endif
@@ -59,6 +59,7 @@ static const char * days[] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thurs
    static struct call_details
    {
       dword cif_schedule_id;
+      dword cancelled_by;
       word sort_time;
       byte next_day;
       byte valid;
@@ -140,7 +141,7 @@ int main(int argc, char **argv)
    _log_init("", debug?1:0);
 
    // Initialise database
-   db_init(conf[conf_db_server], conf[conf_db_user], conf[conf_db_password], conf[conf_db_name]);
+   db_init(conf[conf_db_server], conf[conf_db_user], conf[conf_db_password], conf[conf_db_name], DB_MODE_NORMAL);
 
    report(argv[optind], year, month);
 
@@ -236,6 +237,9 @@ static void report_day(const char * const tiploc, time_t when)
    
    sprintf(zs, " AND (public_departure != '' OR departure != '') AND (train_status = 'P' OR train_status = 'B' OR train_status = '1' OR train_status = '5')");
    strcat(query, zs);
+      // And exclude ECS
+      sprintf(zs, " AND (cif_train_category not like 'E%%')");
+      strcat(query, zs);
    
    strcat(query, " ORDER BY LOCATE(cif_schedules.CIF_stp_indicator, 'NPO'), cif_schedule_id"); 
    
@@ -258,6 +262,7 @@ static void report_day(const char * const tiploc, time_t when)
 
          // Insert in array
          calls[call_count].cif_schedule_id        = atol(row0[0]);
+         calls[call_count].cancelled_by           = 0;
          calls[call_count].sort_time              = atoi(row0[4]);
          calls[call_count].next_day               = atoi(row0[3]);
          calls[call_count].valid                  = true;
@@ -283,7 +288,7 @@ static void report_day(const char * const tiploc, time_t when)
       {
          for(i = 0; i < index; i++)
          {
-            if(!strcmp(calls[i].cif_train_uid, calls[index].cif_train_uid))
+            if(!strcmp(calls[i].cif_train_uid, calls[index].cif_train_uid) && calls[i].cif_stp_indicator != 'O')
             {
                // Hit
                calls[i].valid = false;
@@ -304,12 +309,12 @@ static void report_day(const char * const tiploc, time_t when)
          sprintf(zs, "Testing index %d train \"%s\", sort_time = %d, next_day = %d", index, calls[index].cif_train_uid, calls[index].sort_time, calls[index].next_day );
          _log(DEBUG, zs);
          //                    0   1                 2                               3
-         strcpy(query, "SELECT id, CIF_stp_indicator ");
+         strcpy(query, "SELECT id, CIF_stp_indicator, update_id ");
          strcat(query, " FROM cif_schedules");
          strcat(query, " WHERE (cif_stp_indicator = 'C' OR cif_stp_indicator = 'O')");
          sprintf(zs, " AND (CIF_train_uid = '%s')", calls[index].cif_train_uid);
          strcat(query, zs);
-         sprintf(zs, " AND (deleted >= %ld)", when);
+         sprintf(zs, " AND (deleted >= %ld) AND (created <= %ld)", when + (12*60*60), when + (12*60*60));
          strcat(query, zs);
 
          if(calls[index].next_day && calls[index].sort_time >= DAY_START)
@@ -340,10 +345,19 @@ static void report_day(const char * const tiploc, time_t when)
                _log(DEBUG, "Index C or O match:");
                if(row0[1][0] == 'C')
                {
-                  // Cancelled
-                  calls[index].valid = false;
-                  //printf("<br>Step 3:  %d invalidated due to C", index);
-                  _log(DEBUG, "Schedule %ld (%s) cancelled by schedule %s.", calls[index].cif_schedule_id, calls[index].cif_train_uid, row0[0]);
+                  if(atol(row0[2]))
+                  {
+                     // Cancelled
+                     calls[index].valid = false;
+                     //printf("<br>Step 3:  %d invalidated due to C", index);
+                     _log(DEBUG, "Schedule %ld (%s) cancelled by schedule %s.", calls[index].cif_schedule_id, calls[index].cif_train_uid, row0[0]);
+                  }
+                  else
+                  {
+                     // VSTP cancellation to be shown as Cancelled rather than omitted.
+                     calls[index].cancelled_by = atol(row0[0]);
+                     _log(DEBUG, "Schedule %ld (%s) VSTP cancelled by schedule %s.", calls[index].cif_schedule_id, calls[index].cif_train_uid, row0[0]);
+                  }
                }
                else 
                {
@@ -354,9 +368,24 @@ static void report_day(const char * const tiploc, time_t when)
                   _log(DEBUG, "Overlay id = %ld, train id = %ld", overlay_id, calls[index].cif_schedule_id);
                   if(overlay_id != calls[index].cif_schedule_id || calls[index].cif_stp_indicator == 'N' || calls[index].cif_stp_indicator == 'P')
                   {
-                     // Supercede
-                     calls[index].valid = false;
-                     _log(DEBUG, "Step 3:  %d invalidated due to O id = %s", index, row0[0]);
+                     // Special case: If, due to defective data, there are two valid overlays, we need the first to be invalidated by the second, but not vice versa.
+                     word special = false;
+                     word i;
+                     for(i = 0; i < call_count && !special; i++)
+                     {
+                        if(i != index && calls[i].cif_schedule_id == overlay_id && !calls[i].valid) special = true;
+                     }
+                  
+                     if(special)
+                     {
+                        _log(DEBUG, "Step 3:  %d NOT invalidated due to O id = %s due to duplicate overlay.", index, row0[0]);
+                     }
+                     else
+                     {
+                        // Supercede
+                        calls[index].valid = false;
+                        _log(DEBUG, "Step 3:  %d invalidated due to O id = %s", index, row0[0]);
+                     }
                   }
                }
             }
@@ -439,12 +468,12 @@ static void report_day(const char * const tiploc, time_t when)
 
    if(ntrain)
    {
-      printf("<tr><td>%s %02d</td><td>%d</td><td>%d</td><td>(%s%%)</td>",
-             days[day % 7], mday, ntrain, ntrain - ncape, percentage(ntrain - ncape, ntrain));
-      printf("<td>%d</td><td>(%s%%)</td>",
-             ntrain - ncape - nlate, percentage(ntrain - ncape - nlate, ntrain));
-      printf("<td>%d</td><td>(%s%%)</td><td align=\"left\">%s</td></tr>\n",
-             ntrain - ncape - nlater, percentage(ntrain - ncape - nlater, ntrain), notes);
+      printf("<tr><td>%s %02d</td><td>%d</td><td>%d</td><td%s>(%s%%)</td>",
+             days[day % 7], mday, ntrain, ntrain - ncape, (ncape)?"":" bgcolor=\"#00ff00\"", percentage(ntrain - ncape, ntrain));
+      printf("<td>%d</td><td%s>(%s%%)</td>",
+             ntrain - ncape - nlate, (ncape + nlate)?"":" bgcolor=\"#00ff00\"", percentage(ntrain - ncape - nlate, ntrain));
+      printf("<td>%d</td><td%s>(%s%%)</td><td align=\"left\">%s</td></tr>\n",
+             ntrain - ncape - nlater, (ncape + nlater)?"":" bgcolor=\"#00ff00\"", percentage(ntrain - ncape - nlater, ntrain), notes);
    }
    else
    {
@@ -503,7 +532,7 @@ static void report_train_day(const word index, const time_t when, const char * c
             byte dom = broken->tm_mday;
 
             // Only accept activations where dom matches, and are +- 15 days (To eliminate last month's activation.)  YUK
-            sprintf(query, "SELECT created, trust_id, deduced FROM trust_activation WHERE cif_schedule_id = %u AND substring(trust_id FROM 9) = '%02d' AND created > %ld AND created < %ld order by created", cif_schedule_id, dom, when - 15*24*60*60, when + 15*24*60*60);
+            sprintf(query, "SELECT created, trust_id, deduced FROM trust_activation WHERE cif_schedule_id = %u AND substring(trust_id FROM 9) = '%02d' AND created > %ld AND created < %ld order by created DESC", cif_schedule_id, dom, when - 15*24*60*60, when + 15*24*60*60);
             if(!db_query(query))
             {
                result1 = db_store_result();
@@ -541,8 +570,8 @@ static void report_train_day(const word index, const time_t when, const char * c
                            {
                               if(!strcasecmp(tiploc, row2[0]))
                               {
-                                 // Bug: For a train which calls twice, we will analyse the first visit twice.
-                                 if(!strcasecmp("departure", row1[0]))
+                                 // Bug: For a train which calls twice, we will only analyse the first visit.
+                                 if((flags & 0x0003) == 0x0001)
                                  {
                                     // Got a departure report at our station
                                     status = Departed;
@@ -552,7 +581,7 @@ static void report_train_day(const word index, const time_t when, const char * c
                                  }
                                  else if(status < Arrived)
                                  {
-                                    // Got an arrival from our station AND haven't seen a departure yet
+                                    // Got an arrival at our station AND haven't seen a departure yet
                                     status = Arrived;
                                  }
                               }
@@ -569,23 +598,29 @@ static void report_train_day(const word index, const time_t when, const char * c
             {
                // Check for cancellations.  We only do this if the train hasn't called.
                word save_status = status;
-               sprintf(query, "SELECT created, reason, type, reinstate from trust_cancellation where trust_id='%s' AND created > %ld AND created < %ld order by created ", trust_id, when - 15*24*60*60, when + 15*24*60*60);                  
-               if(!db_query(query))
-               {                   
-                  result2 = db_store_result();
-                  while((row2 = mysql_fetch_row(result2)))
-                  {
-                     if(atoi(row2[3]))
+               if(!calls[index].cancelled_by)
+               {
+                  sprintf(query, "SELECT created, reason, type, reinstate from trust_cancellation where trust_id='%s' AND created > %ld AND created < %ld order by created ", trust_id, when - 15*24*60*60, when + 15*24*60*60);                  
+                  if(!db_query(query))
+                  {                   
+                     result2 = db_store_result();
+                     while((row2 = mysql_fetch_row(result2)))
                      {
-                        status = save_status;
+                        if(atoi(row2[3]))
+                        {
+                           status = save_status;
+                        }
+                        else
+                        {
+                           status = Cancelled;
+                        }
                      }
-                     else
-                     {
-                        status = 3;
-                     }
+                     mysql_free_result(result2);
                   }
-                  mysql_free_result(result2);
-                  
+               }
+               else
+               {
+                  status = Cancelled; 
                }
             }
          }

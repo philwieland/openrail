@@ -5,7 +5,7 @@ use DBI;
 
 my $name = 'manage';
 my $title = 'Open Rail Manager';
-my $build = 'Y805n';
+my $build = 'Z817n';
 
 my ($command);
 $| = 1; # perform flush after each write to STDOUT
@@ -208,6 +208,7 @@ sub status
    system('sudo /etc/init.d/trustdb status');
    system('sudo /etc/init.d/tddb status');
    system('sudo /etc/init.d/limed status');
+   system('sudo /etc/init.d/jiankong status');
 }
 
 #########################################################################

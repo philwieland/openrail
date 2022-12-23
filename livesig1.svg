@@ -1,5 +1,5 @@
 changequote(`[',`]')dnl
-define([BUILD], [YB16n])dnl
+define([BUILD], [1A01n])dnl
 define([BERTH], [<rect x="$1" y="eval(($2) - 6)" width="32" height="12" class="describer" id="$3b$4box" onmousemove="parent.tt_on(evt,'$5')" onmouseout="parent.tt_off(evt)"/><text x="eval(($1) + 10)"  y="eval(($2) + 4)" class="describer-text-off" id="$3b$4off" onmousemove="parent.tt_on(evt,'$5')" onmouseout="parent.tt_off(evt)">$4</text><text x="eval(($1) + 2)"  y="eval(($2) + 4)" class="describer-text" id="$3b$4" onmousemove="parent.tt_on(evt,'$5')" onmouseout="parent.tt_off(evt)">x</text>])dnl
 define([BERTHL], [<polygon points="eval(($1) + 3),eval(($2) + 6) eval(($1) - 3),eval(($2) + 0) eval(($1) + 3),eval(($2) - 6) eval(($1) + 32),eval(($2) - 6) eval(($1) + 32),eval(($2) + 6) " class="describer" id="$3b$4box" onmousemove="parent.tt_on(evt,'$5')" onmouseout="parent.tt_off(evt)"/><text x="eval(($1) + 10)"  y="eval(($2) + 4)" class="describer-text-off" id="$3b$4off" onmousemove="parent.tt_on(evt,'$5')" onmouseout="parent.tt_off(evt)">$4</text><text x="eval(($1) + 2)"  y="eval(($2) + 4)" class="describer-text" id="$3b$4" onmousemove="parent.tt_on(evt, '$5')" onmouseout="parent.tt_off(evt)">x</text>])dnl
 define([BERTHR], [<polygon points="eval(($1) + 0),eval(($2) + 6) eval(($1) + 0),eval(($2) - 6) eval(($1) + 29),eval(($2) - 6) eval(($1) + 35),eval(($2) + 0) eval(($1) + 29),eval(($2) + 6) " class="describer" id="$3b$4box" onmousemove="parent.tt_on(evt,'$5')" onmouseout="parent.tt_off(evt)"/><text x="eval(($1) + 10)"  y="eval(($2) + 4)" class="describer-text-off" id="$3b$4off" onmousemove="parent.tt_on(evt,'$5')" onmouseout="parent.tt_off(evt)">$4</text><text x="eval(($1) + 2)"  y="eval(($2) + 4)" class="describer-text" id="$3b$4" onmousemove="parent.tt_on(evt,'$5')" onmouseout="parent.tt_off(evt)">x</text>])dnl
@@ -18,7 +18,7 @@ define([ARROWD], [<line x1="$1" y1="$2" x2="eval(($1)-20)" y2="$2" class="arrow"
 <svg xmlns="http://www.w3.org/2000/svg" version="1.1" width="1260" height="290">
   <g id="layer1">
     <!-- Background -->
-    <rect x="0" y="0" width="1260" height="290" class="back" />
+    <rect x="0" y="0" width="1260" height="290" class="back" id="diag-bg"/>
     <text class="title-text" x="420" y="20">Wavertree to St Helens and Lea Green</text>
 
     <!-- Up -->
@@ -28,30 +28,32 @@ define([ARROWD], [<line x1="$1" y1="$2" x2="eval(($1)-20)" y2="$2" class="arrow"
     <rect x="50" y="83" width="32" height="10" class="platform" />
     <rect x="50" y="132" width="32" height="10" class="platform" />
     <text x="45" y="75" class="label-text-small">Wavertree</text>
-    BERTH(50, 100, M1, E300, LE300)
-
+    BERTH(50, 100, M1, 0300)
+    
     <text x="122" y="141" class="label-text-small">Down Chat Moss</text>
-    ARROWD(140,117)
+    ARROWD(170,117)
 
     <!-- Down -->
-    <line x1="180" y1="125" x2="40" y2="125" class="track-off" />
+    <line x1="180" y1="125" x2="40" y2="125" class="track" />
     <line x1="567" y1="125" x2="180" y2="125" class="track" />
+    BERTH(50,125,M1, 0039)
     <!-- Olive Mount Chord-->
     <text x="107"  y="55" class="label-text-small">Olive</text>
     <text x="105"  y="65" class="label-text-small">Mount</text>
     <polyline points="95,80 145,80 165,100 170,100 195,125 200,125" class="track" />
-    BERTHR(105, 74, M1, E400, LE400)
-    BERTHL(105, 86, XZ, E401, LE400)
+    BERTHR(105, 74, M1, 0400)
+    BERTHL(105, 86, M1, 0401)
+    BERTH(105, 125, M1, 0301)
 
-    BERTH(200, 100,  M1, E298, LE298)
-    BERTH(200, 125, XZ, E299, LE299)
+    BERTH(200, 100, M1, 0298)
+    BERTH(200, 125, M1, 0299)
     <!-- Broad Green -->
     <text x="240" y="70" class="label-text-small">Broad</text>
     <text x="240" y="80" class="label-text-small">Green</text>
     <rect x="240" y="83" width="32" height="10" class="platform" />
     <rect x="240" y="132" width="32" height="10" class="platform" />
-    BERTH(280, 100,  M1, E296, LE296)
-    BERTH(240, 125, XZ, E297, LE297)
+    BERTH(280, 100, M1, 0296)
+    BERTH(240, 125, M1, 0297)
 
     BERTH(320, 100, M1, 3592, 3592) SIGNALUL(355, 100, M1, 022, LL3592)
 
@@ -61,7 +63,7 @@ define([ARROWD], [<line x1="$1" y1="$2" x2="eval(($1)-20)" y2="$2" class="arrow"
     <!-- Down -->
     <line x1="567" y1="125" x2="300" y2="125" class="track" />
     BERTH(340, 125, M1, 3593, 3593) SIGNALDL(337, 125, M1, 023, LL3595)
-    BERTH(280, 125, XZ, E295, LE295)
+    BERTH(280, 125, M1, 0295)
 
     <!-- Down Fast -->
     <polyline points="390,125 410,145 535,145" class="track"/>
@@ -85,8 +87,9 @@ define([ARROWD], [<line x1="$1" y1="$2" x2="eval(($1)-20)" y2="$2" class="arrow"
     <!-- Roby Jn Routes -->
     <polyline points="430,125 372,125" class="route" id="M1s063r"/><!-- Dn Slow -->
     <polyline points="430,145 410,145 390,125 372,125" class="route" id="M1s057r"/><!-- Dn Fast -->
-    <!--H4in--><polyline points="352,100 430,100" class="route" id="M1s067r"/><!-- Up Fast -->
-    <!--H4in--><polyline points="352,100 390,100 410,80 430,80" class="route" id="M1s066r"/><!-- Up Slow -->
+    <polyline points="352,100 430,100" class="route" id="M1s067r"/><!-- Up Fast -->
+    <polyline points="352,100 390,100 410,80 430,80" class="route" id="M1s066r"/><!-- Up Slow -->
+    <polyline points="462,80 535,80" class="route" id="M1s072r"/><!-- 5582 5580 -->
 
     <!-- Huyton -->
     <text x="517" y="58" class="label-text-small">Huyton</text>
@@ -126,9 +129,9 @@ define([ARROWD], [<line x1="$1" y1="$2" x2="eval(($1)-20)" y2="$2" class="arrow"
     <polyline points="640,50 1240,50" class="track"/>
     <polyline points="1240,70 690,70" class="track"/>
     <!-- Pilks loop -->
-    <polyline points="947,70 960,70 980,90 1030,90 1050,70 1060,70" class="track"/>
-    <polyline points="980,90 1060,90" class="track"/>
-    <polyline points="1055,70 1075,50" class="track"/>
+    <polyline points="937,70 950,70 970,90 1020,90 1040,70 1050,70" class="track"/>
+    <polyline points="970,90 1050,90" class="track"/>
+    <polyline points="1045,70 1065,50" class="track"/>
 
     <!-- St Helens xover -->
     <polyline points="1155,70 1160,70 1180,50 1185,50" class="track"/>
@@ -147,36 +150,36 @@ define([ARROWD], [<line x1="$1" y1="$2" x2="eval(($1)-20)" y2="$2" class="arrow"
     BERTH(750, 50, M1, 3746, 3746) SIGNALUL(785, 50, M1, 026, LL3746)
     BERTH(750, 70, M1, 3749, 3749) SIGNALDL(747, 70, M1, 027, LL3749)
 
-    <text x="800" y="20" class="label-text-small">Eccleston</text>
-    <text x="810" y="30" class="label-text-small">Park</text>
-    <rect x="805" y="33" width="32" height="10" class="platform" />
-    <rect x="805" y="77" width="32" height="10" class="platform" />
+    <text x="795" y="20" class="label-text-small">Eccleston</text>
+    <text x="805" y="30" class="label-text-small">Park</text>
+    <rect x="800" y="33" width="32" height="10" class="platform" />
+    <rect x="800" y="77" width="32" height="10" class="platform" />
 
-    <text x="860" y="20" class="label-text-small">Thatto</text>
-    <text x="860" y="30" class="label-text-small">Heath</text>
-    <rect x="860" y="33" width="32" height="10" class="platform" />
-    <rect x="860" y="77" width="32" height="10" class="platform" />
-    BERTH(860, 70, M1, 3745, 3745) SIGNALDL(857, 70, M1, 025, LL3745)
+    <text x="850" y="20" class="label-text-small">Thatto</text>
+    <text x="850" y="30" class="label-text-small">Heath</text>
+    <rect x="850" y="33" width="32" height="10" class="platform" />
+    <rect x="850" y="77" width="32" height="10" class="platform" />
+    BERTH(850, 70, M1, 3745, 3745) SIGNALDL(847, 70, M1, 025, LL3745)
 
-    BERTH(915, 50, WA, S101, SH101)
-    BERTHL(918, 76, M1, 3739, 3739) SIGNALDL(912, 70, M1, 024, LL3739)
-    BERTHR(918, 64, WA, S109, SH109)
+    BERTH(915, 50, WA, S101, SH101) SIGNALUL(950,50,WA,093,SH101)
+    BERTHL(908, 76, M1, 3739, 3739) SIGNALDL(902, 70, M1, 024, LL3739)
+    BERTHR(908, 64, WA, S109, SH109)
 
-    BERTHL(990, 96, M1, S111, SH111)
-    BERTHR(990, 84, WA, S105, SH105)
+    BERTHL(980, 96, WA, S111)
+    BERTHR(980, 84, WA, S105, SH105)
 
-    BERTHR(1080, 44, WA, S002, SH2)
-    BERTHL(1080, 56, WA, S102, [SH102 Shunt to Down line])
-    BERTH(1080, 70, M1, S112, SH112)
+    BERTHR(1069, 44, WA, S002, SH2) SIGNALUL(1105,50,WA,081,SH2)
+    BERTHL(1069, 56, WA, S102, [SH102 Shunt to Down line])
+    BERTH(1060, 70, WA, S112) SIGNALDL(1057,70,WA,0a2,SH112)
 
     <text x="1064" y="96" class="label-text-small">To Ravenhead Sidings</text>
     <text x="1110" y="30" class="label-text-small">St Helens</text>
     <rect x="1120" y="33" width="32" height="10" class="platform" />
     <rect x="1120" y="77" width="32" height="10" class="platform" />
-    BERTH(1120, 50, WA, S003, SH3) 
-    BERTH(1120, 70, M1, S022, SH22) 
-    BERTH(1190, 50, WA, S004, SH4) 
-    BERTH(1190, 70, WA, SHDN, -)
+    BERTH(1120, 50, WA, S003, SH3)  SIGNALUL(1155,50,WA,082,SH3)
+    BERTH(1120, 70, M1, SH22) SIGNALDL(1117,70,WA,091,SH22)
+    BERTH(1190, 50, WA, S004, SH4)  SIGNALUL(1225,50,WA,083,SH4)
+    BERTH(1190, 70, WA, SHDN) SIGNALDL(1187,70,WA,092,SH23)
 
     <!-- Chat Moss -->
     <polyline points="730,125  1240,125" class="track"/>
@@ -213,6 +216,8 @@ define([ARROWD], [<line x1="$1" y1="$2" x2="eval(($1)-20)" y2="$2" class="arrow"
     <rect x="1030" y="152" width="32" height="10" class="platform" />
     BERTH(1030, 125, M1, 3572, 3572) SIGNALUL(1065, 125, M1, 001, LL3572)
     BERTH(1030, 145, M1, 3575, 3575) SIGNALDL(1027, 145, M1, 004, LL3575)
+    <polyline points="1062,125 1080,125" class="route" id="M1s050r"/> <!-- LL3572 WN589 -->
+    <polyline points="1080,145 1062,145" class="route" id="M1s051r"/> <!-- LL3573 LL3575 -->
 
     BERTH(1080, 125, M1, W589, WN589)
     BERTH(1080, 145, M1, 3573, 3573) SIGNALDL(1077, 145, M1, 002, LL3573)
@@ -233,7 +238,7 @@ define([ARROWD], [<line x1="$1" y1="$2" x2="eval(($1)-20)" y2="$2" class="arrow"
     <rect x="0" y="168" width="400" height="122" class="describer" />
 
     <text class="info-text">
-      <tspan x="4" y="178" id="info0">M1/WA/XZ</tspan>
+      <tspan x="4" y="178" id="info0">M1/WA/M0</tspan>
       <tspan x="4" y="188" id="info1">HUYTON/HUYTJUN/LVRPLSH/WVRTTEC/STHLNSC</tspan>
       <tspan x="4" y="198" id="info2"></tspan>
       <tspan x="4" y="208" id="info3"></tspan>

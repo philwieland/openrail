@@ -1,8 +1,0 @@
-description "Openrail Services"
-
-start on runlevel [2345]
-stop on runlevel [!2345]
-respawn
-
-exec /usr/sbin/trustdb
-exec /usr/sbin/vstpdb

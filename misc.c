@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2013, 2014, 2015, 2016, 2017 Phil Wieland
+    Copyright (C) 2013, 2014, 2015, 2016, 2017, 2018, 2021, 2022 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -457,19 +457,20 @@ char * show_time_text(const char * const input)
 }
 
 #define CONFIG_SIZE 4096
-char * conf[MAX_CONF];
 static const char * const config_keys[MAX_CONF] = {"db_server", "db_name", "db_user", "db_password", 
-                                                   "nr_user", "nr_password", 
-                                                   "report_email",
+                                                   "nr_user", "nr_password", "nr_server",
+                                                   "report_email", "public_url",
                                                    "stomp_topics", "stomp_topic_names", "stomp_topic_log",
                                                    "stompy_bin", "trustdb_no_deduce_act", "huyton_alerts",
-                                                   "live_server", "tddb_report_new", "debug",};
+                                                   "live_server", "tddb_report_new", "server_split",
+                                                   "debug",};
 static const byte config_type[MAX_CONF] = { 0, 0, 0, 0,
+                                            0, 0, 0,
                                             0, 0,
-                                            0,
                                             0, 0, 0,
                                             1, 1, 1,
                                             1, 1, 1,
+                                            1,
 };
 
 char * load_config(const char * const filepath)
@@ -508,50 +509,60 @@ char * load_config(const char * const filepath)
       conf[i] = &buf[1];
    }
 
-   while(fgets(line, sizeof(line), cfg))
+   int c;
+   int line_i = 0;
+   while((c = fgetc(cfg)) != EOF)
    {
-      if(line[0] && line[0] != '#' && line[0] != '\n')
+      if(c != '\n' && c != '\r')
       {
-         ll = strlen(line);
-         if(ll > sizeof(line) - 8) return "Overlength config line.";
-         if(line[ll - 1] == '\n') line[(ll--) - 1] = '\0';
-         for(i = 0; i < ll && line[i] != ' ' && line[i] != '\t'; i++) key[i] = line[i];
-         key[i] = '\0';
-         j = 0;
-         for(; i < ll && (line[i] == ' ' || line[i] == '\t'); i++);
-         for(; i < ll ; i++) value[j++] = line[i];
-         value[j] = '\0';
-         //printf("Line \"%s\", key \"%s\", value \"%s\".\n", line, key, value);
-
-         for(i=0; i < MAX_CONF && strcasecmp(key, config_keys[i]); i++);
-
-         if(i < MAX_CONF)
+         line[line_i++] = c;
+      }
+      else
+      {
+         line[line_i] = '\0';
+         line_i = 0;
+         if(line[0] && line[0] != '#')
          {
-            //printf("Recognised key %d \"%s\".\n", i, key);
-            if(config_type[i])
+            ll = strlen(line);
+            if(ll > sizeof(line) - 8) return "Overlength config line.";
+            for(i = 0; i < ll && line[i] != ' ' && line[i] != '\t'; i++) key[i] = line[i];
+            key[i] = '\0';
+            j = 0;
+            for(; i < ll && (line[i] == ' ' || line[i] == '\t'); i++);
+            for(; i < ll ; i++) value[j++] = line[i];
+            value[j] = '\0';
+            
+            for(i=0; i < MAX_CONF && strcasecmp(key, config_keys[i]); i++);
+            
+            if(i < MAX_CONF)
             {
-               // Boolean setting.
-               conf[i] = &buf[0];
+               // printf("Recognised key %ld \"%s\"  ", i, key);
+               if(config_type[i])
+               {
+                  // Boolean setting.
+                  conf[i] = &buf[0];
+               }
+               else
+               {
+                  // Value setting
+                  if(buf_index + j + 1 >= CONFIG_SIZE) 
+                  {
+                     fclose(cfg);
+                     return "Config buffer overflow.";
+                  }
+                  conf[i] = &buf[buf_index];
+                  strcpy(&buf[buf_index], value);
+                  buf_index += (j + 1);
+               }
+               // printf("Value = \"%s\"\n", conf[i]);
+               set_count++;
             }
             else
             {
-               // Value setting
-               if(buf_index + j + 1 >= CONFIG_SIZE) 
-               {
-                  fclose(cfg);
-                  return "Config buffer overflow.";
-               }
-               conf[i] = &buf[buf_index];
-               strcpy(&buf[buf_index], value);
-               buf_index += (j + 1);
+               // Ignore silently unrecognised keys
+               // This is so that we can add a new config item and not have to rebuild those programs that
+               // don't use it.
             }
-            set_count++;
-         }
-         else
-         {
-            // Ignore silently unrecognised keys
-            // This is so that we can add a new config item and not have to rebuild those programs that
-            // don't use it.
          }
       }
    }
@@ -774,7 +785,7 @@ char * system_call(const char * const command)
    }
    close(r);
 
-   sprintf(z, "%s 2>%s", command, filename);
+   sprintf(z, "%.120s 2>%.120s", command, filename);
    _log(DEBUG, "Command string \"%s\".", z);
 
    r = system(z);

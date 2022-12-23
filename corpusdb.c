@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2013, 2015, 2016, 2017 Phil Wieland
+    Copyright (C) 2013, 2015, 2016, 2017, 2018, 2022 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -38,7 +38,7 @@
 #define NAME  "corpusdb"
 
 #ifndef RELEASE_BUILD
-#define BUILD "YB07p"
+#define BUILD "3721p"
 #else
 #define BUILD RELEASE_BUILD
 #endif
@@ -159,7 +159,7 @@ int main(int argc, char **argv)
    }
 
    // Initialise database
-   if(db_init(conf[conf_db_server], conf[conf_db_user], conf[conf_db_password], conf[conf_db_name])) exit(1);
+   if(db_init(conf[conf_db_server], conf[conf_db_user], conf[conf_db_password], conf[conf_db_name], DB_MODE_NORMAL)) exit(1);
 
    if(!fetch_corpus() && !process_corpus() && !update_friendly_names())
    {
@@ -223,7 +223,7 @@ static word fetch_corpus(void)
    if(!result)
    {
       char url[256];
-      sprintf(url, "https://datafeeds.networkrail.co.uk/ntrod/SupportingFileAuthenticate?type=CORPUS");
+      sprintf(url, "https://%s/ntrod/SupportingFileAuthenticate?type=CORPUS", conf[conf_nr_server]);
       sprintf(zs, "Target URL \"%s\"", url);
       _log(DEBUG, zs);
 
@@ -298,6 +298,17 @@ static word fetch_corpus(void)
       if((r = system_call(zs)))
       {
          _log(MAJOR, "Failed to uncompress file:  %s", r);
+         if((fp_result = fopen(filepath_z, "r")))
+         {
+            char error_message[2048];
+            size_t length;
+            if((length = fread(error_message, 1, 2047, fp_result)) && error_message[0] == '<')
+            {
+               error_message[length] = '\0';
+               _log(MAJOR, "Received message:\n%s", error_message);   
+            }
+            fclose(fp_result);
+         }
          result = 5;
       }
    }
@@ -349,7 +360,13 @@ static word process_corpus(void)
    }      
 
    // Reset the database
-   database_upgrade(corpusdb);
+   word e;
+   if((e = database_upgrade(corpusdb)))
+   {
+      _log(CRITICAL, "Error %d in database_upgrade().  Aborting.", e);
+      exit(1);
+   }
+
    db_start_transaction();
    db_query("DELETE FROM corpus");
    id_number = 1;
@@ -368,7 +385,7 @@ static word process_corpus(void)
          if(iobj >= MAX_OBJ)
          {
             obj[64] = '\0';
-            sprintf(zs, "Object buffer overflow:  \"%s\"...", obj);
+            sprintf(zs, "Object buffer overflow:  \"%.100s\"...", obj);
             _log(CRITICAL, zs);
             exit(1);
          }
@@ -393,7 +410,7 @@ if(zs[1] == '\0' && zs[0] == ' ') zs[0] = '\0'; \
 db_real_escape_string(zs1, zs, strlen(zs)); \
 strcat(query, ", '"); strcat(query, zs1); strcat(query, "'"); }
 #define EXTRACT_APPEND_SQL_INT(a) { jsmn_find_extract_token(object_string, tokens, 0, a, zs, sizeof( zs )); \
-if(zs[1] == '\0' && zs[0] == ' ') zs[0] = '0'; \
+if((zs[0] == '\0') || (zs[1] == '\0' && zs[0] == ' ')) { zs[0] = '0'; zs[1] = '\0'; } \
 db_real_escape_string(zs1, zs, strlen(zs)); \
 strcat(query, ", "); strcat(query, zs1); }
 
