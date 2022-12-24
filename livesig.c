@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2014, 2015, 2016, 2017 Phil Wieland
+    Copyright (C) 2014, 2015, 2016, 2017, 2018, 2019, 2020 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -41,15 +41,18 @@ static char * show_handle(const dword h);
 #define NAME "livesig"
 
 #ifndef RELEASE_BUILD
-#define BUILD "Y930p"
+#define BUILD "1607p"
 #else
 #define BUILD RELEASE_BUILD
 #endif
 
+// Set to 1 to disable caching of maps, for use at times of frequent updates.
+#define NO_CACHE_MAPS 0
+
 word debug;
 enum {PageMode, UpdateMode, QueryMode} mode;
 static time_t now;
-#define PARMS 10
+#define PARMS 16
 #define PARMSIZE 128
 static char parameters[PARMS][PARMSIZE];
 
@@ -147,7 +150,7 @@ int main()
    }
 
    // Initialise database
-   db_init(conf[conf_db_server], conf[conf_db_user], conf[conf_db_password], conf[conf_db_name]);
+   db_init(conf[conf_db_server], conf[conf_db_user], conf[conf_db_password], conf[conf_db_name], DB_MODE_NORMAL);
 
    _log(GENERAL, "Parameters:  (l = %d)", l);
    for(i=0;i <10; i++)
@@ -169,7 +172,11 @@ static void page(void)
 {
    word map_id = atoi(parameters[0]);
 
-   printf("Content-Type: text/html; charset=iso-8859-1\n\n");
+   printf("Content-Type: text/html; charset=iso-8859-1\n");
+#if NO_CACHE_MAPS
+   printf("Cache-Control: no-cache\n");
+#endif
+   printf("\n");
    printf("<!DOCTYPE HTML PUBLIC \"-//W3C//DTD HTML 4.01 Transitional//EN\" \"http://www.w3.org/TR/html4/loose.dtd\">\n");
    printf("<html xmlns=\"http://www.w3.org/1999/xhtml\" lang=\"en\" xml:lang=\"en\">\n");
    printf("<head>\n");
@@ -194,7 +201,8 @@ static void page(void)
    {
       printf("<p>Map %d not found.  <a href=\"/\">Please select a map from the list on the home page.</a></p>\n", map_id);
    }
-   printf("<table width=\"1260\"><tr><td align=\"left\" id=\"bottom-line\">&copy;2017 Phil Wieland.  Live data from Network Rail under <a href=\"http://www.networkrail.co.uk/data-feeds/terms-and-conditions\">this licence</a>.</td>\n");
+   struct tm * broken = localtime(&now);
+   printf("<table width=\"1260\"><tr><td align=\"left\" id=\"bottom-line\">&copy;%04d.  Live data from Network Rail under <a href=\"http://www.networkrail.co.uk/data-feeds/terms-and-conditions\">this licence</a>.</td>\n", broken->tm_year + 1900);
    printf("<td align=\"right\"><a href=\"/\">Home Page and other maps</a></td><td width=\"10%%\">&nbsp;</td>\n");
    printf("<td align=\"right\"><a href=\"/about.html\">About livesig</a></td></tr></table>\n");
    printf("</body></html>\n\n");
@@ -336,7 +344,7 @@ static void update(void)
 
 static void query(void)
 {
-   char headcode[8], re_ob_headcode[8], query[512], query1[256];
+   char headcode[8], re_ob_headcode[8], query[2048], query1[256];
    MYSQL_RES * result0, * result1;
    MYSQL_ROW row0;
    dword schedule_id;
@@ -360,7 +368,7 @@ static void query(void)
       // Train time, not reporting number.
       struct tm * broken = localtime(&now);
       static const char * days_runs[8] = {"runs_su", "runs_mo", "runs_tu", "runs_we", "runs_th", "runs_fr", "runs_sa", "runs_su"};
-      sprintf(query, "SELECT s.id FROM cif_schedules AS s INNER JOIN cif_schedule_locations AS l ON s.id = l.cif_schedule_id WHERE l.tiploc_code = 'LVRPLSH' AND l.departure = '%s' AND s.deleted > %ld AND (s.%s) AND (s.schedule_start_date <= %ld) AND (s.schedule_end_date >= %ld) ORDER BY LOCATE(s.CIF_stp_indicator, 'ONPC')",
+      sprintf(query, "SELECT s.id FROM cif_schedules AS s INNER JOIN cif_schedule_locations AS l ON s.id = l.cif_schedule_id WHERE l.tiploc_code = 'LVRPLSH' AND l.departure = '%s' AND s.deleted > %ld AND (s.%s) AND (s.schedule_start_date <= %ld) AND (s.schedule_end_date >= %ld) AND train_status != 'B' AND train_status != '5' ORDER BY LOCATE(s.CIF_stp_indicator, 'ONPC')",
            headcode, now + (12*60*60), days_runs[broken->tm_wday], now + (12*60*60), now - (12*60*60));
       if(!db_query(query))
       {
@@ -483,20 +491,28 @@ static void query(void)
 
    switch(*key)
    {
-   case 0x20323431: /* 142  */ printf("Stabled Class 142 unit.\n"); break;
-   case 0x20303531: /* 150  */ printf("Stabled Class 150 unit.\n"); break;
-   case 0x20363531: /* 156  */ printf("Stabled Class 156 unit.\n"); break;
-   case 0x20383531: /* 158  */ printf("Stabled Class 158 unit.\n"); break;
-   case 0x20353831: /* 185  */ printf("Stabled Class 185 unit.\n"); break;
-   case 0x20393133: /* 319  */ printf("Stabled Class 319 unit.\n"); break;
-   case 0x20303933: /* 390  */ printf("Stabled Class 390 unit.\n"); break;
+   case 0x20323431: /* 142  */ printf("Stabled class 142 unit(s).\n"); break;
+   case 0x20303531: /* 150  */ printf("Stabled class 150 unit(s).\n"); break;
+   case 0x20363531: /* 156  */ printf("Stabled class 156 unit(s).\n"); break;
+   case 0x20383531: /* 158  */ printf("Stabled class 158 unit(s).\n"); break;
+   case 0x20353831: /* 185  */ printf("Stabled class 185 unit(s).\n"); break;
+   case 0x20353931: /* 195  */ printf("Stabled class 195 unit(s).\n"); break;
+   case 0x20393133: /* 319  */ printf("Stabled class 319 unit(s).\n"); break;
+   case 0x20333233: /* 323  */ printf("Stabled class 323 unit(s).\n"); break;
+   case 0x20313333: /* 331  */ printf("Stabled class 331 unit(s).\n"); break;
+   case 0x20303933: /* 390  */ printf("Stabled class 390 unit(s).\n"); break;
+   case 0x20373933: /* 397  */ printf("Stabled class 397 unit(s).\n"); break;
+   case 0x20323038: /* 802  */ printf("Stabled class 802 unit(s).\n"); break;
    case 0x2020424c: /* LB   */
    case 0x4b4f4c42: /* BLOK */ printf("Line blocked.\n"); break;
+   case 0x20203354: /* T3   */ printf("Absolute possession."); break;
    case 0x434d4544: /* DEMC */
+   case 0x43494d44: /* DMIC */
    case 0x494d4544: /* DEMI */ printf("Failed train.\n"); break;
    case 0x54455331: /* 1SET */ printf("Stabled unit.\n"); break;
    case 0x54455332: /* 2SET */ printf("Two stabled units.\n"); break;
    case 0x20544d45: /* EMT  */ printf("Stabled East Midlands Trains unit.\n"); break;
+   case 0x49584154: /* TAXI */ printf("Allerton depot shuttle.\n"); break;
    default: printf("Not found.\n"); break;
    }
 }

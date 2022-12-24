@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2014, 2015, 2016, 2017 Phil Wieland
+    Copyright (C) 2014, 2015, 2016, 2017, 2019, 2020, 2021, 2022 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -31,6 +31,7 @@
 #include <sys/prctl.h>
 #include <sys/resource.h>
 #include <sys/sysinfo.h>
+#include <arpa/inet.h>
 #include <netinet/in.h>
 #include <errno.h>
 #include <netdb.h>
@@ -42,7 +43,7 @@
 #define NAME  "stompy"
 
 #ifndef RELEASE_BUILD
-#define BUILD "Y910p"
+#define BUILD "3721p"
 #else
 #define BUILD RELEASE_BUILD
 #endif
@@ -67,7 +68,7 @@ static ssize_t stomp_tx_queue_on, stomp_tx_queue_off;
 
 #define BASE_PORT 55840
 
-#define STOMP_HOST "datafeeds.networkrail.co.uk"
+#define STOMP_HOST conf[conf_nr_server]
 #define STOMP_PORT 61618
 
 // Select timeout period in seconds
@@ -92,15 +93,17 @@ static word stomp_topic_log[STREAMS];
 static char topics[1024];
 
 // Stats
-static time_t start_time;
-enum stats_categories {StompBytes, ConnectAttempt, StompMessage, StompInvalid, BaseStreamFrameSent, 
+static time_t start_time, stomp_connect_time;
+enum stats_categories {StompBytes, ConnectAttempt, StompMessage, StompInvalid, ClientConnect,
+                       BaseStreamFrameSent, 
                        DiscWrite = BaseStreamFrameSent + STREAMS, DiscRead, MAXstats
 };
 static qword stats[MAXstats];
 static qword grand_stats[MAXstats];
 static const char * stats_category[MAXstats] = 
    {
-      "STOMP Bytes", "STOMP Connect Attempt", "Accepted STOMP Message", "Discarded STOMP Message", "", "", "",
+      "STOMP Bytes", "STOMP Connect Attempt", "Accepted STOMP Message", "Discarded STOMP Message", "Client Connect",
+      "", "", "",
       "Frame Disc Write", "Frame Disc Read",
    };
 
@@ -118,7 +121,7 @@ static time_t stats_due, alarms_due, server_sockets_due, stomp_timeout, rates_du
 
 // STOMP controls
 static word stomp_holdoff;
-static time_t stomp_holdoff_time[8] = { 8, 64, 64, 128, 128, 128, 128, 256};
+static time_t stomp_holdoff_time[8] = { 8, 16, 32, 64, 64, 64, 64, 64};
 
 // Disc spool
 // This and sub-directories will be created if required.
@@ -188,6 +191,7 @@ static word queue_length(const word s);
 static void dump_buffer_to_disc(const word s, struct frame_buffer * const b);
 static word dump_queue_to_disc(const word s);
 static int is_a_buffer(const struct dirent *d);
+static void load_buffer_from_disc(struct frame_buffer * const b, const word s, const char * const name);
 static word load_queue_from_disc(const word s);
 static int disc_queue_length(const word s);
 static qword disc_queue_oldest(const word s);
@@ -195,6 +199,7 @@ static void log_message(const word s);
 //static word count_messages(const struct frame_buffer * const b);
 static void heartbeat_tx(void);
 static char * show_percent(qword * s, qword * t, const qword l, const qword n);
+static char * show_elapsed(time_t e);
 
 // Signal handling
 void termination_handler(int signum)
@@ -312,6 +317,7 @@ int main(int argc, char *argv[])
    int lfp = 0;
 
    now = start_time = time(NULL);
+   stomp_connect_time = 0;
    // Set up log
    _log_init(debug?"/tmp/stompy.log":"/var/log/garner/stompy.log", debug?1:0);
 
@@ -678,7 +684,14 @@ static void set_up_server_sockets(void)
          memset((void *) &server_addr, 0, sizeof(server_addr));
 
          server_addr.sin_family = AF_INET;
-         server_addr.sin_addr.s_addr = INADDR_ANY;
+         if(*conf[conf_server_split])
+         {
+            server_addr.sin_addr.s_addr = INADDR_ANY;
+         }
+         else
+         {
+            inet_aton("127.0.0.1", &(server_addr.sin_addr));
+         }
          server_addr.sin_port = htons(BASE_PORT + stream);
    
          if(bind(s, (struct sockaddr *) &server_addr, sizeof(server_addr)) < 0) 
@@ -1214,7 +1227,7 @@ static void client_read(const int s)
       l = read(s, buffer, 16);
       return;
    }
-   l = read(s, buffer, 16);
+   l = read(s, buffer, 8);
    if(l < 0)
    {
       _log(MAJOR, "Error reading ACK from client on stream %d (%s).  Error %d %s.", stream, stomp_topic_names[stream], errno, strerror(errno));
@@ -1230,6 +1243,32 @@ static void client_read(const int s)
    else if(!l)
    {
       _log(MAJOR, "EOF reading ACK from client on stream %d (%s).", stream, stomp_topic_names[stream]);
+      client_state[stream] = CLIENT_IDLE;
+      client_buffer[stream] = NULL;
+      close(s);
+      s_number[stream][CLIENT] = -1;
+      FD_CLR(s, &write_sockets);
+      FD_CLR(s, &read_sockets);
+      _log(GENERAL, "Client disconnected from stream %d (%s).", stream, stomp_topic_names[stream]);
+      return;
+   }
+   else if(l != 1 || buffer[0] != 'A')
+   {
+      buffer[l] = '\0';
+      {
+         char z1[32], z2[16], z3[16];
+         word ii = 0;
+         z1[0] = '\0';
+         while(buffer[ii])
+         {
+            sprintf(z3, "%02x ", buffer[ii]);
+            strcat(z1, z3);
+            z2[ii] = (buffer[ii]>31 && buffer[ii]<127)?buffer[ii]:'.';
+            ii++;
+         }
+         z2[ii] = '\0';
+         _log(MAJOR, "Invalid ACK %s\"%s\" from client on stream %d (%s).", z1, z2, stream, stomp_topic_names[stream]);
+      }
       client_state[stream] = CLIENT_IDLE;
       client_buffer[stream] = NULL;
       close(s);
@@ -1278,8 +1317,11 @@ static void client_read(const int s)
 static void client_accept(const int s)
 {
    _log(PROC, "client_accept(%d)", s);
+   struct sockaddr_in acc_add;
+   socklen_t acc_add_len = sizeof(acc_add);
+   
    word stream = s_stream[s];
-   int new_socket = accept(s, NULL, NULL);
+   int new_socket = accept(s, (struct sockaddr *)&acc_add, &acc_add_len);
    if(new_socket < 0)
    {
       _log(CRITICAL, "accept() on stream %d failed.  Error %d %s", stream, errno, strerror(errno));
@@ -1290,6 +1332,7 @@ static void client_accept(const int s)
       if(s_number[stream][CLIENT] >= 0)
       {
          _log(MAJOR, "Client connect for stream %d, socket %d when socket %d already in use.", stream, new_socket, s_number[stream][CLIENT]);
+         _log(MAJOR, "   New connection is from %s:%d", inet_ntoa(acc_add.sin_addr), acc_add.sin_port);
          // Already open.  Close the old one.
          close(s_number[stream][CLIENT]);
          FD_CLR(s_number[stream][CLIENT], &write_sockets);
@@ -1312,7 +1355,8 @@ static void client_accept(const int s)
       s_type[new_socket] = CLIENT;
       s_number[stream][CLIENT] = new_socket;
       FD_SET(new_socket, &write_sockets);
-      _log(GENERAL, "Client connected to stream %d (%s).", stream, stomp_topic_names[stream]);
+      _log(GENERAL, "Client %s:%d connected to stream %d (%s).", inet_ntoa(acc_add.sin_addr), acc_add.sin_port, stream, stomp_topic_names[stream]);
+      stats[ClientConnect]++;
    }
 }
 
@@ -1533,6 +1577,7 @@ static void stomp_manager(const enum stomp_manager_event event, const char * con
    {
       stomp_manager_state = SM_HOLD;
       outage_start = 0;
+      stomp_connect_time = 0;
       alarm_sent = false;
    }
 
@@ -1565,6 +1610,7 @@ static void stomp_manager(const enum stomp_manager_event event, const char * con
          email_alert(NAME, BUILD, "STOMP Alarm", report);
          alarm_sent = true;
       }
+      stomp_connect_time = 0;
       stats[ConnectAttempt]++;
       _log(GENERAL, "Connecting to STOMP server.");
       report_rates("Connecting to STOMP server.");
@@ -1666,8 +1712,9 @@ static void stomp_manager(const enum stomp_manager_event event, const char * con
          FD_CLR(s_stomp, &read_sockets);
          FD_CLR(s_stomp, &write_sockets);
          s_stomp = -1;
-         _log(GENERAL, "%s in state %s.  STOMP socket disconnected.", sm_events[event], sm_states[stomp_manager_state]);
+         _log(GENERAL, "%s in state %s.  STOMP socket disconnected.  Connection up time %s.", sm_events[event], sm_states[stomp_manager_state], show_elapsed(stomp_connect_time?(now - stomp_connect_time):0));
       }
+      stomp_connect_time = 0;
       stomp_manager_state = SM_HOLD;
       if(controlled_shutdown) 
       {
@@ -1687,7 +1734,7 @@ static void stomp_manager(const enum stomp_manager_event event, const char * con
       }
       if(s_stomp >= 0)
       {
-         _log(GENERAL, "%s in state %s.  Sending STOMP DISCONNECT.", sm_events[event], sm_states[stomp_manager_state]);
+         _log(GENERAL, "%s in state %s.  Sending STOMP DISCONNECT. Connection up time %s.", sm_events[event], sm_states[stomp_manager_state], show_elapsed(stomp_connect_time?(now - stomp_connect_time):0));
          stomp_queue_tx("DISCONNECT\n\n", 13);
          SET_TIMER_RUNNING;
          stomp_manager_state = SM_SEND_DISCO;
@@ -1697,6 +1744,7 @@ static void stomp_manager(const enum stomp_manager_event event, const char * con
          stomp_manager_state = SM_SEND_DISCO;
          SET_TIMER_IMMEDIATE;
       } 
+      stomp_connect_time = 0;
       break;
 
    case 4: // RX_DONE while awaiting connect response
@@ -1726,6 +1774,7 @@ static void stomp_manager(const enum stomp_manager_event event, const char * con
                }
             }
             stomp_holdoff = 0;
+            stomp_connect_time = now;
          }
          else
          {
@@ -1772,7 +1821,7 @@ static void stomp_queue_tx(const char * const d, const ssize_t l)
 
 static void report_stats(void)
 {
-   char zs[128], zs1[128];
+   char zs[256], zs1[128];
    word i;
    char report[2048];
 
@@ -1782,10 +1831,23 @@ static void report_stats(void)
    strcpy(report, zs);
    strcat(report, "\n");
 
-   sprintf(zs, "%27s: %-14s %ld days", "Run time", "", (now - start_time)/(24*60*60));
+   sprintf(zs, "%27s: %-14s %s", "Run time", "", show_elapsed(now - start_time));
    _log(GENERAL, zs);
    strcat(report, zs);
    strcat(report, "\n");
+
+   if(stomp_connect_time)
+   {
+      sprintf(zs, "%27s: %-14s %s", "STOMP connection up time", "", show_elapsed(now - stomp_connect_time));
+   }
+   else
+   {
+      sprintf(zs, "%27s: Connection down.", "STOMP connection up time");
+   }
+   _log(GENERAL, zs);
+   strcat(report, zs);
+   strcat(report, "\n");
+
    for(i=0; i<MAXstats; i++)
    {
       grand_stats[i] += stats[i];
@@ -1957,7 +2019,28 @@ static void report_rates(const char * const m)
          {
             total += inst[BaseCountStreamRX + i];
 
-            fprintf(rates_fp, "|  %5llu %5llu  ", inst[BaseCountStreamRX + i], inst[BaseCountStreamTX + i]);
+            char tx_info[8];
+            if(inst[BaseCountStreamTX + i])
+            {
+               sprintf(tx_info, "%5llu", inst[BaseCountStreamTX + i]);
+            }
+            else
+            {
+               if(s_number[i][CLIENT] < 0)
+               {
+                  strcpy(tx_info, "  Dis");
+               }
+               else if(stream_state[i] == 2)
+               {
+                  strcpy(tx_info, " Lock");
+               }
+               else
+               {
+                  strcpy(tx_info, "    0");
+               }
+            }
+
+            fprintf(rates_fp, "|  %5llu %s  ", inst[BaseCountStreamRX + i], tx_info);
          }
          
          // Calculate frames on disc
@@ -2208,17 +2291,29 @@ static void dump_buffer_to_disc(const word s, struct frame_buffer * const b)
 {
    char filename[256];
 
-   sprintf(filename, "%s/%lld", spool_path[s], b->stamp);
-   _log(DEBUG, "dump_buffer_to_disc():  Target filename \"%s\".", filename);
+   word declash = 0;
+   int fd = -1;
 
    ssize_t length = strlen(b->frame);
 
    inst[StartDisc] = time_us();
 
-   int fd = open(filename, O_WRONLY | O_CREAT, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+   while(fd < 0 && declash < 100)
+   {
+      sprintf(filename, "%s/%lld_%02d", spool_path[s], b->stamp, declash++);
+      _log(DEBUG, "dump_buffer_to_disc():  Target filename \"%s\".", filename);
+
+      // O_EXCL -> open will fail if file already exists
+      fd = open(filename, O_WRONLY | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+      if(fd < 0)
+      {
+         _log(MAJOR, "Writing buffer to disc, failed to open \"%s\".  Error %d %s.", filename, errno, strerror(errno));
+      }
+   }
+   
    if(fd < 0)
    {
-      _log(CRITICAL, "Writing buffer to disc, failed to open \"%s\".  Error %d %s.", filename, errno, strerror(errno));
+      _log(CRITICAL, "Writing buffer to disc, failed to open file after declashing attempted.  Error %d %s.", errno, strerror(errno));
    }
    else
    {
@@ -2297,12 +2392,21 @@ static void load_buffer_from_disc(struct frame_buffer * const b, const word s, c
    }
    else
    {
-      ssize_t l, length;
+      ssize_t l, length, togo;
       length = 0;
       l = -1;
       while(l)
       {
-         l = read(fd, b->frame + length, FRAME_SIZE - length - 1);
+         togo = FRAME_SIZE - length - 1;
+         if(togo < 0)
+         {
+            _log(CRITICAL, "load_buffer_from_disc():  Overlong frame from \"%s\" truncated after %ld bytes.", filepath, length);
+            l = 0;
+         }
+         else
+         {
+            l = read(fd, b->frame + length, togo);
+         }
          if(l < 0)
          {
             _log(CRITICAL, "Error reading buffer \"%s\" from disc.  Error %d %s.", filepath, errno, strerror(errno));
@@ -2316,7 +2420,7 @@ static void load_buffer_from_disc(struct frame_buffer * const b, const word s, c
          {
             b->stamp = atoll(name);
             b->frame[length] = 0; // Append the \0.
-            _log(DEBUG, "load_buffer_from_disc(): Successfully read %ld bytes with stamp %lld.", l, b->stamp);
+            _log(DEBUG, "load_buffer_from_disc(): Successfully read %ld bytes with stamp %lld.", length, b->stamp);
             stats[DiscRead]++;
          }
       }
@@ -2514,7 +2618,6 @@ static char * show_percent(qword * s, qword * t, const qword l, const qword n)
 {
    static char display[800];
 
-
    if(*s)
    {
       // Currently active
@@ -2536,6 +2639,30 @@ static char * show_percent(qword * s, qword * t, const qword l, const qword n)
    else
    {
       sprintf(display, " 100%%");
+   }
+
+   return display;
+}
+
+static char * show_elapsed(time_t e)
+{
+   static char display[64];
+
+   if(e < 120)
+   {
+      sprintf(display, "%ld seconds", e);
+   }
+   else if(e < 120 * 60)
+   {
+      sprintf(display, "%ld minutes", e / 60);
+   }
+   else if(e < 48 * 60 * 60)
+   {
+      sprintf(display, "%ld hours", e / (60 * 60));
+   }
+   else
+   {
+      sprintf(display, "%ld days", e / (24 * 60 * 60));
    }
 
    return display;

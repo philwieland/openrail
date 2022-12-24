@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2013, 2014, 2015, 2016, 2017 Phil Wieland
+    Copyright (C) 2013, 2014, 2015, 2016, 2017, 2018, 2020 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -46,25 +46,25 @@
 #define NAME  "vstpdb"
 
 #ifndef RELEASE_BUILD
-#define BUILD "Y305p"
+#define BUILD "1615p"
 #else
 #define BUILD RELEASE_BUILD
 #endif
 
 static void perform(void);
-static void process_frame(const char * body);
-static void process_vstp(const char * string, const jsmntok_t * tokens);
-static void process_delete_schedule(const char * string, const jsmntok_t * tokens);
-static void process_create_schedule(const char * string, const jsmntok_t * tokens, const word update);
-static word process_create_schedule_location(const char * string, const jsmntok_t * tokens, const int index, const unsigned long schedule_id);
-static void process_update_schedule(const char * string, const jsmntok_t * tokens);
+static void process_frame(char const * const body);
+static void process_vstp(char const * const string, jsmntok_t const * const tokens);
+static void process_delete_schedule(char const * const string, jsmntok_t const * const tokens);
+static void process_create_schedule(char const * const string, jsmntok_t const * const tokens, const word update);
+static word process_create_schedule_location(char const * const string, jsmntok_t const * const tokens, const int index, const unsigned long schedule_id);
+static void process_update_schedule(char const * const string, jsmntok_t const * const tokens);
 
-static void jsmn_dump_tokens(const char const * string, const jsmntok_t const * tokens, const word object_index);
+static void jsmn_dump_tokens(char const * const string, jsmntok_t const * const tokens, const word object_index);
 static void report_stats(void);
 #define INVALID_SORT_TIME 9999
-static word get_sort_time_vstp(const char const * buffer);
-static char * vstp_to_CIF_time(const char * buffer);
-static char * tiploc_name(const char * const tiploc);
+static word get_sort_time_vstp(char const * const buffer);
+static char * vstp_to_CIF_time(char const * const buffer);
+static char * tiploc_name(char const * const tiploc);
 
 static word debug, run, interrupt, holdoff, huyton_flag;
 
@@ -87,15 +87,42 @@ static jsmntok_t tokens[NUM_TOKENS];
 // Stats
 static time_t start_time;
 enum stats_categories {ConnectAttempt, GoodMessage, DeleteHit, DeleteMiss, DeleteMulti, Create, 
-                       UpdateCreate, UpdateDeleteMiss, UpdateDeleteMulti, HeadcodeDeduced,
+                       UpdateCreate, UpdateDeleteMiss, UpdateDeleteMulti, SpeedCorrected, HeadcodeDeduced,
                        NotMessage, NotVSTP, NotTransaction, MAXstats};
 static qword stats[MAXstats];
 static qword grand_stats[MAXstats];
 static const char * stats_category[MAXstats] = 
    {
       "Stompy Connect Attempt", "Good Message", "Delete Hit", "Delete Miss", "Delete Multiple Hit", "Create",
-      "Update", "Update Delete Miss", "Update Delete Mult. Hit", "Deduced Schedule Headcode",
+      "Update", "Update Delete Miss", "Update Delete Mult. Hit", "Speed Corrected", "Deduced Schedule Headcode",
       "Not a message", "Invalid or Not VSTP", "Unknown Transaction",
+   };
+
+static struct speed_correct_table { char given[4]; char actual[4]; } speed_correct[] =
+   {
+      {"022", "010"},
+      {"034", "015"},
+      {"056", "020"},
+      {"067", "030"},
+      {"078", "035"},
+      {"089", "040"},
+      {"101", "045"},
+      {"112", "050"},
+      {"123", "055"},
+      {"134", "060"},
+      {"157", "070"},
+      {"168", "075"},
+      {"179", "080"},
+      {"190", "085"},
+      {"195", "087"},
+      {"201", "090"},
+      {"213", "095"},
+      {"224", "100"},
+      {"246", "110"},
+      {"280", "125"},
+      {"313", "140"},
+      {"416", "186"},
+      {"",    ""   },
    };
 
 // Signal handling
@@ -303,12 +330,12 @@ static void perform(void)
    word last_report_day;
    // Initialise database
    {
-      db_init(conf[conf_db_server], conf[conf_db_user], conf[conf_db_password], conf[conf_db_name]);
+      db_init(conf[conf_db_server], conf[conf_db_user], conf[conf_db_password], conf[conf_db_name], DB_MODE_NORMAL);
 
       word e;
       if((e=database_upgrade(vstpdb)))
       {
-         _log(CRITICAL, "Error %d in upgrade_database().  Aborting.", e);
+         _log(CRITICAL, "Error %d in database_upgrade().  Aborting.", e);
          exit(1);
       }
    }
@@ -401,7 +428,7 @@ static void perform(void)
    report_stats();
 }
 
-static void process_frame(const char * body)
+static void process_frame(char const * const body)
 {
    jsmn_parser parser;
    time_t elapsed = time(NULL);
@@ -436,7 +463,7 @@ static void process_frame(const char * body)
    }
 }
 
-static void process_vstp(const char * string, const jsmntok_t * tokens)
+static void process_vstp(char const * const string, jsmntok_t const * const tokens)
 {
    char zs[128];
 
@@ -466,10 +493,10 @@ static void process_vstp(const char * string, const jsmntok_t * tokens)
 
 #define EXTRACT(a,b) jsmn_find_extract_token(string, tokens, 0, a, b, sizeof( b ))
 #define EXTRACT_OBJECT(a,b) jsmn_find_extract_token(string, tokens, index, a, b, sizeof( b ))
-#define EXTRACT_APPEND_SQL(a) { jsmn_find_extract_token(string, tokens, 0, a, zs, sizeof( zs )); sprintf(zs1, ", \"%s\"", zs); strcat(query, zs1); }
-#define EXTRACT_APPEND_SQL_OBJECT(a) { jsmn_find_extract_token(string, tokens, index, a, zs, sizeof( zs )); sprintf(zs1, ", \"%s\"", zs); strcat(query, zs1); }
+#define EXTRACT_APPEND_SQL(a) { jsmn_find_extract_token(string, tokens, 0, a, zs, sizeof( zs )); sprintf(zs1, ", \"%.900s\"", zs); strcat(query, zs1); }
+#define EXTRACT_APPEND_SQL_OBJECT(a) { jsmn_find_extract_token(string, tokens, index, a, zs, sizeof( zs )); sprintf(zs1, ", \"%.900s\"", zs); strcat(query, zs1); }
 
-static void process_delete_schedule(const char * string, const jsmntok_t * tokens)
+static void process_delete_schedule(char const * const string, jsmntok_t const * const tokens)
 {
    char query[1024], CIF_train_uid[16], schedule_start_date[16], schedule_end_date[16], CIF_stp_indicator[8]; 
    dword id;
@@ -549,7 +576,7 @@ static void process_delete_schedule(const char * string, const jsmntok_t * token
    }
 }
 
-static void process_create_schedule(const char * string, const jsmntok_t * tokens, const word update)
+static void process_create_schedule(char const * const string, jsmntok_t const * const tokens, word const update)
 {
    // update true indicates this is as the result of a VSTP update.
    char zs[1024], zs1[1024];
@@ -591,7 +618,8 @@ static void process_create_schedule(const char * string, const jsmntok_t * token
    strcat(query, zs1);
 
    EXTRACT("signalling_id", signalling_id);
-   sprintf(zs1, ", '%s'", signalling_id); strcat(query, zs1);
+   sprintf(zs1, ", '%s'", signalling_id);
+   strcat(query, zs1);
 
    EXTRACT_APPEND_SQL("CIF_train_category");
    EXTRACT_APPEND_SQL("CIF_headcode");
@@ -600,7 +628,17 @@ static void process_create_schedule(const char * string, const jsmntok_t * token
    EXTRACT_APPEND_SQL("CIF_business_sector");
    EXTRACT_APPEND_SQL("CIF_power_type");
    EXTRACT_APPEND_SQL("CIF_timing_load");
-   EXTRACT_APPEND_SQL("CIF_speed");
+   EXTRACT("CIF_speed", zs);
+   for(i=0; speed_correct[i].given[0] && strcmp(zs, speed_correct[i].given); i++);
+   if(speed_correct[i].given[0])
+   {
+      //_log(MINOR, "Correcting speed \"%s\" to \"%s\".", zs, speed_correct[i].actual);
+      strcpy(zs, speed_correct[i].actual);
+      stats[SpeedCorrected]++;
+   }
+   sprintf(zs1, ", '%.3s'", zs);
+   strcat(query, zs1);
+   
    EXTRACT_APPEND_SQL("CIF_operating_characteristics");
    EXTRACT_APPEND_SQL("CIF_train_class");
 
@@ -618,7 +656,9 @@ static void process_create_schedule(const char * string, const jsmntok_t * token
 
    EXTRACT_APPEND_SQL("train_status");
 
-   strcat(query, ", 0, '', '')"); // id filled by MySQL
+   strcat(query, ", 0, '', '')"); // id filled by MySQL,
+                                      // Deduced headcode,
+                                      // Deduced headcode status
 
    if(!db_query(query))
    {
@@ -682,7 +722,15 @@ static void process_create_schedule(const char * string, const jsmntok_t * token
       strcat(message, "\n\n");
       EXTRACT("CIF_train_uid", zs1);
       EXTRACT("CIF_stp_indicator", stp);
-      sprintf(zs, "%u (%s %s) ", id, zs1, stp);
+
+      if(conf[conf_public_url][0])
+      {
+         sprintf(zs, "%.400srail/liverail/train/%u\n(%.400s %s) ", conf[conf_public_url], id, zs1, stp);
+      }
+      else
+      {
+         sprintf(zs, "%u (%.400s %.400s) ", id, zs1, stp);
+      }
       EXTRACT("signalling_id", zs1);
       strcat(zs, zs1);
       sprintf(query, "SELECT tiploc_code, departure FROM cif_schedule_locations WHERE record_identity = 'LO' AND cif_schedule_id = %u", id);
@@ -764,7 +812,7 @@ static void process_create_schedule(const char * string, const jsmntok_t * token
    }
 }
 
-static word process_create_schedule_location(const char * string, const jsmntok_t * tokens, const int index, const unsigned long schedule_id)
+static word process_create_schedule_location(char const * const string, jsmntok_t const * const tokens, int const index, unsigned long const schedule_id)
 {
    char query[2048], zs[1024], zs1[1024];
 
@@ -845,7 +893,7 @@ static word process_create_schedule_location(const char * string, const jsmntok_
    return (index + tokens[index].size + 5);
 }
 
-static void process_update_schedule(const char * string, const jsmntok_t * tokens)
+static void process_update_schedule(char const * const string, jsmntok_t const * const tokens)
 {
    char query[1024], CIF_train_uid[16], schedule_start_date[16], schedule_end_date[16], CIF_stp_indicator[8]; 
    dword id;
@@ -887,7 +935,7 @@ static void process_update_schedule(const char * string, const jsmntok_t * token
    _log(DEBUG, "Updated schedule \"%s\".", CIF_train_uid);
 }
 
-static void jsmn_dump_tokens(const char const * string, const jsmntok_t const * tokens, const word object_index)
+static void jsmn_dump_tokens(char const * const string, jsmntok_t const * const tokens, word const object_index)
 {
    char zs[256], zs1[256];
 
@@ -952,7 +1000,7 @@ static void report_stats(void)
    email_alert(NAME, BUILD, "Statistics Report", report);
 }
 
-static word get_sort_time_vstp(const char const * buffer)
+static word get_sort_time_vstp(char const * const buffer)
 {
    word result;
    char zs[8];
@@ -970,7 +1018,7 @@ static word get_sort_time_vstp(const char const * buffer)
    return result;
 }
 
-static char * vstp_to_CIF_time(const char * buffer)
+static char * vstp_to_CIF_time(char const * const buffer)
 {
 
    static char cif[8];
@@ -998,7 +1046,7 @@ static char * vstp_to_CIF_time(const char * buffer)
    return cif;
 }
 
-static char * tiploc_name(const char * const tiploc)
+static char * tiploc_name(char const * const tiploc)
 {
    // Not re-entrant
    char query[256];

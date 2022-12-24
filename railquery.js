@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2015, 2017 Phil Wieland
+    Copyright (C) 2015, 2017, 2018, 2020, 2022 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -16,10 +16,13 @@
 
     phil@philwieland.com
 
+Version 3c17
+
 */
 
 var url_base = "/rail/query/";
 var liverail_url_base = "/rail/liverail/";
+var livetrain_url_base = "/rail/livetrain/";
 
 function search_onclick()
 {
@@ -53,7 +56,7 @@ function menu_onclick()
 
 function A_onclick()
 {
-   result = liverail_url_base + 'train/' + document.getElementById("A-id").value + '/' + document.getElementById("date").value;
+   result = livetrain_url_base + '$' + document.getElementById("A-id").value + '/' + document.getElementById("date").value;
    window.location = result;
 }
 
@@ -103,7 +106,31 @@ function F_onclick()
 {
    result = url_base + 'F/' + 
       document.getElementById("F-id").value + '/' +
+      document.getElementById("F-uid").value + '/' +
       document.getElementById("F-l").value;
+   window.location = result;
+}
+
+function G_onclick()
+{
+   result = url_base + 'G/' + 
+      document.getElementById("G-l").value;
+   window.location = result;
+}
+
+function H_onclick()
+{
+   result = url_base + 'H/' + 
+        document.getElementById("H-l0").value + '/' +
+        document.getElementById("H-l0p").value + '/' +
+        document.getElementById("H-l0l").value + '/' +
+        document.getElementById("H-l1").value + '/' +
+        document.getElementById("H-l2").value + '/' +
+        ((document.getElementById("H-p").checked)?"P":"") + '/' +
+        ((document.getElementById("H-SP").checked)?"P":"") + ((document.getElementById("H-SO").checked)?"O":"") + '/' +
+        document.getElementById("H-d0").value.replace("/", "-").replace("/", "-") + '/' +
+        document.getElementById("H-d1").value.replace("/", "-").replace("/", "-");
+        
    window.location = result;
 }
 

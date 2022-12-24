@@ -1,5 +1,5 @@
 changequote(`[',`]')dnl
-define([BUILD], [Z110n])dnl
+define([BUILD], [1113n])dnl
 define([BERTH], [<rect x="$1" y="eval(($2) - 6)" width="32" height="12" class="describer" id="$3b$4box" onmousemove="parent.tt_on(evt,'$5')" onmouseout="parent.tt_off(evt)"/><text x="eval(($1) + 10)"  y="eval(($2) + 4)" class="describer-text-off" id="$3b$4off" onmousemove="parent.tt_on(evt,'$5')" onmouseout="parent.tt_off(evt)">$4</text><text x="eval(($1) + 2)"  y="eval(($2) + 4)" class="describer-text" id="$3b$4" onmousemove="parent.tt_on(evt,'$5')" onmouseout="parent.tt_off(evt)">x</text>])dnl
 define([BERTHL], [<polygon points="eval(($1) + 3),eval(($2) + 6) eval(($1) - 3),eval(($2) + 0) eval(($1) + 3),eval(($2) - 6) eval(($1) + 32),eval(($2) - 6) eval(($1) + 32),eval(($2) + 6) " class="describer" id="$3b$4box" onmousemove="parent.tt_on(evt,'$5')" onmouseout="parent.tt_off(evt)"/><text x="eval(($1) + 10)"  y="eval(($2) + 4)" class="describer-text-off" id="$3b$4off" onmousemove="parent.tt_on(evt,'$5')" onmouseout="parent.tt_off(evt)">$4</text><text x="eval(($1) + 2)"  y="eval(($2) + 4)" class="describer-text" id="$3b$4" onmousemove="parent.tt_on(evt, '$5')" onmouseout="parent.tt_off(evt)">x</text>])dnl
 define([BERTHR], [<polygon points="eval(($1) + 0),eval(($2) + 6) eval(($1) + 0),eval(($2) - 6) eval(($1) + 29),eval(($2) - 6) eval(($1) + 35),eval(($2) + 0) eval(($1) + 29),eval(($2) + 6) " class="describer" id="$3b$4box" onmousemove="parent.tt_on(evt,'$5')" onmouseout="parent.tt_off(evt)"/><text x="eval(($1) + 10)"  y="eval(($2) + 4)" class="describer-text-off" id="$3b$4off" onmousemove="parent.tt_on(evt,'$5')" onmouseout="parent.tt_off(evt)">$4</text><text x="eval(($1) + 2)"  y="eval(($2) + 4)" class="describer-text" id="$3b$4" onmousemove="parent.tt_on(evt,'$5')" onmouseout="parent.tt_off(evt)">x</text>])dnl
@@ -11,6 +11,16 @@ define([SIGNALDL], [<polyline points="$1,eval(($2)+2) $1,eval(($2)+7) eval(($1)-
 define([SIGNALDR], [<polyline points="$1,eval(($2)-2) $1,eval(($2)-7) eval(($1)-7),eval(($2)-7)" class="sig-line"/><circle cx="eval(($1)-9)" cy="eval(($2)-7)" r="4" stroke="black" stroke-width="0" fill="black" id="$3s$4s" onmousemove="parent.tt_on(evt,'$5')" onmouseout="parent.tt_off(evt)"/>])dnl
 define([SIGNALDLR], [<polyline points="$1,eval(($2)+2) $1,eval(($2)+7) eval(($1)-7),eval(($2)+7)" class="sig-line"/><circle cx="eval(($1)-9)" cy="eval(($2)+7)" r="4" stroke-width="0" fill="red" onmousemove="parent.tt_on(evt,'$3')" onmouseout="parent.tt_off(evt)"/>])dnl
 define([SIGNALDRR], [<polyline points="$1,eval(($2)-2) $1,eval(($2)-7) eval(($1)-7),eval(($2)-7)" class="sig-line"/><circle cx="eval(($1)-9)" cy="eval(($2)-7)" r="4" stroke-width="0" fill="red" onmousemove="parent.tt_on(evt,'$3')" onmouseout="parent.tt_off(evt)"/>])dnl
+define([SIGNALULR], [<polyline points="$1,eval(($2)-2) $1,eval(($2)-7) eval(($1)+7),eval(($2)-7)" class="sig-line"/><circle cx="eval(($1)+9)" cy="eval(($2)-7)" r="4" stroke-width="0" fill="red" onmousemove="parent.tt_on(evt,'$5')" onmouseout="parent.tt_off(evt)"/>])dnl
+define([SIGNALDLC], [<polyline points="$1,eval(($2)+2) $1,eval(($2)+7) eval(($1)-7),eval(($2)+7)" class="sig-line"/><circle cx="eval(($1)-9)" cy="eval(($2)+7)" r="4" stroke="black" stroke-width="0" fill="black" id="$3s$4s" onmousemove="parent.tt_on(evt,'$5')" onmouseout="parent.tt_off(evt)" style="opacity:0"/><path d="M eval(($1)-5),eval(($2)+3) l 0 8 a 8 8 0 0 1 -8 -8 z" stroke-width="0" fill="black" id="$3s$4sc" onmousemove="parent.tt_on(evt,'$5')" onmouseout="parent.tt_off(evt)" style="opacity:1"/>])dnl
+define([SIGNALDRC], [<polyline points="$1,eval(($2)-2) $1,eval(($2)-7) eval(($1)-7),eval(($2)-7)" class="sig-line"/><circle cx="eval(($1)-9)" cy="eval(($2)-7)" r="4" stroke="black" stroke-width="0" fill="black" id="$3s$4s" onmousemove="parent.tt_on(evt,'$5')" onmouseout="parent.tt_off(evt)" style="opacity:0"/><path d="M eval(($1)-5),eval(($2)-11) l 0 8 a 8 8 0 0 1 -8 -8 z" stroke-width="0" fill="black" id="$3s$4sc" onmousemove="parent.tt_on(evt,'$5')" onmouseout="parent.tt_off(evt)" style="opacity:1"/>])dnl
+define([SIGNALULG], [<polyline points="$1,eval(($2)-2) $1,eval(($2)-7) eval(($1)+5),eval(($2)-7)" class="sig-line"/><path d="M eval(($1)+5),eval(($2)-11) l 0 8 a 8 8 0 0 0 8 -8 z" stroke-width="0" fill="black" id="$3s$4s" onmousemove="parent.tt_on(evt,'$5')" onmouseout="parent.tt_off(evt)"/>])dnl
+define([SIGNALURG], [<polyline points="$1,eval(($2)+2) $1,eval(($2)+7) eval(($1)+5),eval(($2)+7)" class="sig-line"/><path d="M eval(($1)+5),eval(($2)+11) l 0 -8 a 8 8 0 0 1 8 8 z" stroke-width="0" fill="black" id="$3s$4s" onmousemove="parent.tt_on(evt,'$5')" onmouseout="parent.tt_off(evt)"/>])dnl
+define([SIGNALDLG], [<polyline points="$1,eval(($2)+2) $1,eval(($2)+7) eval(($1)-5),eval(($2)+7)" class="sig-line"/><path d="M eval(($1)-5),eval(($2)+11) l 0 -8 a 8 8 0 0 0 -8 8 z" stroke-width="0" fill="black" id="$3s$4s" onmousemove="parent.tt_on(evt,'$5')" onmouseout="parent.tt_off(evt)"/>])dnl
+define([SIGNALDRG], [<polyline points="$1,eval(($2)-2) $1,eval(($2)-7) eval(($1)-5),eval(($2)-7)" class="sig-line"/><path d="M eval(($1)-5),eval(($2)-11) l 0 8 a 8 8 0 0 1 -8 -8 z" stroke-width="0" fill="black" id="$3s$4s" onmousemove="parent.tt_on(evt,'$5')" onmouseout="parent.tt_off(evt)"/>])dnl
+define([SIGNALDRGR], [<polyline points="$1,eval(($2)-2) $1,eval(($2)-7) eval(($1)-5),eval(($2)-7)" class="sig-line"/><path d="M eval(($1)-5),eval(($2)-11) l 0 8 a 8 8 0 0 1 -8 -8 z" stroke-width="0" fill="red" onmousemove="parent.tt_on(evt,'$3')" onmouseout="parent.tt_off(evt)"/>])dnl
+define([TRTSR], [<text x="eval(($1)+15)" y="eval(($2)+10)" class="trts" id="$3s$4r">R</text>])dnl
+define([TRTSL], [<text x="eval(($1)+15)" y="eval(($2)-4)" class="trts" id="$3s$4r">R</text>])dnl
 define([ARROWU], [<line x1="$1" y1="$2" x2="eval(($1)+20)" y2="$2" class="arrow"/><polygon points="eval(($1)+20),eval(($2)-2) eval(($1)+20),eval(($2)+2) eval(($1)+26),$2" class="arrow"/>])dnl
 define([ARROWD], [<line x1="$1" y1="$2" x2="eval(($1)-20)" y2="$2" class="arrow"/><polygon points="eval(($1)-20),eval(($2)-2) eval(($1)-20),eval(($2)+2) eval(($1)-26),$2" class="arrow"/>])dnl
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
@@ -18,257 +28,367 @@ define([ARROWD], [<line x1="$1" y1="$2" x2="eval(($1)-20)" y2="$2" class="arrow"
 <svg xmlns="http://www.w3.org/2000/svg" version="1.1" width="1260" height="600">
   <g id="layer1">
     <!-- Background -->
-    <rect x="0" y="0" width="1260" height="600" class="back" />
+    <rect x="0" y="0" width="1260" height="600" class="back" id="diag-bg"/>
 
-    <text x="5" y="45" class="label-text-small">Liverpool Lime Street</text>
-    <text x="200" y="240" class="caption-text">Lime Street / Edge Hill:  Interim layout from 28 December 2017.</text>
-    <!-- <text x="200" y="252" class="caption-text">Provisional diagram.</text> -->
+    <text x="5" y="75" class="label-text-small">Liverpool Lime Street</text>
 
-    <!-- P1o -->
-    <polyline points="0,70 170,70 235,135 550,135" class="track" /><!-- P1 to UpS -->
-    <polyline points="145,70 235,160 550,160" class="track" /> <!-- P1 to DnS -->
-    <rect x="0" y="52.5" width="80" height="10" class="platform" />
-    BERTH(5,   70, XZ, 0BP1, P1)
-    BERTH(75,  70, XZ, 0AP1, P1)
-    ROUTE(110, 70, XZ, LR01, P1 route)
+    <!-- P1 -->
+    <polyline points="0,90 105,90 130,115 240,115 265,135" class="track" />
+    BERTH(0, 90, M0, B100)
+    BERTH(35, 90, M0, A100)
+    SIGNALUR(70, 90, M0, 026, LL5100) TRTSR(70, 90, M0, 0f4) <!-- Sbits to be confirmed -->
 
-    <!-- P2o -->
-    <polyline points="0,90 145,90 170,115" class="track" /> -->
-    <polyline points="45,90 65,70" class="track-closed" /> <!-- Cross-over -->
-    BERTH(5,   90, XZ, 0BP2, P2)
-    BERTH(75,  90, XZ, 0AP2, P2)
-    ROUTE(110, 90, XZ, LR02, P2 route)
-
-    <!-- P3o -->
-    <rect x="0" y="97.5" width="80" height="10" class="platform" />
-    <polyline points="0,115 190,115" class="track" />
-    BERTH(5,   115, XZ, 0BP3, P3)
-    BERTH(40,  115, XZ, 0AP3, P3)
-    ROUTE(75,  115, XZ, LR03, P3 route)
-    BERTHR(110, 115, XZ, 084B, LS84B)
+    <!-- P2 -->
+    <rect x="0" y="97.5" width="67" height="10" class="platform" />
+    <polyline points="0,115 105,115 125,135 550,135" class="track" /> <!-- To UpS -->
+    BERTH(0, 115, M0, B098)
+    BERTH(35, 115, M0, A098)
+    SIGNALUL(70, 115, M0, 025, LL5098) TRTSL(70, 115, M0, 0f3)
        
-    <!-- P4o -->
-    <polyline points="0,135 145,135 165,115" class="track" />
-    BERTH(5,   135, XZ, 0BP4, P4)
-    BERTH(40,  135, XZ, 0AP4, P4)
-    ROUTE(75,  135, XZ, LR04, P4 route)
-    BERTHR(110, 135, XZ, 084A, LS84A)
+    <!-- P3 -->
+    <polyline points="0,135 105,135 130,160" class="track" />
+    BERTH(0, 135, M0, B096)
+    BERTH(35, 135, M0, A096)
+    SIGNALUR(70, 135, M0, 024, LL5096) TRTSR(70, 135, M0, 0f2)
     
-    <!-- P5o -->
-    <rect x="0" y="142.5" width="80" height="10" class="platform" />
-    <polyline points="0,160 135,160 147.5,172.5 310,172.5" class="track" /> <!-- to neck -->
-    BERTH(5,  160, XZ, 0BP5, P5)
-    BERTH(40, 160, XZ, 0AP5, P5)
-    ROUTE(75, 160, XZ, LR05, P5 route)
+    <!-- P4 -->
+    <rect x="0" y="142.5" width="67" height="10" class="platform" />
+    <polyline points="0,160 550,160" class="track" /> <!-- to DnS -->
+    BERTH(0, 160, M0, B094)
+    BERTH(35, 160, M0, A094)
+    SIGNALUL(70, 160, M0, 023, LL5094) TRTSL(70, 160, M0, 0f1)
     
-    <!-- P6o -->
-    <polyline points="0,180 135,180 147.5,172.5" class="track-closed" /> 
-    <!-- BERTH(5,  180, XZ, 0BP6, P6)
-    BERTH(40, 180, XZ, 0AP6, P6)
-    ROUTE(75, 180, XZ, LR06, P6 route) -->
-    <rect x="0" y="187.5" width="80" height="10" class="platform" />
+    <!-- P5 -->
+    <polyline points="0,180 130,180 150,160" class="track" /> 
+    <rect x="0" y="187.5" width="67" height="10" class="platform" />
+    BERTH(0, 180, M0, B092)
+    BERTH(35, 180, M0, A092)
+    SIGNALUR(70, 180, M0, 022, LL5092) TRTSR(70, 180, M0, 0f0)
     
-    <!-- P7old -->
-    <polyline points="0,215 160,215 190,185 550,185" class="track" /> <!-- to UpF -->
-    BERTH(5,  215, XZ, 0BP7, P7)
-    BERTH(40, 215, XZ, 0AP7, P7)
-    ROUTE(75, 215, XZ, LR07, P7 route)
-    <rect x="0" y="222.5" width="80" height="10" class="platform" />
+    <!-- P6 -->
+    <polyline points="0,215 120,215 150,185 550,185" class="track" /> <!-- to UpF -->
+    <rect x="0" y="222.5" width="67" height="10" class="platform" />
+    BERTH(0, 215, M0, B088)
+    BERTH(35, 215, M0, A088)
+    SIGNALUR(70, 215, M0, 013, LL3088) TRTSR(70, 215, M0, 036)
     
-    <!-- P7 new -->
-    <polyline points="0,240 135,240" class="track-closed" />
-    <!-- BERTH(5,  240, XZ, nBP7, P7 new)
-    BERTH(40, 240, XZ, nAP7, P7 new) -->
+    <!-- P7 -->
+    <polyline points="0,240 95,240" class="track" />
+    BERTH(0, 240, M0, B086)
+    BERTH(35, 240, M0, A086)
+    SIGNALUL(70, 240, M0, 012, LL3086) TRTSL(70, 240, M0, 035)
        
-    <!-- P8 new -->
-    <polyline points="0,260 115,260 160,215" class="track" /> 
-    <!-- BERTH(5,  260, XZ, nBP8, P8 new)
-    BERTH(40, 260, XZ, nAP8, P8 new) -->
-    BERTH(5,  260, XZ, 0BP8, P8)
-    BERTH(40, 260, XZ, 0AP8, P8)
-    ROUTE(75, 260, XZ, LR08, P8 route)
+    <!-- P8 -->
+    <polyline points="0,260 75,260 120,215" class="track" /> 
+    BERTH(0, 260, M0, B084)
+    BERTH(35, 260, M0, A084)
+    SIGNALUR(70, 260, M0, 011, LL3084) TRTSR(70, 260, M0, 034)
     
-    <!-- P8old -->
-    <rect x="0" y="267.5" width="80" height="10" class="platform" />
-    <polyline points="0,285 135,285 210,210 550,210" class="track" /> 
-    BERTH(5,  285, XZ, 0BP9, P9)
-    BERTH(40, 285, XZ, 0AP9, P9)
-    ROUTE(75, 285, XZ, LR09, P9 route)
+    <!-- P9 P8o -->
+    <rect x="0" y="267.5" width="67" height="10" class="platform" />
+    <polyline points="0,285 95,285" class="track" /> 
+    BERTH(0, 285, M0, B082)
+    BERTH(35, 285, M0, A082)
+    SIGNALUL(70, 285, M0, 010, LL3082) TRTSL(70, 285, M0, 033)
 
-    <!-- P9old -->
-    <polyline points="0,305 115,305 135,285" class="track-closed" /> <!-- P9old to DnF -->
-    <!-- BERTH(5,  305, XZ, 0BP9, P9)
-    BERTH(40, 305, XZ, 0AP9, P9)
-    ROUTE(75, 305, XZ, LR09, P9 route) -->
-    <rect x="0" y="312.5" width="80" height="10" class="platform" />
+    <!-- P10 -->
+    <polyline points="0,305 75,305 170,210 550,210" class="track" /> <!-- P9old to DnF -->
+    <rect x="0" y="312.5" width="67" height="10" class="platform" />
+    BERTH(0, 305, M0, B080)
+    BERTH(35, 305, M0, A080)
+    SIGNALUR(70, 305, M0, 007, LL3080) TRTSR(70, 305, M0, 032)
+
     <text class="platform-text">
-    <tspan x="5" y="61">P1</tspan>
-    <tspan x="5" y="106">P2/P3</tspan>
-    <tspan x="5" y="151">P4/P5</tspan>
-    <!-- <tspan x="5" y="196">P6</tspan> -->
-    <tspan x="5" y="231">P7</tspan>
-    <tspan x="5" y="276">P8/P9</tspan>
+    <tspan x="5" y="106">P1 P2</tspan>
+    <tspan x="5" y="151">P3 P4</tspan>
+    <tspan x="5" y="196">P5</tspan>
+    <tspan x="5" y="231">P6 P7</tspan>
+    <tspan x="5" y="276">P8 P9</tspan>
     <tspan x="5" y="321">P10</tspan>
     </text>
 
     <!-- Throat -->
-    <polyline points="245,172.5 257.5,160" class="track" />
-    <polyline points="215,210 240,185 242.5,185 255,172.5 265,172.5 277.5,160 330,160 355,135" class="track" />
-    <polyline points="275,172.5 287.5,185 295,185 320,210" class="track" />
-    <polyline points="245,160 270,135" class="track" /> <!-- P234 to DnS -->
-    <polyline points="260,185 285,210" class="track" /> <!-- Missing from diagram until Z110 -->
-    
-    <!--<polyline points="200,135 225,160 230,160 255,135" class="track" />
-    <polyline points="235,160 255,180 260,180 280,160" class="track" />
-    <polyline points="210,225 235,200 260,200 280,180 285,180 305,160" class="track" />
-    <polyline points="290,180 310,200 315,200 340,225" class="track" />
-    <polyline points="265,200 290,225" class="track" />
-    -->
+    <polyline points="160,160 185,135" class="track" /> <!-- 315 -->
+    <polyline points="170,210 195,185" class="track" /> <!-- 314 points -->
+    <polyline points="190,135 215,160" class="track" /> <!-- 312 -->
+    <polyline points="200,185 225,160" class="track" /> <!-- 311 -->
+    <polyline points="275,185 300,210" class="track" /> <!-- 309 -->
+    <polyline points="280,160 305,135" class="track" /> <!-- 308 -->
 
-    BERTH(290, 135, XZ, 082A, LS82A)
-    BERTHR(290, 160, XZ, 082B, LS82B)
+    <polyline points="365,135 390,160 435,160 460,185 465,185 490,210" class="track" /> <!-- Ladder crown street -->
 
-    <!-- BERTHL(380, 135, XZ, LS72, LE58) -->
-    BERTH(360, 160, XZ, 0006, LS6)
-    BERTH(360, 185, XZ, 0047, LS47)
-    BERTH(360, 210, XZ, 0005, LS5)
-    
-    BERTH(470, 135, XZ, E058, LE58)
-    BERTH(490, 160, XZ, 0003, LS3)
-    BERTH(490, 185, XZ, E054, LE54)
-    BERTH(490, 210, XZ, 0001, LS1)
+    <!-- Routes -->
+    <polyline points="320,210 170,210 75,305 67,305" class="route" id="M0s050r"/> <!-- 3067 to P10 -->
+    <polyline points="320,210 170,210 75,305 67,305" class="route" id="M0s055r"/> <!-- 3067c to P10 -->
+    <polyline points="320,210 170,210 95,285 67,285" class="route" id="M0s051r"/> <!-- 3067 to P9 -->
+    <polyline points="320,210 170,210 95,285 67,285" class="route" id="M0s056r"/> <!-- 3067c to P9 -->
+    <polyline points="320,210 300,210 275,185 150,185 75,260 67,260" class="route" id="M0s052r"/> <!-- 3067 P8 -->
+    <polyline points="320,210 300,210 275,185 150,185 75,260 67,260" class="route" id="M0s057r"/> <!-- 3067c P8 -->
+    <polyline points="320,210 300,210 275,185 150,185 95,240 67,240" class="route" id="M0s053r"/> <!-- 3067 P7 -->
+    <polyline points="320,210 300,210 275,185 150,185 95,240 67,240" class="route" id="M0s060r"/> <!-- 3067c P7 -->
+    <polyline points="320,210 300,210 275,185 150,185 120,215 67,215" class="route" id="M0s054r"/> <!-- 3067 P6 -->
+    <polyline points="320,210 300,210 275,185 150,185 120,215 67,215" class="route" id="M0s061r"/> <!-- 3067c P6 -->
+
+    <polyline points="496,210 452,210" class="route" id="M0s045r"/> <!-- 3057 3061 -->
+    <polyline points="496,210 490,210 465,185 460,185 435,160 432,160" class="route" id="M0s046r"/> <!-- 3057 5063 -->
+
+    <polyline points="67,305 75,305 195,185 200,185 225,160 230,160" class="route" id="M0s0c3r"/> <!-- P10 9074 -->
+    <polyline points="67,305 75,305 195,185 297,185" class="route" id="M0s0c4r"/> <!-- P10 3072 -->
+    <polyline points="67,285 95,285 195,185 200,185 225,160 230,160" class="route" id="M0s0c5r"/> <!-- P9 9074 -->
+    <polyline points="67,285 95,285 195,185 297,185" class="route" id="M0s0c6r"/> <!-- P9 3072 -->
+    <polyline points="67,260 75,260 150,185 200,185 225,160 230,160" class="route" id="M0s0c7r"/> <!-- P8 9074 -->
+    <polyline points="67,260 75,260 150,185 297,185" class="route" id="M0s0d0r"/>  <!-- P8 3072-->
+    <polyline points="67,240 95,240 150,185 200,185 225,160 230,160" class="route" id="M0s0d1r"/>  <!-- P7 9074 -->
+    <polyline points="67,240 95,240 150,185 297,185" class="route" id="M0s0d2r"/>  <!-- P7 3072 -->
+    <polyline points="67,215 120,215 150,185 200,185 225,160 230,160" class="route" id="M0s0d3r"/> <!-- P6 9074 -->
+    <polyline points="67,215 120,215 150,185 297,185" class="route" id="M0s0d4r"/>  <!-- P6 3072-->
+    <polyline points="67,180 130,180 150,160 160,160 185,135 200,135" class="route" id="M0s0d5r"/>  <!-- P5 5076 -->
+    <polyline points="67,180 130,180 150,160 230,160" class="route" id="M0s0d6r"/> <!-- P5 9074 -->
+    <polyline points="67,160 160,160 185,135 200,135" class="route" id="M0s0d7r"/>  <!-- P4 5076 -->
+    <polyline points="67,160 230,160" class="route" id="M0s0e0r"/> <!-- P4 9074 -->
+    <polyline points="67,135 105,135 130,160 160,160 185,135 200,135" class="route" id="M0s0e1r"/> <!-- P3 5076 -->
+    <polyline points="67,135 105,135 130,160 230,160" class="route" id="M0s0e2r"/> <!-- P3 9074 -->
+    <polyline points="67,115 105,115 125,135 200,135" class="route" id="M0s0e3r"/> <!-- P2 5076 -->
+    <polyline points="67,115 105,115 125,135 190,135 215,160 230,160" class="route" id="M0s0e4r"/> <!-- P2 9074 -->
+    <polyline points="67,90 105,90 130,115 200,115" class="route" id="M0s0e5r"/>  <!-- P1 5078 -->
+
+    <polyline points="397,160 352,160" class="route" id="M0s064r"/>  <!-- 5063 5071-->
+    <polyline points="397,160 390,160 365,135 352,135" class="route" id="M0s065r"/> <!-- 5063 9073 -->
+    <polyline points="352,135 460,135" class="route" id="M0s066r"/> <!-- 5066 E058 -->
+    <polyline points="352,135 365,135 390,160 435,160 460,185 485,185" class="route" id="M0s067r"/> <!-- 5066 E054 -->
+    <polyline points="352,160 435,160 460,185 485,185" class="route" id="M0s094r"/>  <!-- 9064 E054 -->
+    <polyline points="235,135 320,135" class="route" id="M0s092r"/>  <!-- 5076 5066 -->
+    <polyline points="235,115 240,115 265,135 320,135" class="route" id="M0s093r"/>  <!-- 5078 5066 -->
+    <polyline points="420,210 352,210" class="route" id="M0s047r"/>  <!-- 3061 3067 -->
+    <polyline points="332,185 370,185" class="route" id="M0s062r"/>  <!-- 3072 3062 -->
+    <polyline points="490,160 432,160" class="route" id="M0s063r"/> <!-- 5059 5063 -->
+    <polyline points="402,185 485,185" class="route" id="M0s0e6r"/> <!-- 3062 E054 -->
+
+    <polyline points="320,160 225,160 200,185 195,185 75,305 67,305" class="route" id="M0s070r"/>  <!-- 5071 P10 -->
+    <polyline points="320,160 225,160 200,185 195,185 75,305 67,305" class="route" id="M0s081r"/>  <!-- 5071c P10 -->
+    <polyline points="320,160 225,160 200,185 195,185 95,285 67,285" class="route" id="M0s071r"/>  <!-- 5071 P9 -->
+    <polyline points="320,160 225,160 200,185 195,185 95,285 67,285" class="route" id="M0s082r"/>  <!-- 5071c P9 -->
+    <polyline points="320,160 225,160 200,185 150,185 75,260 67,260" class="route" id="M0s072r"/>  <!-- 5071 P8 -->
+    <polyline points="320,160 225,160 200,185 150,185 75,260 67,260" class="route" id="M0s083r"/>  <!-- 5071c P8 -->
+    <polyline points="320,160 225,160 200,185 150,185 95,240 67,240" class="route" id="M0s073r"/>  <!-- 5071 P7 -->
+    <polyline points="320,160 225,160 200,185 150,185 95,240 67,240" class="route" id="M0s084r"/>  <!-- 5071c P7 -->
+    <polyline points="320,160 225,160 200,185 150,185 120,215 67,215" class="route" id="M0s074r"/>  <!-- 5071 P6 -->
+    <polyline points="320,160 225,160 200,185 150,185 120,215 67,215" class="route" id="M0s085r"/>  <!-- 5071c P6 -->
+    <polyline points="320,160 150,160 130,180 67,180" class="route" id="M0s075r"/>  <!-- 5071 P5 -->
+    <polyline points="320,160 150,160 130,180 67,180" class="route" id="M0s086r"/>  <!-- 5071c P5 -->
+    <polyline points="320,160 67,160" class="route" id="M0s076r"/>  <!-- 5071 P4 -->
+    <polyline points="320,160 67,160" class="route" id="M0s087r"/>  <!-- 5071c P4 -->
+    <polyline points="320,160 130,160 105,135 67,135" class="route" id="M0s077r"/>  <!-- 5071 P3 -->
+    <polyline points="320,160 130,160 105,135 67,135" class="route" id="M0s090r"/>  <!-- 5071c P3 -->
+    <polyline points="320,160 215,160 190,135 125,135 105,115 67,115" class="route" id="M0s080r"/>  <!-- 5071 P2 -->
+    <polyline points="320,160 215,160 190,135 125,135 105,115 67,115" class="route" id="M0s091r"/>  <!-- 5071c P2 -->
+
+    <polyline points="320,135 305,135 280,160 225,160 200,185 195,185 75,305 67,305" class="route" id="M0s095r"/> <!-- 9073 P10 -->
+    <polyline points="320,135 305,135 280,160 225,160 200,185 195,185 75,305 67,305" class="route" id="M0s0a7r"/> <!-- 9073c P10 -->
+    <polyline points="320,135 305,135 280,160 225,160 200,185 195,185 95,285 67,285" class="route" id="M0s096r"/> <!-- 9073 P9 -->
+    <polyline points="320,135 305,135 280,160 225,160 200,185 195,185 95,285 67,285" class="route" id="M0s0b0r"/> <!-- 9073c P9 -->
+    <polyline points="320,135 305,135 280,160 225,160 200,185 150,185 75,260 67,260" class="route" id="M0s097r"/> <!-- 9073 P8 -->
+    <polyline points="320,135 305,135 280,160 225,160 200,185 150,185 75,260 67,260" class="route" id="M0s0b1r"/> <!-- 9073c P8 -->
+    <polyline points="320,135 305,135 280,160 225,160 200,185 150,185 95,240 67,240" class="route" id="M0s0a0r"/> <!-- 9073 P7 -->
+    <polyline points="320,135 305,135 280,160 225,160 200,185 150,185 95,240 67,240" class="route" id="M0s0b2r"/> <!-- 9073c P7 -->
+    <polyline points="320,135 305,135 280,160 225,160 200,185 150,185 120,215 67,215" class="route" id="M0s0a1r"/> <!-- 9073 P6 -->
+    <polyline points="320,135 305,135 280,160 225,160 200,185 150,185 120,215 67,215" class="route" id="M0s0b3r"/> <!-- 9073c P6 -->
+    <polyline points="320,135 305,135 280,160 150,160 130,180 67,180" class="route" id="M0s0a2r"/> <!-- 9073 P5 -->
+    <polyline points="320,135 305,135 280,160 150,160 130,180 67,180" class="route" id="M0s0b4r"/> <!-- 9073c P5 -->
+    <polyline points="320,135 305,135 280,160 67,160" class="route" id="M0s0a3r"/> <!-- 9073 P4 -->
+    <polyline points="320,135 305,135 280,160 67,160" class="route" id="M0s0b5r"/> <!-- 9073c P4 -->
+    <polyline points="320,135 305,135 280,160 130,160 105,135 67,135" class="route" id="M0s0a4r"/> <!-- 9073 P3 -->
+    <polyline points="320,135 305,135 280,160 130,160 105,135 67,135" class="route" id="M0s0b6r"/> <!-- 9073c P3 -->
+    <polyline points="320,135 125,135 105,115 67,115" class="route" id="M0s0a5r"/> <!-- 9073 P2 -->
+    <polyline points="320,135 125,135 105,115 67,115" class="route" id="M0s0b7r"/> <!-- 9073c P2 -->
+    <polyline points="320,135 265,135 240,115 130,115 105,90 67,90" class="route" id="M0s0a6r"/> <!-- 9073 P1 -->
+    <polyline points="320,135 265,135 240,115 130,115 105,90 67,90" class="route" id="M0s0c0r"/> <!-- 9073c P1 -->
+
+    <polyline points="265,160 280,160 305,135 320,135" class="route" id="M0s0c1r"/> <!-- 9074 5066 -->
+    <polyline points="265,160 320,160" class="route" id="M0s0c2r"/> <!-- 9074 9064 -->
+
+    <polyline points="370,185 195,185 75,305 67,305" class="route" id="M0s040r"/> <!-- 1003 P10 -->
+    <polyline points="370,185 195,185 95,285 67,285" class="route" id="M0s041r"/> <!-- 1003 P9 -->
+    <polyline points="370,185 150,185 75,260 67,260" class="route" id="M0s042r"/> <!-- 1003 P8 -->
+    <polyline points="370,185 150,185 95,240 67,240" class="route" id="M0s043r"/> <!-- 1003 P7 -->
+    <polyline points="370,185 150,185 120,215 67,215" class="route" id="M0s044r"/> <!-- 1003 P6 -->
+
+    BERTHR(200, 115, M0, 5078) SIGNALUL(235, 115, M0, 021, LL5078)
+    BERTHR(200, 135, M0, 5076) SIGNALUL(235, 135, M0, 020, LL5076)
+    BERTHR(230, 160, M0, 9074) SIGNALUL(265, 160, M0, 031, LL9074)
+    BERTHR(320, 129, M0, 5066) SIGNALUL(360, 135, M0, 016, LL5066)
+    BERTHL(320, 141, M0, 9073) SIGNALDRC(317, 135, M0, 030, LL9073)
+    BERTHR(320, 154, M0, 9064) SIGNALUL(360, 160, M0, 027, LL9064)
+    BERTHL(320, 166, M0, 5071) SIGNALDLC(314, 160, M0, 017, LL5071)
+    BERTH(320, 210, M0, 3067)  SIGNALDLC(317, 210, M0, 005, LL3067)
+    BERTHR(297, 185, M0, 3072) SIGNALUL(335, 185, M0, 006, LL3072)
+    BERTHL(370, 191, M0, 1003) SIGNALDRG(367, 185, M0, 000, LL1003 Position Light Signal)
+    BERTHR(370, 179, M0, 3062) SIGNALUL(408, 185, M0, 004, LL3062)
+    BERTHL(400, 160, M0, 5063) SIGNALDL(394, 160, M0, 015, LL5063)
+    BERTH(420, 210, M0, 3061) SIGNALDL(417, 210, M0, 003, LL3061)
+    SIGNALDRGR(455, 135, LL1001 Limit Of Shunt)
+    BERTHR(460, 129, M1, 0058) SIGNALUL(500, 135, M1, 0a4, LE58)
+    BERTHL(460, 141, M0, 1001, LL1001)
+    BERTH(490, 160, M0, 5059) SIGNALDL(487,160, M0, 014, LL5059)
+    BERTH(485, 185, M1, 0054) SIGNALUL(520, 185, M1, 0a3, LE54)
+    BERTH(496, 210, M0, 3057) SIGNALDL(493, 210, M0, 002, LL3057)
 
     <polyline points="510,135 535,160" class="track" /> <!-- xover UpSlow DnSlow near edge hill -->
-
-    <polyline points="400,135 425,160 430,160 455,185 460,185 485,210" class="track-closed" /> <!-- Ladder crown street -->
-
      
-       ARROWU(395,124) <text x="350" y="127" class="label-text-small">Up Slow</text>
-       <!-- ARROWD(410,124) ARROWU(430,124) <text x="365" y="115" class="label-text-small">Up Slow (Bi-directional)</text> -->
-       <!-- ARROWD(410,173) <text x="420" y="176" class="label-text-small">Down Slow</text> 
-       ARROWU(431,187) <text x="390" y="190" class="label-text-small">Up Fast</text> -->
-       ARROWD(420,222) <text x="430" y="225" class="label-text-small">Down Fast</text>
+    ARROWU(400,125) <text x="375" y="120" class="label-text-small">Up Chat Moss Slow</text>
+    ARROWD(420,226) <text x="430" y="229" class="label-text-small">Down Ditton Fast</text>
     
-
     <!-- Yard accesses -->
     <polyline points="605,135 585,115" class="track-off" /> <!-- Up side -->
-    <polyline points="610,210 580,240 535,240" class="track" /> <!-- Wapping -->
-    BERTHR(540, 240, XZ, E150, LE150)
-    <text x="535" y="260" class="label-text-small">Wapping</text>
-    <polyline points="642.5,210 672.5,240 717.5,240" class="track" /> <!-- Edge Hill Depot-->
-    BERTHL(680, 240, XZ, E135, LE135)
-    <text x="655" y="260" class="label-text-small">Edge Hill Depot</text>
+    <polyline points="610,210 580,240 525,240" class="track" /> <!-- Wapping -->
+    BERTHR(530, 240, M1, 0150) SIGNALULG(565, 240, M1, 0d5, LE150)
+    <text x="525" y="260" class="label-text-small">Wapping</text>
+    <polyline points="642.5,210 672.5,240 725,240" class="track" /> <!-- Edge Hill Depot-->
+    BERTHL(690, 240, M1, 0135) SIGNALDLG(687, 240, M1, 0c6, LE135)
+    <text x="665" y="260" class="label-text-small">Edge Hill Depot</text>
 
     <!-- Edge Hill -->
     <rect x="545" y="142.5" width="32" height="10" class="platform" />
     <rect x="545" y="192.5" width="32" height="10" class="platform" />
     <polyline points="550,135 1260,135" class="track" /> <!-- Up Ch M -->
     <polyline points="550,160 1260,160" class="track" /> <!-- Dn Ch M -->
-    <polyline points="550,185 750,185" class="track" /> <!-- Up Main -->
-    <polyline points="550,210 750,210" class="track" /> <!-- Dn Main -->
+    <polyline points="550,185 790,185" class="track" /> <!-- Up Main -->
+    <polyline points="550,210 790,210" class="track" /> <!-- Dn Main -->
     <text class="platform-text">
-      <tspan x="532" y="146">P1</tspan>
-      <tspan x="532" y="156">P2</tspan>
-      <tspan x="532" y="196">P3</tspan>
-      <tspan x="532" y="206">P4</tspan>
+      <tspan x="533" y="146">P1</tspan>
+      <tspan x="533" y="156">P2</tspan>
+      <tspan x="533" y="196">P3</tspan>
+      <tspan x="533" y="206">P4</tspan>
     </text>
-    BERTH(545, 135, XZ, ZEHF, -)
-    <!-- TODO BERTHL(514, 160, XZ, E053, LE53) -->
-    BERTHL(544, 160, XZ, EH53, LE53)
-    BERTHR(546, 172, XZ, ZEHE, -)
-    BERTH(545, 185, XZ, ZEHD, -)
-    BERTH(545, 210, XZ, E049, LE49)
-    BERTH(545, 222, XZ, EH49, LE49)
+    BERTH(545, 135, M1, 0048) SIGNALUL(580,135,M1,0a0,LE48)
+    BERTHL(544, 160, M1, 0053) SIGNALDL(541,160, M1, 0a2, LE53)
+    BERTHR(546, 172, M1, 0046) SIGNALUL(580, 160, M1, 096, LE46)
+    BERTH(545, 185, M1, 0044) SIGNALUL(580, 185, M1, 094, LE44)
+    BERTHL(544, 210, M1, 0049) SIGNALDL(542, 210, M1, 0a1, LE49)
+    BERTHR(546, 222, M1, 0042)  SIGNALUL(580, 210, M1, 092, LE42)
     <text x="540" y="125" class="label-text-small">Edge Hill</text>
 
     <polyline points="585,160 610,185 615,185 640,210 645,210 670,185 675,185 700,160" class="track" />
     <polyline points="615,160 640,135" class="track" /> <!-- xover upCM downCM -->
-    BERTH(780, 135, XZ, ZEHC, LE36) <!-- BERTH(780, 135, M1, E036, LE36) --> <!-- Changed E036 to ZEHC YB15 -->
-    BERTH(705, 148, XZ, E045, LE45) BERTH(705, 160, XZ, EH45, LE45) ROUTE(705, 172, XZ, ER45, LE45 route)
-    BERTH(705, 185, XZ, ZEHA, -)
-    BERTH(705, 198, XZ, E043, LE43) BERTH(705, 210, XZ, EH43, LE43) ROUTE(705, 222, XZ, ER43, LE43 route)
-    <polyline points="745,160 770,135" class="track" />
-    <text x="755" y="189" class="label-text-small">Up Main</text>
-    <text x="754" y="214" class="label-text-small">Down Main</text>
-    ARROWU(695,124) <text x="620" y="127" class="label-text-small">Up Chat Moss</text>
-    ARROWD(775,174) <text x="786" y="176" class="label-text-small">Down Chat Moss</text>
+    BERTH(773, 135, M1, 0036) SIGNALUL(808,135,M1,087,LE36)
+    BERTH(695, 185, M1, 0010) SIGNALUL(730, 185, M1, 080, LE10)
+    <!-- ROUTE(695, 216, M0, ER43, LE43 route) -->
+    BERTH(695, 210, M1, 0043) SIGNALDL(692, 210, M1, 093, LE43)
+    BERTH(745, 185, M1, 0008) SIGNALUL(780, 185, M1, 0f1, LE8)
+    BERTH(745, 210, M1, 0019) SIGNALDL(742, 210, M1, 082, LE19)
+    <polyline points="745,160 770,135" class="track" /> <!-- Second crossover upcm downcm -->
+    <text x="795" y="189" class="label-text-small">Up Ditton Fast</text>
+    <text x="795" y="214" class="label-text-small">Down Ditton Fast</text>
+    ARROWU(695,126) <text x="675" y="121" class="label-text-small">Up Chat Moss</text>
+    ARROWD(905,168) <text x="860" y="180" class="label-text-small">Down Chat Moss</text>
 
-    <!-- Bootle Branch Jn -->
-    <polyline points="820,135 860,95  925,95  985,35 1080,35" class="track" /><!-- To Dn Bootle -->
-    <polyline points="820,160 865,115 930,115 990,55 1080,55" class="track" /><!-- To Up Bootle -->
+    <!-- Bootle Branch Jn / Olive Mount Chord -->
+    <polyline points="820,135 860,95  955,95  1015,35 1175,35" class="track" /><!-- To Dn Bootle -->
+    <polyline points="820,160 865,115 960,115 1020,55 1175,55" class="track" /><!-- To Up Bootle -->
     <polyline points="770,75 825,75 845,95 865,95 885,115 890,115 910,135 915,135 940,160" class="track" />
     <polyline points="770,95 890,95" class="track" />
-    BERTHR(785, 75, XZ, E034, LE34)
-    BERTH(900, 115, XZ, E041, LE41)
-    BERTH(990, 35, XZ, E032, LE32)
-    BERTH(1040, 35, XZ, E030, LE30)
-    BERTH(1040, 55, XZ, E402, LE402)
-    <text x="865" y="75" class="label-text-small">Bootle</text>
-    <text x="860" y="85" class="label-text-small">Branch Jn</text>
+    <polyline points="975,160 1085,160" class="track" />
+    <polyline points="1120,35 1100,55 1095,55 1075,75 1020,75 1000,95 1000,105 1010,115 1055,115 1075,135 1080,135 1105,160" class="track" /> <!-- Olive Mount Chord and crossovers -->
+    <!-- *** Routes -->
+    <!-- R32AM 0032 to 0030 --> <polyline points="1097,35 1125,35" class="route" id="M1s111r"/>
+    <!-- R34AM 0034 to 0032 --> <polyline points="815,75 825,75 845,95 955,95 1015,35 1065,35" class="route" id="M1s112r"/> 
+    <!-- R34AM 0034 to 0300 --> <polyline points="815,75 825,75 845,95 865,95 885,115 890,115 910,135 967,135" class="route" id="M1s113r"/>
+    <!-- R36AM 0036 to 0032 --> <polyline points="805,135 820,135 860,95 955,95 1015,35 1065,35" class="route" id="M1s114r"/>
+    <!-- R36BM 0036 to 0300 --> <polyline points="805,135 967,135" class="route" id="M1s115r"/>
+    <!-- R39AM 0039 to 0045 --> <polyline points="952,160 747,160" class="route" id="M1s116r"/>
+    <!-- R41AM 0041 to 0045 --> <polyline points="920,115 865,115 820,160 747,160" class="route" id="M1s121r"/>
+    <!-- R42AM 0042 to 0036 --> <polyline points="577,210 645,210 670,185 675,185 700,160 745,160 770,135 773,135" class="route" id="M1s124r"/>
+    <!-- R42BM 0042 to 0010 --> <polyline points="577,210 645,210 670,185 695,185" class="route" id="M1s125r"/>
+    <!-- R44AM 0044 to 0036 --> <polyline points="577,185 675,185 700,160 745,160 770,135 773,135" class="route" id="M1s136r"/> 
+    <!-- R44BM 0044 to 0010 --> <polyline points="577,185 695,185" class="route" id="M1s137r"/>
+    <!-- R45DM 0043 to 0049 --> <polyline points="695,210 576,210" class="route" id="M1s134r"/>
+    <!-- R45DM 0043 to 0053 --> <polyline points="695,210 640,210 615,185 610,185 585,160 576,160" class="route" id="M1s135r"/>
+    <!-- R45CM 0045 to 0049 --> <polyline points="713,160 700,160 675,185 670,185 645,210 576,210" class="route" id="M1s146r"/>
+    <!-- R45DM 0045 to 0053 --> <polyline points="713,160 576,160" class="route" id="M1s147r"/>
+    <!-- R46AM 0046 to 0036 --> <polyline points="577,160 615,160 640,135 773,135" class="route" id="M1s150r"/>
+    <!-- R46AS 0046 to 0036 --> <polyline points="577,160 615,160 640,135 773,135" class="route" id="M1s151r"/>
+    <!-- R46BM 0046 to 0010 --> <polyline points="577,160 585,160 610,185 695,185" class="route" id="M1s152r"/>
+    <!-- R48AM 0048 to 0036 --> <polyline points="577,135 773,135" class="route" id="M1s157r"/>
+    <!-- R48AS 0048 to 0036 --> <polyline points="577,135 773,135" class="route" id="M1s160r"/>
+    <!-- R49AM 0049 to 3057 --> <polyline points="542,210 528,210" class="route" id="M1s161r"/>
+    <!-- R53AM 0053 to 5059 --> <polyline points="542,160 522,160" class="route" id="M1s162r"/>
+    <!-- R53BS 0053 to 5059 --> <polyline points="542,160 535,160 510,135 492,135" class="route" id="M1s163r"/> <!-- GUESS -->
+    <!-- R54AM 0054 to 0044 --> <polyline points="517,185 545,185" class="route" id="M1s164r"/>
+    <!-- R58AM 0058 to 0048 --> <polyline points="492,135 545,135" class="route" id="M1s165r"/>
+    <!-- R58AM 0058 to 0046 --> <polyline points="492,135 510,135 535,160 542,160" class="route" id="M1s166r"/>
+
+    <!-- *** Berths -->
+    <!-- ROUTE(715, 166, M0, ER45, LE45 route) -->
+    BERTHL(715, 160, M1, 0045) SIGNALDL(712,160, M1, 095, LE45)
+    BERTHR(780, 75, M1, 0034) SIGNALUL(815, 75, M1, 086, LE34)
+    BERTHR(780, 95, M1, 0122) SIGNALURG(815, 95, M1, 0b5, LE122 Position Light Signal)
+    BERTH(920, 115, M1, 0041) SIGNALDL(917, 115, M1, 091, LE41)
+    BERTHL(890, 95, M1, 0121) SIGNALDRG(885, 95, M1, 0b3, LE121 Position Light Signal) 
+    BERTH(1065, 35, M1, 0032) SIGNALUL(1100, 35, M1, 084, LE32)
+    BERTH(1125, 35, M1, 0030) <!-- SIGNALUL(1160, 35, M1, 083, LE30) -->
+    BERTH(1125, 55, M1, 0402) SIGNALDL(1122, 55, M1, 0e7, LE402)
+    <text x="855" y="65" class="label-text-small">Bootle</text>
+    <text x="850" y="75" class="label-text-small">Branch Jn</text>
     <text x="730" y="83" class="label-text-small">Waterloo</text>
     <text x="733" y="93" class="label-text-small">Sidings</text>
-    <text x="1085" y="39" class="label-text-small">Down Bootle</text>
-    <text x="1085" y="59" class="label-text-small">Up Bootle</text>
+    <text x="1180" y="39" class="label-text-small">Down Bootle</text>
+    <text x="1180" y="59" class="label-text-small">Up Bootle</text>
 
-    <!-- Olive Mount Chord -->
-    <polyline points="1035,35 1015,55 1010,55 990,75 990,95 1010,115 1055,115 1075,135 1080,135 1105,160" class="track" />
-    <!--BERTH(904, 95, XZ, E416, EH416) Not in feed ? Apparently no berth, trains leave 402 and enter 400. -->
-    BERTHR(1015, 109, XZ, E400, LE400)
-    BERTHL(1015, 121, XZ, E401, LE401)
-    BERTH(1115, 135, XZ, E298, LE298)
-    BERTH(1115, 160, XZ, E299, LE299)
+    <!-- Routes -->
+    <polyline points="1115,160 1067,160" class="route" id="M1s1f0r"/> <!-- R299AM 0299 to 0301 -->
+    <polyline points="1115,160 1105,160 1080,135 1075,135 1055,115 1010,115 1000,105 1000,95 1020,75 1025,75" class="route" id="M1s1f1r"/> <!-- R299BM 0299 to 0401 -->
+    <polyline points="999,135 1115,135" class="route" id="M1s1f2r"/> <!-- R300AM 0300 to 0298 -->
+    <polyline points="1035,160 984,160" class="route" id="M1s1f3r"/> <!-- R301AM 0301 to 0039 -->
+    <polyline points="1050,115 1055,115 1075,135 1115,135" class="route" id="M1s1f4r"/> <!-- R400AM 0400 to 0298 -->
+    <polyline points="1060,75 1075,75 1095,55 1100,55, 1120,35 1125,35" class="route" id="M1s1f5r"/> <!-- R401AM 0401 to 0030 -->
+    <polyline points="1125,55 1095,55 1075,75 1020,75 1000,95 1000,105 1010,115 1015,115" class="route" id="M1s1f6r"/> <!-- R402AM 0402 to 0400 -->
+    <polyline points="1125,55 1020,55 960,115 952,115" class="route" id="M1s1f7r"/> <!-- R402BM 0402 to 0041 -->
+    BERTHR(1015, 115, M1, 0400) SIGNALUL(1050, 115, M1, 0e5, LE400)
+    BERTHR(1025, 75, M1, 0401) SIGNALUL(1060, 75, M1, 0e6, LE401)
+    BERTH(1115, 135, M1, 0298) <!-- SIGNALUL(1150, 135, M1, 0e1, LE298) -->
+    BERTH(1115, 160, M1, 0299) SIGNALDL(1112, 160, M1, 0e2, LE299)
     <text x="1075" y="115" class="label-text-small">Olive</text>
     <text x="1070" y="125" class="label-text-small">Mount Jn</text>
-    <text x="1000" y="25" class="label-text-small">Edge Lane Jn</text>
+    <text x="1070" y="20" class="label-text-small">Edge Lane Jn</text>
 
     <!-- Wavertree -->
-    <rect x="975" y="117.5" width="32" height="10" class="platform" />
-    <rect x="975" y="167.5" width="32" height="10" class="platform" />
-    BERTH(942, 160, XZ, E039, LE39) 
-    BERTH(975, 135, XZ, E300, LE300)
-    <!-- BERTH(955, 165, XZ, E301, LE301) Not in feed.  NB X323: LE301 definitely extant. -->
-    <text x="970" y="187" class="label-text-small">Wavertree</text>
-    <polyline points="975,160 1085,160" class="track-off" />
+    <rect x="967" y="117.5" width="32" height="10" class="platform" />
+    <rect x="967" y="167.5" width="32" height="10" class="platform" />
+    BERTH(952, 160, M1, 0039) SIGNALDL(949, 160, M1, 090, LE39)
+    BERTH(967, 135, M1, 0300) SIGNALUL(1002, 135, M1, 0e3, LE300)
+    <text x="960" y="187" class="label-text-small">Wavertree</text>
+    BERTH(1035, 160, M1, 0301) SIGNALDL(1032, 160, M1, 0e4, LE301)
 
     <!-- Broad Green -->
-    <rect x="1160" y="117.5" width="32" height="10" class="platform" />
-    <rect x="1160" y="167.5" width="32" height="10" class="platform" />
-    BERTH(1160, 160, XZ, E297, LE297)
-    BERTH(1210, 135, XZ, E296, LE296)
-    BERTH(1210, 160, XZ, E295, LE295)
-    <text x="1142" y="115" class="label-text-small">Broad Green</text>
+    <rect x="1175" y="117.5" width="32" height="10" class="platform" />
+    <rect x="1175" y="167.5" width="32" height="10" class="platform" />
+    BERTH(1175, 160, M1, 0297) <!-- SIGNALDL(1172, 160, M1, 0e0, LE297) -->
+    BERTH(1210, 135, M1, 0296) <!-- SIGNALUL(1245, 135, M1, 0d7, LE296) -->
+    BERTH(1225, 160, M1, 0295) <!-- SIGNALDL(1222, 160, M1, 0d6, LE295) -->
+    <text x="1157" y="115" class="label-text-small">Broad Green</text>
 
     <text class="title-text" x="420" y="50" >Liverpool Lime Street to Broad Green</text>
     <text class="title-text" x="420" y="300">Broad Green to Ince Moss Junction and Earlestown</text>
 
     <!-- Progress wheel and status message -->
     <text x="30" y="22" class="caption-text" id="caption">Please wait ...</text>
-    <circle cx="15" cy="15" r="10" stroke-width="0" fill="blue" id="progc"/>
+    <circle cx="15" cy="15" r="10" stroke-width="0" fill="blue" id="progc" />
     <polygon points="15,15 12,7 18,7" stroke-width="0" fill="white" id="progress" />
     
-    <!-- Description notes -->
-    <!-- <text x="5" y="42" class="caption-text">Lime Street / Edge Hill:  Temporary layout 9 October to 20 October 2017.</text>
-    <text x="5" y="55" class="caption-text">Huyton / Roby:  New permanent layout from 9 October.</text>
-    -->
-
-    <!-- Resignalling -->
-<!--
-    <polygon points="0,60 900,60 1000,10 1260,10 1260,280 250,280 200,320 0,320" stroke-width="0" fill="#cccccc" opacity="0.7"/>
-<text x="250" y="80" class="caption-text">Owing to resignalling works information for this area is not available at present.</text> -->
   </g>
 
   <g id="map1" transform="translate(-300 300)">
     <!-- Up -->
     <line x1="300"   y1="100" x2="567" y2="100" class="track" />
  
-    BERTH(320, 100, M1, 3592, 3592) SIGNALUL(355, 100, M1, 022, LL3592)
+    BERTH(320, 100, M1, 3592) SIGNALUL(355, 100, M1, 022, LL3592)
 
     <!-- Up Slow -->
-    <!--H4in--><polyline points="390,100 410,80 600,80 630,50 700,50" class="track"/> 
+    <polyline points="390,100 410,80 600,80 630,50 700,50" class="track"/> 
 
     <!-- Down -->
     <line x1="567" y1="125" x2="300" y2="125" class="track" />
-    BERTH(340, 125, M1, 3593, 3593) SIGNALDL(337, 125, M1, 023, LL3595)
+    BERTH(340, 125, M1, 3593) SIGNALDL(337, 125, M1, 023, LL3595)
 
     <!-- Down Fast -->
     <polyline points="390,125 410,145 535,145" class="track"/>
@@ -284,16 +404,17 @@ define([ARROWD], [<line x1="$1" y1="$2" x2="eval(($1)-20)" y2="$2" class="arrow"
       <tspan x="435" y="71">P4</tspan>
       <tspan x="435" y="160.5">P1</tspan>
     </text>
-    <!--H4in-->BERTH(430,80, M1, 5582, 5582)  SIGNALUL(465, 80, M1, 040, LL5582)
-    BERTH(430,100, M1, 3590, 3590) SIGNALUR(465,100, M1, 020, LL3590)
-    BERTH(430,125, M1, 5583, 5583) SIGNALDL(427, 125, M1, 034, LL5583)
-    BERTH(430,145, M1, 3591, 3591) SIGNALDL(427, 145, M1, 021, LL3591)
+    BERTH(430,80,  M1, 5582) SIGNALUL(465, 80, M1, 040, LL5582)
+    BERTH(430,100, M1, 3590) SIGNALUR(465,100, M1, 020, LL3590)
+    BERTH(430,125, M1, 5583) SIGNALDL(427, 125, M1, 034, LL5583)
+    BERTH(430,145, M1, 3591) SIGNALDL(427, 145, M1, 021, LL3591)
 
     <!-- Roby Jn Routes -->
     <polyline points="430,125 372,125" class="route" id="M1s063r"/><!-- Dn Slow -->
     <polyline points="430,145 410,145 390,125 372,125" class="route" id="M1s057r"/><!-- Dn Fast -->
-    <!--H4in--><polyline points="352,100 430,100" class="route" id="M1s067r"/><!-- Up Fast -->
-    <!--H4in--><polyline points="352,100 390,100 410,80 430,80" class="route" id="M1s066r"/><!-- Up Slow -->
+    <polyline points="352,100 430,100" class="route" id="M1s067r"/><!-- Up Fast -->
+    <polyline points="352,100 390,100 410,80 430,80" class="route" id="M1s066r"/><!-- Up Slow -->
+    <polyline points="462,80 535,80" class="route" id="M1s072r"/><!-- 5582 5580 -->
 
     <!-- Huyton -->
     <text x="517" y="58" class="label-text-small">Huyton</text>
@@ -304,12 +425,12 @@ define([ARROWD], [<line x1="$1" y1="$2" x2="eval(($1)-20)" y2="$2" class="arrow"
       <tspan x="522" y="71">P4</tspan>
       <tspan x="522" y="160.5">P1</tspan>
     </text>
-    BERTHL(500,80,M1,9593,9593) SIGNALDRR(497,80, [Fixed red LL9593])
-    BERTHR(535,80,M1,5580,5580) SIGNALUL(570, 80, M1, 037, LL5580) 
-    BERTH(517,100,M1,3586,3586) SIGNALUR(552, 100, M1, 016,LL3586) 
-    BERTHL(500,125,M1,5579,5579) SIGNALDL(497,125, M1, 033, LL5579)
-    BERTHR(535,125,M1,9588,9588 To Up Chat Moss) SIGNALUL(570,125, M1, 035, LL9588) 
-    BERTH(517,145,M1,3587,3587) SIGNALDL(497,145, M1, 017, LL3587)
+    BERTHL(500,80,M1,9593) SIGNALDRR(497,80, [Fixed red LL9593])
+    BERTHR(535,80,M1,5580) SIGNALUL(570, 80, M1, 037, LL5580) 
+    BERTH(517,100,M1,3586) SIGNALUR(552, 100, M1, 016,LL3586) 
+    BERTHL(500,125,M1,5579) SIGNALDL(497,125, M1, 033, LL5579)
+    BERTHR(535,125,M1,9588, 9588 To Up Chat Moss) SIGNALUL(570,125, M1, 035, LL9588) 
+    BERTH(517,145,M1,3587) SIGNALDL(497,145, M1, 017, LL3587)
 
     <!-- Huyton Jn -->
     <text x="600" y="160" class="label-text-small">Huyton</text>
@@ -330,13 +451,13 @@ define([ARROWD], [<line x1="$1" y1="$2" x2="eval(($1)-20)" y2="$2" class="arrow"
     <polyline points="567,80 600,80 630,50 640,50" class="route" id="M1s070r"/><!-- P4 to Up SH -->
     
     <!-- St Helens Lines-->
-    <polyline points="1225,50 1230,50 1250,30" class="track-off"/> <!-- Rainford line -->
+    <!-- <polyline points="1225,50 1230,50 1250,30" class="track-off"/>  Rainford line -->
     <polyline points="640,50 1560,50" class="track"/>
     <polyline points="1560,70 690,70" class="track"/>
     <!-- Pilks loop -->
-    <polyline points="947,70 960,70 980,90 1030,90 1050,70 1060,70" class="track"/>
-    <polyline points="980,90 1060,90" class="track"/>
-    <polyline points="1055,70 1075,50" class="track"/>
+    <polyline points="937,70 950,70 970,90 1020,90 1040,70 1050,70" class="track"/>
+    <polyline points="970,90 1050,90" class="track"/>
+    <polyline points="1045,70 1065,50" class="track"/>
     <!-- St Helens xover -->
     <polyline points="1155,70 1160,70 1180,50 1185,50" class="track"/>
     <!-- St Helens Siding -->
@@ -347,76 +468,76 @@ define([ARROWD], [<line x1="$1" y1="$2" x2="eval(($1)-20)" y2="$2" class="arrow"
     <text x="635" y="35" class="label-text-small">Up St Helens</text>
     ARROWU(700, 32)
 
-    BERTH(640, 50, M1, 3754, 3754) SIGNALUL(675, 50, M1, 031, LL3754)
-    BERTH(695, 50, M1, 3750, 3750) SIGNALUL(730, 50, M1, 030, LL3750)
-    BERTH(685, 70, M1, 3755, 3755) SIGNALDL(682, 70, M1, 032, LL3755)
+    BERTH(640, 50, M1, 3754) SIGNALUL(675, 50, M1, 031, LL3754)
+    BERTH(695, 50, M1, 3750) SIGNALUL(730, 50, M1, 030, LL3750)
+    BERTH(685, 70, M1, 3755) SIGNALDL(682, 70, M1, 032, LL3755)
 
     <!-- Prescot -->
     <text x="750" y="30" class="label-text-small">Prescot</text>
     <rect x="750" y="33" width="32" height="10" class="platform" />
     <rect x="750" y="77" width="32" height="10" class="platform" />
-    BERTH(750, 50, M1, 3746, 3746) SIGNALUL(785, 50, M1, 026, LL3746)
-    BERTH(750, 70, M1, 3749, 3749) SIGNALDL(747, 70, M1, 027, LL3749)
+    BERTH(750, 50, M1, 3746) SIGNALUL(785, 50, M1, 026, LL3746)
+    BERTH(750, 70, M1, 3749) SIGNALDL(747, 70, M1, 027, LL3749)
 
-    <text x="800" y="20" class="label-text-small">Eccleston</text>
-    <text x="810" y="30" class="label-text-small">Park</text>
-    <rect x="805" y="33" width="32" height="10" class="platform" />
-    <rect x="805" y="77" width="32" height="10" class="platform" />
+    <text x="795" y="20" class="label-text-small">Eccleston</text>
+    <text x="805" y="30" class="label-text-small">Park</text>
+    <rect x="800" y="33" width="32" height="10" class="platform" />
+    <rect x="800" y="77" width="32" height="10" class="platform" />
 
-    <text x="860" y="20" class="label-text-small">Thatto</text>
-    <text x="860" y="30" class="label-text-small">Heath</text>
-    <rect x="860" y="33" width="32" height="10" class="platform" />
-    <rect x="860" y="77" width="32" height="10" class="platform" />
-    BERTH(860, 70, M1, 3745, 3745) SIGNALDL(857, 70, M1, 025, LL3745)
+    <text x="850" y="20" class="label-text-small">Thatto</text>
+    <text x="850" y="30" class="label-text-small">Heath</text>
+    <rect x="850" y="33" width="32" height="10" class="platform" />
+    <rect x="850" y="77" width="32" height="10" class="platform" />
+    BERTH(850, 70, M1, 3745) SIGNALDL(847, 70, M1, 025, LL3745)
 
-    BERTH(915, 50, WA, S101, SH101)
-    BERTHL(918, 76, M1, 3739, 3739) SIGNALDL(912, 70, M1, 024, LL3739)
-    BERTHR(918, 64, WA, S109, SH109)
+    BERTH(915, 50, WA, S101) SIGNALUL(950,50,WA,093,SH101)
+    BERTHL(908, 76, M1, 3739) SIGNALDL(902, 70, M1, 024, LL3739)
+    BERTHR(908, 64, WA, S109)
 
-    BERTHL(990, 96, M1, S111, SH111)
-    BERTHR(990, 84, WA, S105, SH105) 
+    BERTHL(980, 96, WA, S111)
+    BERTHR(980, 84, WA, S105) 
 
-    BERTHR(1080, 44, WA, S002, SH2)
-    BERTHL(1080, 56, WA, S102, SH102 Shunt to Down line)
-    BERTH(1080, 70, M1, S112, SH112)
+    BERTHR(1069, 44, WA, S002) SIGNALUL(1105,50,WA,081,SH2)
+    BERTHL(1069, 56, WA, S102, SH102 Shunt to Down line)
+    BERTH(1060, 70, WA, S112) SIGNALDL(1057,70,WA,0a2,SH112)
 
-    <text x="1064" y="96" class="label-text-small">To Ravenhead Sidings</text>
+    <text x="1064" y="96" class="label-text-small">To Pilkington's Oil Sidings</text>
     <text x="1110" y="30" class="label-text-small">St Helens</text>
     <rect x="1120" y="33" width="32" height="10" class="platform" />
     <rect x="1120" y="77" width="32" height="10" class="platform" />
-    BERTH(1120, 50, WA, S003, SH3) 
-    BERTH(1120, 70, M1, S022, SH22) 
+    BERTH(1120, 50, WA, S003) SIGNALUL(1155,50,WA,082,SH3)
+    BERTH(1120, 70, M1, SH22) SIGNALDL(1117,70,WA,091,SH22) <!-- Berth was S022 -->
 
-    BERTH(1190, 50, WA, S004, SH4)
-    BERTH(1190, 70, WA, SHDN, -)
+    BERTH(1190, 50, WA, S004) SIGNALUL(1225,50,WA,083,SH4)
+    BERTH(1190, 70, WA, SHDN) SIGNALDL(1187,70,WA,092,SH23)
 
-    BERTH(1240, 50, WA, WN85, WN85) 
+    BERTH(1240, 50, WA, WN85) 
 
-    BERTH(1280, 50, WA, 0088, WN88) 
-    BERTH(1300, 70, WA, 0086, WN86) 
+    BERTH(1280, 50, WA, 0088) 
+    BERTH(1300, 70, WA, 0086) 
 
     <text x="1310" y="30" class="label-text-small">Garswood</text>
     <rect x="1320" y="33" width="32" height="10" class="platform" />
     <rect x="1320" y="77" width="32" height="10" class="platform" />
 
-    BERTH(1340, 70, WA, 0092, WN92) 
+    BERTH(1340, 70, WA, 0092) 
 
     <text x="1365" y="30" class="label-text-small">Bryn</text>
     <rect x="1360" y="33" width="32" height="10" class="platform" />
     <rect x="1360" y="77" width="32" height="10" class="platform" />
-    BERTH(1360, 50, WA, 0093, WN93)
+    BERTH(1360, 50, WA, 0093)
 
-    BERTH(1400, 70, WA, 0094, WN94) 
-    BERTH(1430, 50, WA, 0096, WN96) 
-    BERTH(1440, 70, WA, 0095, WN95) 
+    BERTH(1400, 70, WA, 0094) 
+    BERTH(1430, 50, WA, 0096) 
+    BERTH(1440, 70, WA, 0095) 
 
     <text x="1465" y="30" class="label-text-small">Ince</text>
     <text x="1460" y="40" class="label-text-small">Moss Jn</text>
 
-    BERTH(1525, 50, WA, 0081, WN81) 
-    BERTH(1525, 70, WA, 0102, WN102) 
-    BERTHL(1525, 96, WA, 0103, WN103) 
-    BERTHR(1525, 84, WA, 0105, WN105) 
+    BERTH(1525, 50, WA, 0081) 
+    BERTH(1525, 70, WA, 0102) 
+    BERTHL(1525, 96, WA, 0103) 
+    BERTHR(1525, 84, WA, 0105) 
  
 
     <!-- Chat Moss -->
@@ -424,48 +545,50 @@ define([ARROWD], [<line x1="$1" y1="$2" x2="eval(($1)-20)" y2="$2" class="arrow"
     <polyline points="1240,145  680,145" class="track"/>
 
     <polyline points="680,125 730,125" class="track"/>
-    BERTHL(680, 131, M1, 1577, 1577) SIGNALDR(677, 125, M1, 000, [LL1577 Position Light Signal])
-    BERTH(680, 145, M1, 3585, 3585) SIGNALDL(677, 145, M1, 015, LL3585)
+    BERTHL(680, 131, M1, 1577) SIGNALDRG(677, 125, M1, 000, [LL1577 Position Light Signal])
+    BERTH(680, 145, M1, 3585) SIGNALDL(677, 145, M1, 015, LL3585)
 
-    BERTHR(680,  119, M1, 3584, 3584) SIGNALUL(720, 125, M1, 014, LL3584)
+    BERTHR(680,  119, M1, 3584) SIGNALUL(720, 125, M1, 014, LL3584)
 
-    BERTH(780, 125, M1, 3582, 3582) SIGNALUL(815, 125, M1, 013, LL3582)
-    BERTH(780, 145, M1, 3581, 3581) SIGNALDL(777, 145, M1, 012, LL3581)
+    BERTH(780, 125, M1, 3582) SIGNALUL(815, 125, M1, 013, LL3582)
+    BERTH(780, 145, M1, 3581) SIGNALDL(777, 145, M1, 012, LL3581)
 
     <text x="700" y="110" class="label-text-small">Up Chat Moss</text>
     ARROWU(770, 107)
     <text x="700" y="165" class="label-text-small">Down Chat Moss</text>
     ARROWD(695, 162)
 
-    BERTH(830,  125, M1, 3580, 3580) SIGNALUL(865, 125, M1, 011, LL3580)
+    BERTH(830,  125, M1, 3580) SIGNALUL(865, 125, M1, 011, LL3580)
 
     <text x="880" y="175" class="label-text-small">Whiston</text>
     <rect x="880" y="108" width="32" height="10" class="platform" />
     <rect x="880" y="152" width="32" height="10" class="platform" />
-    BERTH(880, 125, M1, 3578, 3578) SIGNALUL(915, 125, M1, 007, LL3578)
-    BERTH(880, 145, M1, 3579, 3579) SIGNALDL(877, 145, M1, 010, LL3579)
+    BERTH(880, 125, M1, 3578) SIGNALUL(915, 125, M1, 007, LL3578)
+    BERTH(880, 145, M1, 3579) SIGNALDL(877, 145, M1, 010, LL3579)
 
-    BERTH(930, 125, M1, 3576, 3576) SIGNALUL(965,  125, M1, 005, LL3576)
-    BERTH(955, 145, M1, 3577, 3577) SIGNALDL(952,  145, M1, 006, LL3577)
-    BERTH(980, 125, M1, 3574, 3574) SIGNALUL(1015, 125, M1, 003, LL3574)
+    BERTH(930, 125, M1, 3576) SIGNALUL(965,  125, M1, 005, LL3576)
+    BERTH(955, 145, M1, 3577) SIGNALDL(952,  145, M1, 006, LL3577)
+    BERTH(980, 125, M1, 3574) SIGNALUL(1015, 125, M1, 003, LL3574)
 
     <text x="1030" y="175" class="label-text-small">Rainhill</text>
     <rect x="1030" y="108" width="32" height="10" class="platform" />
     <rect x="1030" y="152" width="32" height="10" class="platform" />
-    BERTH(1030, 125, M1, 3572, 3572) SIGNALUL(1065, 125, M1, 001, LL3572)
-    BERTH(1030, 145, M1, 3575, 3575) SIGNALDL(1027, 145, M1, 004, LL3575)
+    BERTH(1030, 125, M1, 3572) SIGNALUL(1065, 125, M1, 001, LL3572)
+    BERTH(1030, 145, M1, 3575) SIGNALDL(1027, 145, M1, 004, LL3575)
+    <polyline points="1062,125 1080,125" class="route" id="M1s050r"/> <!-- LL3572 WN589 -->
+    <polyline points="1080,145 1062,145" class="route" id="M1s051r"/> <!-- LL3573 LL3575 -->
 
-    BERTH(1080, 125, M1, W589, WN589)
-    BERTH(1080, 145, M1, 3573, 3573) SIGNALDL(1077, 145, M1, 002, LL3573)
-    BERTH(1120, 125, WA, 0587, WN587)
-    BERTH(1120, 145, WA, 0588, WN588)
+    BERTH(1080, 125, M1, W589)
+    BERTH(1080, 145, M1, 3573) SIGNALDL(1077, 145, M1, 002, LL3573)
+    BERTH(1120, 125, WA, 0587)
+    BERTH(1120, 145, WA, 0588)
     <text x="1130" y="175" class="label-text-small">Lea Green</text>
     <rect x="1140" y="108" width="32" height="10" class="platform" />
     <rect x="1140" y="152" width="32" height="10" class="platform" />
-    BERTH(1160, 145, WA, 0586, WN586)
+    BERTH(1160, 145, WA, 0586)
 
-    BERTH(1200, 125, WA, 0583, WN583)
-    BERTH(1200, 145, WA, 0584, WN584)
+    BERTH(1200, 125, WA, 0583)
+    BERTH(1200, 145, WA, 0584)
 
    </g>
   <g> <!-- SHJ and Earlestown -->
@@ -477,22 +600,22 @@ define([ARROWD], [<line x1="$1" y1="$2" x2="eval(($1)-20)" y2="$2" class="arrow"
     <text x="930" y="475" class="label-text-small">St Helens Jn</text>
     <rect x="940" y="408" width="32" height="10" class="platform" />
     <rect x="940" y="452" width="32" height="10" class="platform" />
-    BERTH(980,  425, WA, 0569, WN569)
-    BERTH(980,  445, WA, 0574, WN574)
-    BERTH(1020, 425, WA, 0567, WN567)
-    BERTH(1020, 445, WA, 0568, WN568)
-    BERTH(1060, 425, WA, 0565, WN565)
-    BERTH(1060, 445, WA, 0566, WN566)
+    BERTH(980,  425, WA, 0569)
+    BERTH(980,  445, WA, 0574)
+    BERTH(1020, 425, WA, 0567)
+    BERTH(1020, 445, WA, 0568)
+    BERTH(1060, 425, WA, 0565)
+    BERTH(1060, 445, WA, 0566)
 
     <polyline points="1095,425 1100,425 1120,445 1125,445 1145,465 1190,465 1210,445 1260,445" class="track"/>
     <polyline points="1185,465 1190,465 1210,485 1260,485" class="track"/>
 
-    BERTHR(1150, 459, WA, 0561, WN561)
-    BERTHL(1150, 471, WA, 0562, WN562)
-    BERTH(1150,  445, WA, 0563, WN563)
-    BERTH(1215,  425, WA, 0539, WN539)
-    BERTHR(1215, 479, WA, 0551, WN551)
-    BERTHL(1215, 491, WA, 0554, WN554)
+    BERTHR(1150, 459, WA, 0561)
+    BERTHL(1150, 471, WA, 0562)
+    BERTH(1150,  445, WA, 0563)
+    BERTH(1215,  425, WA, 0539)
+    BERTHR(1215, 479, WA, 0551)
+    BERTHL(1215, 491, WA, 0554)
     <text x="1100" y="470" class="label-text-small">Sankey</text>
     <text x="1110" y="480" class="label-text-small">Jn</text>
     <text x="1160" y="418" class="label-text-small">Earlestown</text>
@@ -504,13 +627,6 @@ define([ARROWD], [<line x1="$1" y1="$2" x2="eval(($1)-20)" y2="$2" class="arrow"
       <tspan x="1220" y="460.5">P2</tspan>
       <tspan x="1220" y="472.5">P3</tspan>
     </text>
-
-<!-- New berths
-BERTH(200,255,M1,WNU1,WNU1) BERTH(235,255,M1,SHLS,SHLS)
-BERTH(200,270,M1,WNU2,WNU2) BERTH(235,270,M1,N012,N012)
-BERTH(200,285,M1,S106,S106) BERTH(235,285,M1,N013,N013)
-BERTH(200,300,M1,N004,N004) BERTH(235,300,M1,N014,N014)
--->
   </g>
 
     <!-- Info panel -->
@@ -519,8 +635,8 @@ BERTH(200,300,M1,N004,N004) BERTH(235,300,M1,N014,N014)
       <!-- <rect x="420" y="498" width="410" height="102" class="describer" />
       <rect x="840" y="498" width="410" height="102" class="describer" /> -->
       <text class="info-text">
-        <tspan x="0"   y="508" id="info0">XZ/M1/WA</tspan>
-        <tspan x="0"   y="518" id="info1">LVRPLSH/EDGELAJ/WVRTTEC/BOOTLBJ/HUYTON/HUYTJUN/STHLNSC/STHLNSJ</tspan>
+        <tspan x="0"   y="508" id="info0">M0/M1/WA</tspan>
+        <tspan x="0"   y="518" id="info1">LVRPLSH/EDGH/WVRTTEC/BOOTLBJ/HUYTON/HUYTJUN/STHLNSC/STHLNSJ/EDGELAJ</tspan>
         <tspan x="0"   y="528" id="info2"></tspan>
         <tspan x="0"   y="538" id="info3"></tspan>
         <tspan x="0"   y="548" id="info4"></tspan>
@@ -528,7 +644,7 @@ BERTH(200,300,M1,N004,N004) BERTH(235,300,M1,N014,N014)
         <tspan x="0"   y="568" id="info6"></tspan>
         <tspan x="0"   y="578" id="info7"></tspan>
         <tspan x="0"   y="588" id="info8"></tspan>
-        <tspan x="0"   y="598" id="info9">livesig3.svg  -  Build BUILD</tspan>
+        <tspan x="0"   y="598" id="info9">livesig12.svg  -  Build BUILD</tspan>
         <tspan x="420" y="508" id="info10"></tspan>
         <tspan x="420" y="518" id="info11"></tspan>
         <tspan x="420" y="528" id="info12"></tspan>
@@ -559,28 +675,33 @@ BERTH(200,300,M1,N004,N004) BERTH(235,300,M1,N014,N014)
 
     <!-- Key -->
   <g transform="translate(900 200)">
-    <rect x="0" y="0" width="350" height="80" class="key-background" />
-    <polyline points="5,10 55,10" class="track" /> 
-    <polyline points="5,30 55,30" class="track-off" /> 
-    <polyline points="5,50 55,50" class="track-closed" /> 
-    <polyline points="5,70 55,70" class="track" /> <polyline points="5,70 55,70" class="route" style="opacity:1.0"/> 
-    <rect x="155" y="4"  width="32" height="12" class="describer"/><text x="157"  y="14" class="describer-text">1A01</text>
-    <rect x="155" y="24" width="32" height="12" class="describer"/><text x="167"  y="34" class="describer-text-off">3587</text>
+    <rect x="0" y="0" width="350" height="100" class="key-background" />
+    <polyline points="5,10 55,10" class="track-off" /> 
+    <polyline points="5,30 55,30" class="track-closed" /> 
+    <polyline points="5,50 55,50" class="track" /> <polyline points="5,50 55,50" class="route" style="opacity:1.0"/>
+    <polyline points="5,70 55,70" class="track" /> SIGNALULR(20,70,M0,XXX,Signal) TRTSL(20,70,M0,XXX)
+    <polyline points="5,90 55,90" class="track" /> SIGNALDRGR(40,90,Position light signal)
+    <rect x="155" y="4"  width="32" height="12" class="describer"/><text x="157" y="14" class="describer-text">1A01</text>
+    <rect x="155" y="24" width="32" height="12" class="describer"/><text x="167" y="34" class="describer-text-off">3587</text>
     <polygon points="155,56 155,44 184,44 190,50 184,56" class="describer"/>
-    <rect x="155" y="64" width="32" height="12" class="describer"/><text x="157"  y="74" class="describer-text-route">SLOW</text>
+    <!-- <rect x="155" y="64" width="32" height="12" class="describer"/><text x="157" y="74" class="describer-text-route">SLOW</text> -->
     <text class="label-text-small">
-      <tspan x="65"  y="14">Track.</tspan>
-      <tspan x="65"  y="34">Track out of area.</tspan>
-      <tspan x="65"  y="54">Track out of use.</tspan>
-      <tspan x="65"  y="74">Route selected.</tspan>
+      <tspan x="65"  y="13">Track out of area.</tspan>
+      <tspan x="65"  y="33">Track out of use.</tspan>
+      <tspan x="65"  y="53">Route selected.</tspan>
+      <tspan x="65"  y="73">Train ready to start.</tspan>
+      <tspan x="65"  y="93">Position light signal.</tspan>
       <tspan x="195" y="14">Occupied berth showing train ID.</tspan>
       <tspan x="195" y="34">Empty berth showing berth ID.</tspan>
       <tspan x="195" y="54">Berth showing direction.</tspan>
-      <tspan x="195" y="74">Route selection.</tspan>
+      <!-- <tspan x="195" y="74">Route selection.</tspan> -->
     </text>
    </g>
   <rect class="tooltip_box" id="ttb" x="0" y="0" rx="4" ry="4" width="55" height="33" visibility="hidden"/>
   <text class="tooltip" id="tt1" x="0" y="0" visibility="hidden">Z</text>
   <text class="tooltip" id="tt2" x="0" y="0" visibility="hidden">Z</text>
+
+<!-- Config -->
+<text id="calling_on" style="display:none">M0|005|055|056|057|060|061|$|M0|017|081|082|083|084|085|086|087|090|091|$|M0|030|0a7|0b0|0b1|0b2|0b3|0b4|0b5|0b6|0b7|0c0</text>
 </svg>
 

@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2013, 2014, 2015, 2016, 2017 Phil Wieland
+    Copyright (C) 2013, 2014, 2015, 2016, 2017, 2018, 2022 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -16,13 +16,16 @@
 
     phil@philwieland.com
 
+Build 3c15p
+
 */
 
 var url_base = "/rail/liverail/";
 var query_url_base = "/rail/query/";
+var train_url_base = "/rail/livetrain/";
 var refresh_tick = 1024; /* ms between ticks */
-var refresh_period = 64000; /* ms */
-var refresh_timeout_period = 64000; 
+var refresh_period = 32000; /* ms */
+var refresh_timeout_period = 32000; 
 var timer_refresh = 0;
 var timer_refresh_timeout = 0;
 var tick_timer;
@@ -93,6 +96,13 @@ function train_date_onclick(schedule_id)
 {
    ar_off();
    var result = url_base + "train" + '/' + schedule_id + '/' + document.getElementById("train_date").value;
+   window.location = result;
+}
+
+function train_date_onclick_train(UID)
+{
+   ar_off();
+   var result = train_url_base + UID + '/' + document.getElementById("train_date").value;
    window.location = result;
 }
 
@@ -304,8 +314,19 @@ function process_smart_update_response(result)
       // Fetch has failed or page layout has changed or date has changed or software version has changed.  Reload whole page from scratch.
       if(result.substring(0, 8) == '<!DOCTYP')
       {
-         // Web site shut down.  Just ignore it
-         document.getElementById("bottom-line").innerHTML = 'Data feed is shut down.';
+         // Web site shut down.
+         var banner = document.getElementById("bottom-line").innerHTML;
+         if(banner.indexOf('<br><br>') < 0)
+         {
+            // No banner
+            banner = '';
+         }
+         else
+         {
+            banner = banner.substr(0, banner.indexOf('<br><br>') + 8);
+         }
+         document.getElementById("bottom-line").innerHTML = banner + '<span style=\"background-color:#ffbbbb;\">Data feed is shut down.</span>';
+
          return;
       }
       clearInterval(tick_timer);

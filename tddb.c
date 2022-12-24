@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2014, 2015, 2016, 2017 Phil Wieland
+    Copyright (C) 2014, 2015, 2016, 2017, 2018, 2019, 2022 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -45,7 +45,7 @@
 #define NAME  "tddb"
 
 #ifndef RELEASE_BUILD
-#define BUILD "YC31p"
+#define BUILD "3316p"
 #else
 #define BUILD RELEASE_BUILD
 #endif
@@ -54,6 +54,7 @@ static void perform(void);
 static void process_frame(const char * const body);
 static void process_message(const word describer, const char * const body, const size_t index);
 static void signalling_update(const char * const message_name, const word describer, const time_t t, const word a, const dword d);
+static void update_database_berth(const word describer, const char * const k, const char * const v);
 static void update_database(const word type, const word describer, const char * const k, const char * const v);
 static const char * const query_berth(const word describer, const char * const k); 
 static void create_database(void);
@@ -110,10 +111,10 @@ static time_t last_reload_describers_check;
 static time_t check_describers_flow_due;
 
 // After loss of feed or other events, skip individual describer stream checks
-// for 4 passes of CHECK_DESCRIBERS_FLOW_INTERVAL
+// for n passes of CHECK_DESCRIBERS_FLOW_INTERVAL
 #define NO_FEED_LOCKOUT 4
 // Threshold in seconds when checking for loss of individual stream.
-#define DESCRIBER_FEED_ALARM_THRESHOLD 256
+#define DESCRIBER_FEED_ALARM_THRESHOLD 360
 
 enum data_types {Berth, Signal};
 
@@ -139,6 +140,25 @@ static dword handle;
 word message_count, message_count_rel;
 time_t last_message_count_report;
 #define MESSAGE_COUNT_REPORT_INTERVAL 64
+
+// Smart berths
+#define BERTH_CMP(a, b) (a[3]==b[3]&&a[2]==b[2]&&a[1]==b[1]&&a[0]==b[0])  
+#define BERTH_CMP_C(a, b, c, d, e) (a[3]==e&&a[2]==d&&a[1]==c&&a[0]==b)
+#define SMART_ORS 4
+static struct smart_or_s
+{
+   const char * bertha;
+   char berthav[8];
+   word berthb_m1;
+   const char * berthb;
+   char berthbv[8];
+   const char * smart_berth;
+} smart_or[SMART_ORS] = {{"E045","",0,"EH45","","ZZ01"},
+                         {"E043","",0,"EH43","","ZZ02"},
+                         {"ZEHC","",1,"E036","","ZZ03"},
+                         {"E049","",0,"EH49","","ZZ04"},
+};
+word describer_M0, describer_M1;
 
 // Signal handling
 void termination_handler(int signum)
@@ -348,14 +368,12 @@ static void perform(void)
    word stompy_timeout = true;
 
    // Initialise database connection
-   while(db_init(conf[conf_db_server], conf[conf_db_user], conf[conf_db_password], conf[conf_db_name]) && run) 
+   while(db_init(conf[conf_db_server], conf[conf_db_user], conf[conf_db_password], conf[conf_db_name], DB_MODE_FOUND_ROWS) && run) 
    {
       _log(CRITICAL, "Failed to initialise database connection.  Will retry...");
       word i;
       for(i = 0; i < 64 && run; i++) sleep(1);
    }
-
-   db_mode(DB_MODE_FOUND_ROWS);
 
    create_database();
 
@@ -592,7 +610,6 @@ static void process_message(const word describer, const char * const body, const
    timestamp = atol(times);
 
    time_t now = time(NULL);
-
    // Handle Network Rail's midnight bug
    if(timestamp > now + (23*60*60))
    {
@@ -630,14 +647,23 @@ static void process_message(const word describer, const char * const body, const
          strcpy(wasf, query_berth(describer, from));
          strcpy(wast, query_berth(describer, to));
          _log(DEBUG, "%s CA:               Berth step (%s) Description \"%s\" from berth \"%s\" to berth \"%s\"", describers[describer].id, time_text(timestamp, true), descr, from, to);
-         log_detail(timestamp, "%s CA: %s from %s to %s", describers[describer].id, descr, from, to);
+         log_detail(timestamp, "%s CA: %s from %s to %s %s", describers[describer].id, descr, from, to, show_signalling_state(describer));
          if(strcmp(wasf, descr) || strcmp(wast, ""))
          {
             _log(DEBUG, "Message %s CA: Step \"%s\" from \"%s\" to \"%s\" found \"%s\" in \"%s\" and \"%s\" in \"%s\".", describers[describer].id, descr, from, to, wasf, from, wast, to);
          }
       }
-      update_database(Berth, describer, from, "");
-      update_database(Berth, describer, to, descr);
+      update_database_berth(describer, from, "");
+      update_database_berth(describer, to, descr);
+      // Smart berth
+      if(describer == describer_M0 && BERTH_CMP_C(from,'E','2','9','9') && BERTH_CMP_C(to,'C','O','U','T'))
+      {
+         update_database_berth(describer, "ZZ51", descr);
+      }
+      else if(describer == describer_M0 && BERTH_CMP_C(from,'S','T','I','N') && BERTH_CMP_C(to,'E','0','3','9'))
+      {
+         update_database_berth(describer, "ZZ51", "");
+      }
       stats[CA]++;
    }
    else if(!strcasecmp(message_type, "CB"))
@@ -648,13 +674,13 @@ static void process_message(const word describer, const char * const body, const
          jsmn_find_extract_token(body, tokens, index, "descr", descr, sizeof(descr));
          strcpy(wasf, query_berth(describer, from));
          _log(DEBUG, "%s CB:             Berth cancel (%s) Description \"%s\" from berth \"%s\"", describers[describer].id, time_text(timestamp, true), descr, from);
-         log_detail(timestamp, "%s CB: %s from %s", describers[describer].id, descr, from);
+         log_detail(timestamp, "%s CB: %s from %s         %s", describers[describer].id, descr, from, show_signalling_state(describer));
          if(strcmp(wasf, descr))
          {
             _log(DEBUG, "Message %s CB: Cancel \"%s\" from \"%s\" found \"%s\" in \"%s\".", describers[describer].id, descr, from, wasf, from);
          }
       }
-      update_database(Berth, describer, from, "");
+      update_database_berth(describer, from, "");
       stats[CB]++;
    }
    else if(!strcasecmp(message_type, "CC"))
@@ -664,9 +690,9 @@ static void process_message(const word describer, const char * const body, const
       if(describers[describer].process_mode == 2) 
       {
          _log(DEBUG, "%s CC:          Berth interpose (%s) Description \"%s\" to berth \"%s\"", describers[describer].id, time_text(timestamp, true), descr, to);
-         log_detail(timestamp, "%s CC: %s           to %s", describers[describer].id, descr, to);
+         log_detail(timestamp, "%s CC: %s           to %s %s", describers[describer].id, descr, to, show_signalling_state(describer));
       }
-      update_database(Berth, describer, to, descr);
+      update_database_berth(describer, to, descr);
       stats[CC]++;
    }
    else if(!strcasecmp(message_type, "CT"))
@@ -741,7 +767,7 @@ static void signalling_update(const char * const message_name, const word descri
    _log(PROC, "signalling_update(\"%s\", %d, %02x, %08x)", message_name, describer, a, d);
 
    detail[0] = '\0';
-   if(a < SIG_BYTES && a < describers[describer].no_sig_address)
+   if(a < SIG_BYTES)
    {
       dword o = signalling[describer][a];
       signalling[describer][a] = d;
@@ -756,19 +782,62 @@ static void signalling_update(const char * const message_name, const word descri
       {
          if((((o>>b)&0x01) != ((d>>b)&0x01)) || o > 0xff)
          {
-            sprintf(detail1, "  Bit %02x %d = %u", a, b, ((d>>b)&0x01));
+            sprintf(detail1, " Bit %02x %d = %u", a, b, ((d>>b)&0x01));
             strcat(detail, detail1);
             changed = true;
          }
       }
       if(!changed) strcat(detail, "  No change");
+      if(!(a < describers[describer].no_sig_address))
+      {
+         _log(MINOR, "Signalling address %04x out of expected range in %s message from describer %s (%s).  Data %02x.", a, message_name, describers[describer].id, describers[describer].description, d);
+      }
    }
    else
    {
-      _log(MINOR, "Signalling address %04x out of range in %s message from describer %s (%s).  Data %02x", a, message_name, describers[describer].id, describers[describer].description, d);
+      _log(MAJOR, "Signalling address %04x invalid in %s message from describer %s (%s).  Data %02x.", a, message_name, describers[describer].id, describers[describer].description, d);
    }
    if(debug) _log(DEBUG, show_signalling_state(describer));
-   if(describers[describer].process_mode == 2) log_detail(t, "%s %s: %02x = %02x %s%s", describers[describer].id, message_name, a, d, show_signalling_state(describer), detail);
+   if(describers[describer].process_mode == 2) log_detail(t, "%s %s: %02x = %02x                %s%s", describers[describer].id, message_name, a, d, show_signalling_state(describer), detail);
+}
+
+static void update_database_berth(const word describer, const char * const k, const char * const v)
+{
+   update_database(Berth, describer, k, v);
+
+   if(describer != describer_M0 && describer != describer_M1) return;
+
+   // Process OR smart berths
+   {
+      word i;
+      for (i=0; i < SMART_ORS; i++)
+      {
+         if(BERTH_CMP(k, smart_or[i].bertha) && describer == describer_M0)
+         {
+            strcpy(smart_or[i].berthav, v);
+            if(smart_or[i].berthav[0])
+            {
+               update_database(Berth, describer, smart_or[i].smart_berth, smart_or[i].berthav);
+            }
+            else
+            {
+               update_database(Berth, describer, smart_or[i].smart_berth, smart_or[i].berthbv);
+            }
+         }
+         else if(BERTH_CMP(k, smart_or[i].berthb) && describer == (smart_or[i].berthb_m1?describer_M1:describer_M0))
+         {
+            strcpy(smart_or[i].berthbv, v);
+            if(smart_or[i].berthbv[0]) 
+            {
+               update_database(Berth, describer_M0, smart_or[i].smart_berth, smart_or[i].berthbv);
+            }
+            else
+            {
+               update_database(Berth, describer_M0, smart_or[i].smart_berth, smart_or[i].berthav);
+            }
+         }
+      }
+   }
 }
 
 static void update_database(const word type, const word describer, const char * const b, const char * const v)
@@ -779,7 +848,7 @@ static void update_database(const word type, const word describer, const char * 
    time_t now = time(NULL);
 
    _log(PROC, "update_database(%d, %d, \"%s\", \"%s\")", type, describer, b, v);
-   if(strlen(v) > 7)
+   if(strlen(v) > 6)
    {
       _log(MAJOR, "Database update discarded.  Overlong value \"%s\".", v);
       return;
@@ -873,8 +942,13 @@ static const char * const query_berth(const word describer, const char * const b
 static void create_database(void)
 {
    _log(PROC, "create_database()");
-
-   database_upgrade(tddb);
+   
+   word e;
+   if((e = database_upgrade(tddb)))
+   {
+      _log(CRITICAL, "Error %d in database_upgrade().  Aborting.", e);
+      exit(1);
+   }
 }
 
 static void jsmn_dump_tokens(const char * const string, const jsmntok_t * const tokens, const word object_index)
@@ -982,7 +1056,7 @@ static const char * show_signalling_state(const word describer)
    char s[8];
    static char  state[128];
 
-   if(describer[describers].no_sig_address > 16)
+   if(describer[describers].no_sig_address > 64)
    {
       state[0] = '\0';
       return state;
@@ -1121,7 +1195,7 @@ static void control_mode_change(const word d, const word n)
             other_k[2]--;
             if(other_k[2] == 'b')
             {
-               update_database(Berth, d, other_k+3, row[2]);
+               update_database_berth(d, other_k+3, row[2]);
             }
             else if(other_k[2] == 's')
             {
@@ -1153,7 +1227,7 @@ static void control_mode_change(const word d, const word n)
          {
             if(row[0][2] == 'b')
             {
-               update_database(Berth, d, row[0]+3, "");
+               update_database_berth(d, row[0]+3, "");
             }
             else if(row[0][2] == 's')
             {
@@ -1195,7 +1269,7 @@ static void control_mode_change(const word d, const word n)
             {
                if(row[1][2] == 'b')
                {
-                  update_database(Berth, d, row[1]+3, "");
+                  update_database_berth(d, row[1]+3, "");
                }
                else if(row[1][2] == 's')
                {
@@ -1254,6 +1328,8 @@ static void reload_describers(void)
                if(describers[new_describers].no_sig_address > SIG_BYTES) describers[new_describers].no_sig_address=SIG_BYTES;
                describers[new_describers].process_mode   = atoi(row[5]);
                strcpy(describers[new_describers].description, row[6]);
+               if(!strcmp("M0", row[0])) describer_M0 = new_describers;
+               if(!strcmp("M1", row[0])) describer_M1 = new_describers;
                new_describers++;
             }
          }

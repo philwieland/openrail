@@ -1,6 +1,6 @@
 CC=gcc -c -g -O2 -Wall -I/usr/include/mysql -DBIG_JOINS=1 -D_GNU_SOURCE -D_FILE_OFFSET_BITS=64 -fno-strict-aliasing -fPIC -DUNIV_LINUX
 
-all:            cifdb jsondb tscdb archdb corpusdb smartdb vstpdb trustdb stompy tddb liverail.cgi livesig.cgi railquery.cgi service-report limed ops.cgi
+all:            cifdb cifmerge archdb corpusdb smartdb vstpdb trustdb stompy tddb liverail.cgi livetrain.cgi livesig.cgi railquery.cgi service-report jiankong ops.cgi
 
 jsmn.o:		jsmn.c jsmn.h misc.h
 
@@ -15,15 +15,10 @@ cifdb:          cifdb.o jsmn.o misc.o db.o database.o
 
 cifdb.o:	cifdb.c jsmn.h misc.h db.h database.h build.h
 
-jsondb:         jsondb.o jsmn.o misc.o db.o database.o
-		gcc -g -O2 -I./include -L./lib jsondb.o jsmn.o misc.o db.o database.o -lmysqlclient -lcurl -o jsondb
+cifmerge:       cifmerge.o misc.o db.o database.o
+		gcc -g -O2 -I./include -L./lib cifmerge.o misc.o db.o database.o -lmysqlclient -lcurl -o cifmerge
 
-jsondb.o:	jsondb.c jsmn.h misc.h db.h database.h build.h
-
-tscdb:		tscdb.o jsmn.o misc.o db.o database.o
-		gcc -g -O2 -I./include -L./lib tscdb.o jsmn.o misc.o db.o database.o -lmysqlclient -lcurl -o tscdb
-
-tscdb.o:	tscdb.c jsmn.h misc.h db.h database.h build.h
+cifmerge.o:	cifmerge.c misc.h db.h database.h build.h
 
 archdb:         archdb.o jsmn.o misc.o db.o database.o 
 		gcc -g -O2 -I./include -L./lib archdb.o jsmn.o misc.o db.o database.o -lmysqlclient -lcurl -o archdb
@@ -34,6 +29,11 @@ liverail.cgi:	liverail.o misc.o db.o
 		gcc -g -O2 -I./include -L./lib liverail.o misc.o db.o -lmysqlclient -o liverail.cgi 
 
 liverail.o:	liverail.c db.h misc.h build.h
+
+livetrain.cgi:	livetrain.o misc.o db.o 
+		gcc -g -O2 -I./include -L./lib livetrain.o misc.o db.o -lmysqlclient -o livetrain.cgi 
+
+livetrain.o:	livetrain.c db.h misc.h build.h
 
 livesig.cgi:	livesig.o misc.o db.o 
 		gcc -g -O2 -I./include -L./lib livesig.o misc.o db.o -lmysqlclient -o livesig.cgi 
@@ -70,15 +70,15 @@ tddb:       	tddb.o jsmn.o misc.o db.o database.o
 
 tddb.o:      	tddb.c jsmn.h misc.h db.h database.h build.h
 
-limed:       	limed.o misc.o db.o database.o 
-		gcc -g -O2 -L./lib -I./include limed.o misc.o db.o database.o -lmysqlclient -o limed 
-
-limed.o:      	limed.c misc.h db.h database.h build.h
-
 stompy:         stompy.o misc.o 
 		gcc -g -O2 -L./lib -I./include stompy.o misc.o -o stompy 
 
 stompy.o:      stompy.c misc.h build.h
+
+jiankong:	jiankong.o misc.o 
+		gcc -g -O2 -L./lib -I./include jiankong.o misc.o -lm -o jiankong 
+
+jiankong.o:    	jiankong.c misc.h build.h
 
 ops.cgi:	ops.o misc.o db.o database.o 
 		gcc -g -O2 -L./lib -I./include ops.o database.o misc.o db.o -lmysqlclient -o ops.cgi
@@ -90,21 +90,8 @@ service-report: service-report.o misc.o db.o
 
 service-report.o: service-report.c misc.h db.h build.h
 
-install:
-		mkdir -p $(DESTDIR)$(prefix)/lib/cgi-bin
-		install -m 0755 cifdb $(DESTDIR)$(prefix)/sbin
-		install -m 0755 archdb $(DESTDIR)$(prefix)/sbin
-		install -m 0755 trustdb $(DESTDIR)$(prefix)/sbin
-		install -m 0755 vstpdb $(DESTDIR)$(prefix)/sbin
-		install -m 0755 corpusdb $(DESTDIR)$(prefix)/sbin
-		install -m 0755 stompy $(DESTDIR)$(prefix)/sbin
-		install -m 0755 liverail.cgi $(DESTDIR)$(prefix)/lib/cgi-bin
-		install -m 0644 liverail.css $(DESTDIR)/var/www
-		install -m 0644 liverail.js $(DESTDIR)/var/www
-
-.PHONY: install
 
 clean:
-		rm -f cifdb jsondb archdb liverail.cgi livesig.cgi railquery.cgi corpusdb vstpdb trustdb service-report stompy tddb limed tscdb smartdb ops.cgi *.o 
+		rm -f cifdb cifmerge archdb liverail.cgi livetrain.cgi livesig.cgi railquery.cgi corpusdb vstpdb trustdb service-report stompy tddb smartdb jiankong ops.cgi *.o 
 
 

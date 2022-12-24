@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2013, 2014, 2015, 2016, 2017 Phil Wieland
+    Copyright (C) 2013, 2014, 2015, 2016, 2017, 2018, 2022 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -45,7 +45,7 @@
 #define NAME  "trustdb"
 
 #ifndef RELEASE_BUILD
-#define BUILD "YB07p"
+#define BUILD "3724p"
 #else
 #define BUILD RELEASE_BUILD
 #endif
@@ -87,7 +87,7 @@ static jsmntok_t tokens[NUM_TOKENS];
 #define REPORT_MINUTE 2
 static word last_report_day;
 
-static time_t start_time;
+static time_t start_time, now;
 
 // Status
 static time_t status_last_trust_processed, status_last_trust_actual;
@@ -96,7 +96,7 @@ static time_t status_last_trust_processed, status_last_trust_actual;
 enum stats_categories {ConnectAttempt, GoodMessage, // Don't insert any here
                        Mess1, Mess2, Mess3, Mess4, Mess5, Mess6, Mess7, Mess8,
                        NotMessage, NotRecog, Mess1Miss, Mess1MissHit, Mess1Cape, MovtNoAct, DeducedAct, 
-                       DeducedHC, DeducedHCReplaced, MAXstats};
+                       DeducedHC, DeducedHCReplaced, DeducedTSC, MAXstats};
 static qword stats[MAXstats];
 static qword grand_stats[MAXstats];
 static const char * stats_category[MAXstats] = 
@@ -104,7 +104,7 @@ static const char * stats_category[MAXstats] =
       "Stompy connect attempt", "Good message", 
       "Message type 1","Message type 2","Message type 3","Message type 4","Message type 5","Message type 6","Message type 7","Message type 8",
       "Not a message", "Invalid or not recognised", "Activation no schedule", "Found by second search", "Act. cancelled schedule", "Movement without act.", "Deduced activation",
-      "Deduced headcode", "Changed deduced headcode",
+      "Deduced headcode", "Changed deduced headcode", "Deduced TSC",
    };
 
 // Message count
@@ -114,8 +114,10 @@ time_t message_count_report_due;
 
 // Latency check
 static qword latency_sum, latency_count, latency_max;
-time_t latency_check_due;
+static time_t latency_check_due;
+static byte latency_alarm_raised;
 #define LATENCY_CHECK_INTERVAL 256
+#define LATENCY_ALARM_THRESHOLD 16
 
 // Signal handling
 void termination_handler(int signum)
@@ -321,27 +323,28 @@ static void perform(void)
    word stompy_timeout = true;
 
    // Initialise database
-   while(db_init(conf[conf_db_server], conf[conf_db_user], conf[conf_db_password], conf[conf_db_name]) && run) 
+   while(db_init(conf[conf_db_server], conf[conf_db_user], conf[conf_db_password], conf[conf_db_name], DB_MODE_NORMAL) && run) 
    {
       _log(CRITICAL, "Failed to initialise database connection.  Will retry...");
       word i;
       for(i = 0; i < 64 && run; i++) sleep(1);
    }
 
-   if(database_upgrade(trustdb))
+   word e;
+   if((e = database_upgrade(trustdb)))
    {
-      _log(CRITICAL, "Failed to upgrade database.  Aborting.");
+      _log(CRITICAL, "Error %d in database_upgrade().  Aborting.", e);
       exit(1);
    }
 
    {
-      time_t now = time(NULL);
+      now = time(NULL);
       struct tm * broken = localtime(&now);
       last_report_day = broken->tm_wday;
       message_count_report_due = now + MESSAGE_COUNT_REPORT_INTERVAL;
       latency_check_due = now + LATENCY_CHECK_INTERVAL;
       message_count = 0;
-      latency_sum = latency_count = latency_max = 0;
+      latency_alarm_raised = latency_sum = latency_count = latency_max = 0;
    }
 
    // Status
@@ -467,11 +470,17 @@ static void process_frame(const char * const body)
          char message_name[128], queue_timestamp_s[128];
          jsmn_find_extract_token(body, tokens, index, "msg_type", message_name, sizeof(message_name));
          word message_type = atoi(message_name);
+
+         now = time(NULL);
          
          jsmn_find_extract_token(body, tokens, index, "msg_queue_timestamp", queue_timestamp_s, sizeof(queue_timestamp_s));
          queue_timestamp_s[10] = '\0';
          status_last_trust_actual = atol(queue_timestamp_s);
-         time_t latency = time(NULL) - status_last_trust_actual;
+         time_t latency;
+         if(now > status_last_trust_actual)
+            latency = now - status_last_trust_actual;
+         else
+            latency = 0;
          //ra_latency_ms = ( (ra_latency_ms * 499) + (latency * 1000))/500;
          latency_sum += latency;
          latency_count++;
@@ -487,6 +496,8 @@ static void process_frame(const char * const body)
             stats[GoodMessage]++;
             message_count++;
             stats[GoodMessage + message_type]++;
+            status_last_trust_processed = now;
+
             switch(message_type)
             {
             case 1: process_trust_0001(body, tokens, index); break;
@@ -526,15 +537,12 @@ static void process_frame(const char * const body)
 static void process_trust_0001(const char * const string, const jsmntok_t * const tokens, const int index)
 {
    char zs[128], zs1[128], report[1024];
-   char train_id[64], train_uid[64];
+   char train_id[64], train_uid[64], tsc[64];
    char query[4096];
    dword cif_schedule_id = 0;
    MYSQL_RES * result0;
    MYSQL_ROW row0;
    
-   time_t now = time(NULL);
-   status_last_trust_processed = now;
-
    sprintf(report, "Activation message:");
 
    jsmn_find_extract_token(string, tokens, index, "train_id", train_id, sizeof(train_id));
@@ -543,12 +551,12 @@ static void process_trust_0001(const char * const string, const jsmntok_t * cons
 
    jsmn_find_extract_token(string, tokens, index, "schedule_start_date", zs, sizeof(zs));
    time_t schedule_start_date_stamp = parse_datestamp(zs);
-   sprintf(zs1, " schedule_start_date=%s", zs);
+   sprintf(zs1, " schedule_start_date=%.32s", zs);
    strcat(report, zs1);
 
    jsmn_find_extract_token(string, tokens, index, "schedule_end_date", zs, sizeof(zs));
    time_t schedule_end_date_stamp   = parse_datestamp(zs);
-   sprintf(zs1, " schedule_end_date=%s", zs);
+   sprintf(zs1, " schedule_end_date=%.32s", zs);
    strcat(report, zs1);
 
    jsmn_find_extract_token(string, tokens, index, "train_uid", train_uid, sizeof(train_uid));
@@ -556,14 +564,14 @@ static void process_trust_0001(const char * const string, const jsmntok_t * cons
    strcat(report, zs1);
 
    jsmn_find_extract_token(string, tokens, index, "schedule_source", zs, sizeof(zs));
-   sprintf(zs1, " schedule_source=\"%s\"", zs);
+   sprintf(zs1, " schedule_source=\"%.8s\"", zs);
    strcat(report, zs1);
 
    jsmn_find_extract_token(string, tokens, index, "schedule_wtt_id", zs, sizeof(zs));
-   sprintf(zs1, " schedule_wtt_id=\"%s\"", zs);
+   sprintf(zs1, " schedule_wtt_id=\"%.16s\"", zs);
    strcat(report, zs1);
 
-   sprintf(query, "select id, CIF_stp_indicator from cif_schedules where cif_train_uid = '%s' AND schedule_start_date = %ld AND schedule_end_date = %ld AND deleted > %ld ORDER BY LOCATE(CIF_stp_indicator, 'ONPC')", train_uid, schedule_start_date_stamp, schedule_end_date_stamp, now);
+   sprintf(query, "select id, CIF_stp_indicator from cif_schedules where cif_train_uid = '%s' AND schedule_start_date = %ld AND schedule_end_date = %ld AND deleted > %ld ORDER BY LOCATE(CIF_stp_indicator, 'ONPC'), created DESC", train_uid, schedule_start_date_stamp, schedule_end_date_stamp, now);
    if(!db_query(query))
    {
       word cancelled = false;
@@ -630,8 +638,8 @@ static void process_trust_0001(const char * const string, const jsmntok_t * cons
          strcat(query, zs1);
          strcat(query, ", '");
              
-         jsmn_find_extract_token(string, tokens, index, "train_service_code", zs, sizeof(zs));
-         strcat(query, zs);
+         jsmn_find_extract_token(string, tokens, index, "train_service_code", tsc, sizeof(tsc));
+         strcat(query, tsc);
          strcat(query, "', '");
                
          jsmn_find_extract_token(string, tokens, index, "toc_id", zs, sizeof(zs));
@@ -681,6 +689,7 @@ static void process_trust_0001(const char * const string, const jsmntok_t * cons
           train_id[5] < '0' || train_id[5] > '9'))
       {
          // This has an obfuscated headcode.
+         _log(MINOR, "Activation with obfuscated headcode received, trust ID \"%s\".", train_id);
          char obfus_hc[16], true_hc[8];
          strcpy(obfus_hc, train_id + 2);
          obfus_hc[4] = '\0';
@@ -730,7 +739,7 @@ static void process_trust_0001(const char * const string, const jsmntok_t * cons
          char act_headcode[16];
          strcpy(act_headcode, train_id + 2);
          act_headcode[4] = '\0';
-         sprintf(query, "SELECT signalling_id, deduced_headcode, deduced_headcode_status from cif_schedules where id = %u", cif_schedule_id);
+         sprintf(query, "SELECT signalling_id, deduced_headcode, deduced_headcode_status, CIF_train_service_code from cif_schedules where id = %u", cif_schedule_id);
          if(!db_query(query))
          {
             result0 = db_store_result();
@@ -748,7 +757,7 @@ static void process_trust_0001(const char * const string, const jsmntok_t * cons
                   {
                      // Not previously deduced
                      sprintf(query, "UPDATE cif_schedules SET deduced_headcode = '%s', deduced_headcode_status = 'A' WHERE id = %u", act_headcode, cif_schedule_id);
-                     _log(MINOR, "Deduced headcode \"%s\" for schedule %u.", act_headcode, cif_schedule_id);
+                     _log(GENERAL, "Deduced headcode \"%s\" for schedule %u.", act_headcode, cif_schedule_id);
                      db_query(query);
                      stats[DeducedHC]++;
                   }
@@ -770,6 +779,24 @@ static void process_trust_0001(const char * const string, const jsmntok_t * cons
                      _log(DEBUG, "Previously deduced headcode \"%s\", status \"%s\" unchanged for schedule %ld, headcode \"%s\".", row0[1], row0[2], cif_schedule_id, act_headcode);
                   }
                }
+
+               // Deduce TSC
+               _log(DEBUG, "TSC: In activation \"%s\", in schedule \"%s\", schedule %ld.", tsc, row0[3], cif_schedule_id);
+               if(strcmp(tsc, row0[3]))
+               {
+                  if((!row0[3][0]) || (row0[3][0] == ' '))
+                  {
+                     _log(GENERAL, "TSC in activation message \"%s\", schedule %ld has \"%s\".  Schedule updated.", tsc, cif_schedule_id, row0[3]);
+                     sprintf(query, "UPDATE cif_schedules SET CIF_train_service_code = '%s' WHERE id = %u", tsc, cif_schedule_id);
+                     db_query(query);
+                     stats[DeducedTSC]++;
+                  }
+                  else
+                  {
+                     _log(DEBUG, "TSC in activation message \"%s\", schedule %ld has \"%s\".  Not updated.", tsc, cif_schedule_id, row0[3]);
+                  }
+               }            
+               
             }
             mysql_free_result(result0);
          }
@@ -783,9 +810,6 @@ static void process_trust_0002(const char * string, const jsmntok_t * tokens, co
    char query[1024];
    char train_id[128], reason[128], type[128], stanox[128];
    
-   time_t now = time(NULL);
-   status_last_trust_processed = now;
-
    jsmn_find_extract_token(string, tokens, index, "train_id", train_id, sizeof(train_id));
    jsmn_find_extract_token(string, tokens, index, "canx_reason_code", reason, sizeof(reason));
    jsmn_find_extract_token(string, tokens, index, "canx_type", type, sizeof(type));
@@ -804,8 +828,6 @@ static void process_trust_0003(const char * string, const jsmntok_t * tokens, co
   
    time_t planned_timestamp, actual_timestamp, timestamp;
 
-   time_t now = time(NULL);
-   status_last_trust_processed = now;
    flags = 0;
    
    sprintf(query, "INSERT INTO trust_movement VALUES(%ld, '", now);
@@ -913,7 +935,6 @@ static void process_trust_0003(const char * string, const jsmntok_t * tokens, co
          // Movement no activation.  Attempt to create the missing activation.
          MYSQL_ROW row0;
          char tiploc[128], reason[128];
-         time_t now = time(NULL);
          qword elapsed = time_ms();
          char planned[8];
 
@@ -1068,7 +1089,7 @@ static void process_trust_0003(const char * string, const jsmntok_t * tokens, co
                   if(num_rows > 0)
                   {
                      //sprintf(reason, "Deduced schedule %u already has an activation recorded", cif_schedule_id);
-                     _log(MINOR, "Deduced schedule %u already has an activation recorded.  Another activation added.", cif_schedule_id);
+                     _log(MINOR, "   Deduced schedule %u already has an activation recorded.  Another activation added.", cif_schedule_id);
                   }
                   mysql_free_result(result0);
                }
@@ -1148,9 +1169,6 @@ static void process_trust_0005(const char * const string, const jsmntok_t * cons
    char query[1024];
    char train_id[128], stanox[128];
    
-   time_t now = time(NULL);
-   status_last_trust_processed = now;
-
    jsmn_find_extract_token(string, tokens, index, "train_id", train_id, sizeof(train_id));
    jsmn_find_extract_token(string, tokens, index, "loc_stanox", stanox, sizeof(stanox));
 
@@ -1165,9 +1183,6 @@ static void process_trust_0006(const char * const string, const jsmntok_t * cons
    char query[1024];
    char train_id[128], reason[128], stanox[128];
    
-   time_t now = time(NULL);
-   status_last_trust_processed = now;
-
    jsmn_find_extract_token(string, tokens, index, "train_id", train_id, sizeof(train_id));
    jsmn_find_extract_token(string, tokens, index, "reason_code", reason, sizeof(reason));
    jsmn_find_extract_token(string, tokens, index, "loc_stanox", stanox, sizeof(stanox));
@@ -1186,9 +1201,6 @@ static void process_trust_0007(const char * const string, const jsmntok_t * cons
    MYSQL_ROW row;
    dword cif_schedule_id = 0;
    
-   time_t now = time(NULL);
-   status_last_trust_processed = now;
-
    jsmn_find_extract_token(string, tokens, index, "train_id", train_id, sizeof(train_id));
    jsmn_find_extract_token(string, tokens, index, "revised_train_id", new_id, sizeof(new_id));
 
@@ -1259,9 +1271,6 @@ static void process_trust_0008(const char * const string, const jsmntok_t * cons
    char query[1024];
    char train_id[128], original_stanox[128], stanox[128];
    
-   time_t now = time(NULL);
-   status_last_trust_processed = now;
-
    jsmn_find_extract_token(string, tokens, index, "train_id", train_id, sizeof(train_id));
    jsmn_find_extract_token(string, tokens, index, "original_loc_stanox", original_stanox, sizeof(original_stanox));
    jsmn_find_extract_token(string, tokens, index, "loc_stanox", stanox, sizeof(stanox));
@@ -1320,7 +1329,7 @@ static void report_stats(void)
    strcpy(report, zs);
    strcat(report, "\n");
 
-   sprintf(zs, "%25s: %-12s %ld days", "Run time", "", (time(NULL) - start_time)/(24*60*60));
+   sprintf(zs, "%25s: %-12s %ld days", "Run time", "", (now - start_time)/(24*60*60));
    _log(GENERAL, zs);
    strcat(report, zs);
    strcat(report, "\n");
@@ -1371,7 +1380,6 @@ static void defer_activation(const char * const uid, const time_t schedule_start
       return;
    }
    
-   time_t now = time(NULL);
    
    word i;
    for(i = 0; i < DEFERRED_ACTIVATIONS && deferred_activations[i].active; i++);
@@ -1394,7 +1402,7 @@ static void defer_activation(const char * const uid, const time_t schedule_start
 static void process_deferred_activations(void)
 {
    word i;
-   time_t now = time(NULL);
+   now = time(NULL);
    MYSQL_RES * db_result;
    MYSQL_ROW db_row;
 
@@ -1447,8 +1455,10 @@ static word count_deferred_activations(void)
 
 static void check_timeout(void)
 {
+   char report[1024];
+
    // Daily report
-   time_t now = time(NULL);
+   now = time(NULL);
    struct tm * broken = localtime(&now);
    if(broken->tm_wday != last_report_day && broken->tm_hour >= REPORT_HOUR && broken->tm_min >= REPORT_MINUTE)
    {
@@ -1484,10 +1494,27 @@ static void check_timeout(void)
          mean_latency = (mean_latency + 500) / 1000;
          char peak[32];
          strcpy(peak, commas_q(latency_max));
-         _log(GENERAL, "Average message latency %s s, peak %s s.", commas_q(mean_latency), peak);
-         //_log(GENERAL, "   Total %s", commas_q(latency_sum));
-         //_log(GENERAL, "   Count %s", commas_q(latency_count));
-         // TODO Raise some alarms here.
+         if(mean_latency > LATENCY_ALARM_THRESHOLD)
+         {
+            _log(MINOR, "Average message latency %s s, peak %s s.", commas_q(mean_latency), peak);
+            if(!latency_alarm_raised && now - start_time > 256)
+            {
+               sprintf(report, "Average message latency %s s, peak %s s.", commas_q(mean_latency), peak);
+               email_alert(NAME, BUILD, "Message Latency Alarm", report);
+               latency_alarm_raised = true;
+            }
+         }
+         else
+         {
+            if(latency_alarm_raised)
+            {
+               _log(MINOR, "Average message latency %s s, peak %s s.", commas_q(mean_latency), peak);
+               sprintf(report, "Average message latency %s s, peak %s s.", commas_q(mean_latency), peak);
+               email_alert(NAME, BUILD, "Message Latency Alarm Cleared", report);
+               latency_alarm_raised = false;
+            }
+         }
+
          latency_sum = latency_count = latency_max = 0;
       }
       latency_check_due = now + LATENCY_CHECK_INTERVAL;

@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2017 Phil Wieland
+    Copyright (C) 2017, 2018, 2019 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -34,7 +34,7 @@
 #define NAME "ops"
 
 #ifndef RELEASE_BUILD
-#define BUILD "Z218p"
+#define BUILD "0A11p"
 #else
 #define BUILD RELEASE_BUILD
 #endif
@@ -142,7 +142,7 @@ int main()
    printf("<body>\n");
 
    // Initialise database
-   db_init(conf[conf_db_server], conf[conf_db_user], conf[conf_db_password], conf[conf_db_name]);
+   db_init(conf[conf_db_server], conf[conf_db_user], conf[conf_db_password], conf[conf_db_name], DB_MODE_NORMAL);
 
    sprintf(zs, "Parameters:  (l = %d)", l);
    _log(GENERAL, zs);
@@ -220,33 +220,39 @@ static void describers()
       {
       case 'a': // Request control mode 0
          sprintf(query, "UPDATE describers SET control_mode_cmd = 0 WHERE id = '%s'", parameters[2]);
-      db_query(query);
-      sprintf(message, "A request has been recorded to set the control mode of describer %s to normal.  Press %s to have this command processed.", parameters[2], menu1);
+         db_query(query);
+         db_query("UPDATE describers SET control_mode_cmd = 1 WHERE id = ''");
+         sprintf(message, "A request has been recorded to set the control mode of describer %s to normal.", parameters[2]);
       break;
       case 'b': // Request control mode 2
          sprintf(query, "UPDATE describers SET control_mode_cmd = 2 WHERE id = '%s'", parameters[2]);
-      db_query(query);
-      sprintf(message, "A request has been recorded to set the control mode of describer %s to blank.  Press %s to have this command processed.", parameters[2], menu1);
-      break;
+         db_query(query);
+         db_query("UPDATE describers SET control_mode_cmd = 1 WHERE id = ''");
+         sprintf(message, "A request has been recorded to set the control mode of describer %s to blank.", parameters[2]);
+         break;
       case 'c': // Request control mode 1
          sprintf(query, "UPDATE describers SET control_mode_cmd = 1 WHERE id = '%s'", parameters[2]);
-      db_query(query);
-      sprintf(message, "A request has been recorded to set the control mode of describer %s to clear (Erase database).  Press %s to have this command processed.", parameters[2], menu1);
-      break;
+         db_query(query);
+         db_query("UPDATE describers SET control_mode_cmd = 1 WHERE id = ''");
+         sprintf(message, "A request has been recorded to set the control mode of describer %s to clear (Erase database).", parameters[2]);
+         break;
       case 'd': // Request process mode 0
          sprintf(query, "UPDATE describers SET process_mode = 0 WHERE id = '%s'", parameters[2]);
-      db_query(query);
-      sprintf(message, "A request has been recorded to set the process mode of describer %s to ignore.  Press %s to have this command processed.", parameters[2], menu1);
-      break;
+         db_query(query);
+         db_query("UPDATE describers SET control_mode_cmd = 1 WHERE id = ''");
+         sprintf(message, "A request has been recorded to set the process mode of describer %s to ignore.", parameters[2]);
+         break;
       case 'e': // Request process mode 1
          sprintf(query, "UPDATE describers SET process_mode = 1 WHERE id = '%s'", parameters[2]);
-      db_query(query);
-      sprintf(message, "A request has been recorded to set the process mode of describer %s to process.  Press %s to have this command processed.", parameters[2], menu1);
-      break;
+         db_query(query);
+         db_query("UPDATE describers SET control_mode_cmd = 1 WHERE id = ''");
+         sprintf(message, "A request has been recorded to set the process mode of describer %s to process.", parameters[2]);
+         break;
       case 'f': // Request process mode 2
          sprintf(query, "UPDATE describers SET process_mode = 2 WHERE id = '%s'", parameters[2]);
-      db_query(query);
-      sprintf(message, "A request has been recorded to set the process mode of describer %s to process and log.  Press %s to have this command processed.", parameters[2], menu1);
+         db_query(query);
+         db_query("UPDATE describers SET control_mode_cmd = 1 WHERE id = ''");
+         sprintf(message, "A request has been recorded to set the process mode of describer %s to process and log.", parameters[2]);
       break;
       case 'z': // Request reload
          db_query("UPDATE describers SET control_mode_cmd = 1 WHERE id = ''");
@@ -549,7 +555,7 @@ static void banners()
    printf("<td valign=\"top\">Standard messages:");
    printf("<table class=\"train-table\">");
 
-   db_query("SELECT banner, banner1, id FROM banners WHERE type = 'diagram_s' ORDER BY banner");
+   db_query("SELECT banner, banner1, id FROM banners WHERE type = 'diagram_s' ORDER BY banner, banner1");
    result[0] = db_store_result();
    while(result[0] && (row[0] = mysql_fetch_row(result[0])))
    {
@@ -577,7 +583,7 @@ static void banners()
    printf("<p>Standard messages:");
    printf("<table class=\"train-table\">");
 
-   db_query("SELECT banner, banner1, id FROM banners WHERE type = 'webpage_s' ORDER BY banner");
+   db_query("SELECT banner, banner1, id FROM banners WHERE type = 'webpage_s' ORDER BY banner, banner1");
    result[0] = db_store_result();
    while(result[0] && (row[0] = mysql_fetch_row(result[0])))
    {

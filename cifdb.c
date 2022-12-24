@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2013, 2014, 2015, 2016, 2017 Phil Wieland
+    Copyright (C) 2013, 2014, 2015, 2016, 2017, 2018, 2020, 2022 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -39,12 +39,12 @@
 #define NAME "cifdb"
 
 #ifndef RELEASE_BUILD
-#define BUILD "YA25p"
+#define BUILD "3721p"
 #else
 #define BUILD RELEASE_BUILD
 #endif
 
-static word debug, opt_fetch_all, run, opt_test, opt_print, opt_insecure, used_insecure;
+static word debug, opt_fetch_all, run, opt_test, opt_print, opt_insecure, used_insecure, subsequent_file;
 static char * opt_filename;
 static char * opt_url;
 static dword update_id;
@@ -58,9 +58,9 @@ static time_t start_time, last_reported_time;
 // Stats
 enum stats_categories {Fetches,  
                        CIFRecords,
-                       ScheduleCreate, ScheduleDeleteHit, ScheduleDeleteMiss,
+                       ScheduleCreate, ScheduleDeleteHit, ScheduleDeleteMiss, ScheduleDeleteMulti,
                        ScheduleLocCreate, ScheduleCR,
-                       AssocCreate, AssocDeleteHit, AssocDeleteMiss,
+                       AssocCreate, AssocDeleteHit, AssocDeleteMiss, AssocDeleteMulti,
                        TIPLOCCreate, TIPLOCAmendHit, TIPLOCAmendMiss, TIPLOCDeleteHit, TIPLOCDeleteMiss, 
                        HeadcodeDeduced,
                        MAXStats };
@@ -69,9 +69,9 @@ static const char * const stats_category[MAXStats] =
    {
       "File fetch",  
       "CIF record", 
-      "Schedule create", "Schedule delete hit", "Schedule delete miss",
+      "Schedule create", "Schedule delete hit", "Schedule delete miss", "Schedule delete multiple",
       "Schedule location create", "Schedule CR create",
-      "Association create", "Association delete hit", "Association delete miss",
+      "Association create", "Association delete hit", "Association delete miss", "Association delete multiple",
       "TIPLOC create", "TIPLOC amend hit", "TIPLOC amend miss", "TIPLOC delete hit", "TIPLOC delete miss",
       "Deduced schedule headcode",
    };
@@ -94,18 +94,18 @@ static size_t cif_write_data(void *buffer, size_t size, size_t nmemb, void *user
 static word process_file(void);
 static int file_is_cif_download(const struct dirent *d);
 static void final_report(void);
-static word process_HD(const char * const c);
-static word process_association(const char * const c);
-static word process_schedule(const char * const c);
-static word process_schedule_delete(const char * const c);
-static word process_tiploc(const char * const c);
-static word create_tiploc(const char * const c);
-static word get_sort_time(const char const * buffer);
+static word process_HD(char const * const c);
+static word process_association( char const * const c);
+static word process_schedule(char const * const c);
+static word process_schedule_delete(char const * const c);
+static word process_tiploc(char const * const c);
+static word create_tiploc(char const * const c);
+static word get_sort_time(char const * const buffer);
 static void reset_database(void);
-static char * tiploc_name(const char * const tiploc);
-static void extract_field(const char * const c, size_t s, size_t l, char * d);
-static char * extract_field_s(const char * const c, size_t s, size_t l);
-static time_t parse_CIF_datestamp(const char * const s);
+static char * tiploc_name(char const * const tiploc);
+static void extract_field(char const * const c, size_t const s, size_t const l, char * const d);
+static char * extract_field_s(char const * const c, size_t const s, size_t const l);
+static time_t parse_CIF_datestamp(char const * const s);
 
 int main(int argc, char **argv)
 {
@@ -117,6 +117,7 @@ int main(int argc, char **argv)
    opt_print = false;
    opt_insecure = false;
    used_insecure = false;
+   subsequent_file = false;
 
    strcpy(config_file_path, "/etc/openrail.conf");
    word usage = false;
@@ -216,8 +217,14 @@ int main(int argc, char **argv)
       exit(1);
    }
 
+   if(!(*conf[conf_nr_server]))
+   {
+      _log(ABEND, "Invalid configuration - nr_server not set.");
+      exit(1);
+   }
+
    // Initialise database
-   if(db_init(conf[conf_db_server], conf[conf_db_user], conf[conf_db_password], conf[conf_db_name])) exit(1);
+   if(db_init(conf[conf_db_server], conf[conf_db_user], conf[conf_db_password], conf[conf_db_name], DB_MODE_NORMAL)) exit(1);
 
    if(opt_fetch_all && !opt_test) reset_database();
 
@@ -226,7 +233,7 @@ int main(int argc, char **argv)
       word e;
       if((e = database_upgrade(cifdb)))
       {
-         _log(CRITICAL, "Error %d in upgrade_database().  Aborting.", e);
+         _log(CRITICAL, "Error %d in database_upgrade().  Aborting.", e);
          exit(1);
       }
    }
@@ -331,6 +338,7 @@ int main(int argc, char **argv)
          word last_day = broken->tm_wday;
          word day = 0; // Day after fetch-day of full update
          word fail = false;
+         subsequent_file = true;
          // Fetch updates from day after full up to today. ASSUMES full extract fetched on Saturday.
          while(last_day != 6 && day <= last_day && !fail)
          {
@@ -405,23 +413,23 @@ static void final_report(void)
       _log(GENERAL, "*** Warning: Insecure download used.");
    }
 
-   sprintf(zs, "        Data extract time: %s", fetch_extract_time?time_text(fetch_extract_time, true):"Unknown");
+   sprintf(zs, "%32s: %s", "Data extract time", fetch_extract_time?time_text(fetch_extract_time, true):"Unknown");
    _log(GENERAL, zs);
    strcat(report, zs); strcat(report, "\n");
    if(opt_filename)
    {
-      sprintf(zs, "           Data from file: %s", opt_filename);
+      sprintf(zs, "%32s: %s", "Data from file", opt_filename);
       _log(GENERAL, zs);
       strcat(report, zs); strcat(report, "\n");
    }
    if(opt_url)
    {
-      sprintf(zs, "     Data downloaded from: %s", opt_url);
+      sprintf(zs, "%32s: %s", "Data downloaded from", opt_url);
       _log(GENERAL, zs);
       strcat(report, zs); strcat(report, "\n");
    }
 
-   sprintf(zs, "             Elapsed time: %ld minutes", (time(NULL) - start_time + 30) / 60);
+   sprintf(zs, "%32s: %ld minutes", "Elapsed time", (time(NULL) - start_time + 30) / 60);
    _log(GENERAL, zs);
    strcat(report, zs); strcat(report, "\n");
    if(opt_test)
@@ -432,13 +440,12 @@ static void final_report(void)
    }
    else
    {
-      sprintf(zs, "                Update id: %s", commas(update_id));
+      sprintf(zs, "%32s: %s", "Update id", commas(update_id));
       _log(GENERAL, zs);
       strcat(report, zs); strcat(report, "\n");
       for(i=0; i<MAXStats; i++)
       {
-         sprintf(zs, "%25s: %s", stats_category[i], commas_q(stats[i]));
-         // if(i == DBError && stats[i]) strcat(zs, " ****************");
+         sprintf(zs, "%32s: %s", stats_category[i], commas_q(stats[i]));
          _log(GENERAL, zs);
          strcat(report, zs);
          strcat(report, "\n");
@@ -462,7 +469,14 @@ static void final_report(void)
             {
                row0 = NULL;
                result0 = NULL;
-               sprintf(zs, "%11ld ", home_report_id[i]);
+               if(conf[conf_public_url][0])
+               {
+                  sprintf(zs, "%srail/liverail/train/%-11ld ", conf[conf_public_url], home_report_id[i]);
+               }
+               else
+               {
+                  sprintf(zs, "%11ld ", home_report_id[i]);
+               }
                switch(home_report_action[i])
                {
                case 'D': strcat(zs, "delete     "); break;
@@ -545,7 +559,7 @@ static void final_report(void)
    email_alert(NAME, BUILD, "Timetable Update Report", report);
 }
 
-static word get_sort_time(const char const * buffer)
+static word get_sort_time(char const * const buffer)
 {
    word result;
    char zs[8];
@@ -609,7 +623,7 @@ static word fetch_file(const word day)
       broken = localtime(&when); // Note broken contains "yesterday"
       if(day < 8)
       {
-         sprintf(url, "https://datafeeds.networkrail.co.uk/ntrod/CifFileAuthenticate?type=CIF_ALL_UPDATE_DAILY&day=toc-update-%s.CIF.gz", weekdays[(day + 6) % 7]);
+         sprintf(url, "https://%s/ntrod/CifFileAuthenticate?type=CIF_ALL_UPDATE_DAILY&day=toc-update-%s.CIF.gz", conf[conf_nr_server], weekdays[(day + 6) % 7]);
       }
       else if(opt_url)
       {
@@ -617,12 +631,12 @@ static word fetch_file(const word day)
       }
       else if(opt_fetch_all)
       {
-         sprintf(url, "https://datafeeds.networkrail.co.uk/ntrod/CifFileAuthenticate?type=CIF_ALL_FULL_DAILY&day=toc-full.CIF.gz");
+         sprintf(url, "https://%s/ntrod/CifFileAuthenticate?type=CIF_ALL_FULL_DAILY&day=toc-full.CIF.gz", conf[conf_nr_server]);
          full_file = true;
       }
       else
       {
-         sprintf(url, "https://datafeeds.networkrail.co.uk/ntrod/CifFileAuthenticate?type=CIF_ALL_UPDATE_DAILY&day=toc-update-%s.CIF.gz", weekdays[broken->tm_wday]);
+         sprintf(url, "https://%s/ntrod/CifFileAuthenticate?type=CIF_ALL_UPDATE_DAILY&day=toc-update-%s.CIF.gz", conf[conf_nr_server], weekdays[broken->tm_wday]);
       }
       
       // Fetch to temporary file name 
@@ -718,7 +732,7 @@ static word fetch_file(const word day)
          if(fetch_total_bytes == 0) return 1;
          
          _log(GENERAL, "Decompressing data...");
-         sprintf(zs, "/bin/gunzip -f %s", filepathz);
+         sprintf(zs, "/bin/gunzip -f %.240s", filepathz);
          char * rc;
          if((rc = system_call(zs)))
          {
@@ -870,10 +884,19 @@ static word process_file(void)
       time_t now = time(NULL);
       if(now - last_reported_time > COMFORT_REPORT_PERIOD)
       {
-         char zs[128], zs1[128];
-         sprintf(zs, "Progress:  Processed %s of ", commas_q(stats[CIFRecords]));
-         sprintf(zs1, "%s CIF cards.  ", commas_q(cards));
-         strcat(zs, zs1);
+         char zs[256], zs1[128];
+         //sprintf(zs, "Progress:  Processed %s of ", commas_q(stats[CIFRecords]));
+         if(subsequent_file)
+         {
+            // We have grand total of cards, not cards in this file, so cannot show percentage etc.
+            sprintf(zs, "Progress:  Processed %s CIF cards.  ", commas_q(stats[CIFRecords]));
+         }
+         else
+         {
+            sprintf(zs, "Progress:  Processed %s (%lld%%) of ", commas_q(stats[CIFRecords]), ((100*stats[CIFRecords]) + (cards/2)) / cards);
+            sprintf(zs1, "%s CIF cards.  ", commas_q(cards));
+            strcat(zs, zs1);
+         }
          sprintf(zs1, "Created %s schedules and ", commas_q(stats[ScheduleCreate]));
          strcat(zs, zs1);
          sprintf(zs1, "%s schedule locations.  Working...", commas_q(stats[ScheduleLocCreate]));
@@ -977,7 +1000,7 @@ static word process_HD(const char * const c)
 
    //| id    | smallint(5) unsigned | NO   | PRI | NULL    | auto_increment |
    //| time  | int(10) unsigned     | NO   |     | NULL    |                |
-   sprintf(query, "INSERT INTO updates_processed VALUES(0, %ld)", fetch_extract_time);
+   sprintf(query, "INSERT INTO updates_processed VALUES(0, %ld, 1)", fetch_extract_time);
    if(db_query(query)) return 1;
    update_id = db_insert_id();
    _log(GENERAL, "Update id %ld", update_id);
@@ -997,19 +1020,21 @@ static word process_association(const char * const c)
    if(c[2] == 'R' || c[2] == 'D')
    {
       // Delete an association
-      sprintf(query1, " WHERE main_train_uid = '%s'", extract_field_s(c, 3, 6));
-      sprintf(query,  " AND assoc_train_uid = '%s'",  extract_field_s(c, 9, 6));
+      sprintf(query1, " WHERE main_train_uid = '%s'",     extract_field_s(c, 3, 6));
+      sprintf(query,  " AND assoc_train_uid = '%s'",      extract_field_s(c, 9, 6));
       strcat(query1, query);
-      sprintf(query,  " AND assoc_start_date = %ld",  parse_CIF_datestamp(extract_field_s(c, 15, 6)));
+      sprintf(query,  " AND assoc_start_date = %ld",      parse_CIF_datestamp(extract_field_s(c, 15, 6)));
       strcat(query1, query);
-      sprintf(query,  " AND location = '%s'",         extract_field_s(c, 37, 7));
+      sprintf(query,  " AND assoc_end_date > %ld",        fetch_extract_time - 24*60*60);
       strcat(query1, query);
-      sprintf(query,  " AND base_location_suffix = '%s'", extract_field_s(c, 44,1));
+      sprintf(query,  " AND location = '%s'",             extract_field_s(c, 37, 7));
+      strcat(query1, query);
+      sprintf(query,  " AND CIF_stp_indicator = '%s'",    extract_field_s(c, 79, 1));
       strcat(query1, query);
       sprintf(query,  " AND deleted > %ld", start_time);
       strcat(query1, query);
 
-      sprintf(query, "SELECT * FROM cif_associations %s", query1);
+      sprintf(query, "SELECT * FROM cif_associations %.900s", query1);
       
       if(db_query(query)) return 1;
       result = db_store_result();
@@ -1020,16 +1045,18 @@ static word process_association(const char * const c)
       {
          _log(MINOR, "AA card \"%s\".", c);
          _log(MINOR, "   Delete (%c) association found %d matches.  All deleted.", c[2], num_rows);
+         stats[AssocDeleteMulti]++;
       }
 
-      if(num_rows < 1)
+      if(num_rows < 1 && c[2] == 'D')
       {
+         // Note, an R may apply to an expired record, so may report 0 here, so ignore quietly.
          _log(MINOR, "AA card \"%s\".", c);
          _log(MINOR, "   Delete (%c) association found no matches.", c[2]);
          stats[AssocDeleteMiss]++;
       }
 
-      sprintf(query, "UPDATE cif_associations set deleted = %ld %s", start_time, query1);
+      sprintf(query, "UPDATE cif_associations set deleted = %ld %.900s", start_time, query1);
       if(db_query(query)) return 1;
 
       stats[AssocDeleteHit] += num_rows;      
@@ -1458,9 +1485,9 @@ static word process_schedule_delete(const char * const c)
    extract_field(c, 79, 1, CIF_stp_indicator);
 
    // Find the id
-   sprintf(query, "SELECT id FROM cif_schedules WHERE update_id != 0 AND CIF_train_uid = '%s' AND schedule_start_date = '%ld' AND CIF_stp_indicator = '%s' AND deleted > %ld",
+   sprintf(query, "SELECT id, schedule_end_date FROM cif_schedules WHERE update_id != 0 AND CIF_train_uid = '%s' AND schedule_start_date = %ld AND CIF_stp_indicator = '%s' AND deleted > %ld",
            CIF_train_uid, schedule_start_date, CIF_stp_indicator, start_time);
- 
+
    if (db_query(query))
    {
       return 1;
@@ -1468,57 +1495,72 @@ static word process_schedule_delete(const char * const c)
 
    result0 = db_store_result();
    word num_rows = mysql_num_rows(result0);
+   word actual_num_rows = 0;
+   dword prev_id = 0;
 
+   /*
    if(num_rows > 1)
    {
-      _log(MINOR, "Delete (%c) schedule CIF_train_uid = \"%s\", schedule_start_date = %s, CIF_stp_indicator = %s found %d matches.  All deleted.", c[2], CIF_train_uid, date_text(schedule_start_date, false), CIF_stp_indicator, num_rows);
-      if(debug)
-      {
-         _log(DEBUG, "\"%s\"", c);
-
-         // Bodge!
-         query[7] = '*'; query[8] = ' ';
-         dump_mysql_result_query(query);
-      }
+      _log(MINOR, "BS card \"%s\".", c);
+      _log(MINOR, "   Delete (%c) schedule CIF_train_uid = \"%s\", schedule_start_date = %s, CIF_stp_indicator = %s found %d matches.  All deleted.", c[2], CIF_train_uid, date_text(schedule_start_date, false), CIF_stp_indicator, num_rows);
    }
- 
+   */
+   
    while((row0 = mysql_fetch_row(result0)) && row0[0]) 
    {
       dword id = atol(row0[0]);
-      if(num_rows > 1) _log(MINOR, "   Schedule ID %u.", id);
-      sprintf(query, "UPDATE cif_schedules SET deleted = %ld where id = %u", start_time, id);
-   
-      if(!db_query(query))
+      if(atol(row0[1]) < fetch_extract_time - 24*60*60)
       {
-         deleted++;
+         // This is a delete matching an expired schedule, ignore it.
       }
-      else return 1;
-
-      if(conf[conf_huyton_alerts][0])
+      else
       {
-         sprintf(query, "SELECT next_day FROM cif_schedule_locations WHERE cif_schedule_id = %u AND (tiploc_code = 'HUYTON' OR tiploc_code = 'HUYTJUN')", id);
+         if(++actual_num_rows == 2)
+         {
+            _log(MINOR, "BS card \"%s\".", c);
+            _log(MINOR, "   Delete (%c) schedule CIF_train_uid = \"%s\", schedule_start_date = %s, CIF_stp_indicator = %s found multiple matches.  All deleted.", c[2], CIF_train_uid, date_text(schedule_start_date, false), CIF_stp_indicator);
+            _log(MINOR, "   Schedule ID %u.", prev_id);
+            stats[ScheduleDeleteMulti]++;
+         }
+         if(actual_num_rows > 1)
+         {
+            _log(MINOR, "   Schedule ID %u.", id);
+         }
+         prev_id = id;
+         sprintf(query, "UPDATE cif_schedules SET deleted = %ld where id = %u", start_time, id);
+   
          if(!db_query(query))
          {
-            result1 = db_store_result();
-            if(mysql_num_rows(result1))
-            { 
-               if(home_report_index < HOME_REPORT_SIZE)
-               {
-                  word i;
-                  for(i = 0; i < home_report_index && home_report_id[i] != id; i++);
-                  if(i == home_report_index)
+            deleted++;
+         }
+         else return 1;
+
+         if(conf[conf_huyton_alerts][0])
+         {
+            sprintf(query, "SELECT next_day FROM cif_schedule_locations WHERE cif_schedule_id = %u AND (tiploc_code = 'HUYTON' OR tiploc_code = 'HUYTJUN')", id);
+            if(!db_query(query))
+            {
+               result1 = db_store_result();
+               if(mysql_num_rows(result1))
+               { 
+                  if(home_report_index < HOME_REPORT_SIZE)
                   {
-                     home_report_id[home_report_index] = id;
-                     home_report_action[home_report_index] = c[2];
+                     word i;
+                     for(i = 0; i < home_report_index && home_report_id[i] != id; i++);
+                     if(i == home_report_index)
+                     {
+                        home_report_id[home_report_index] = id;
+                        home_report_action[home_report_index] = c[2];
+                        home_report_index++;
+                     }
+                  }
+                  else
+                  {
                      home_report_index++;
                   }
                }
-               else
-               {
-                  home_report_index++;
-               }
+               mysql_free_result(result1);
             }
-            mysql_free_result(result1);
          }
       }
    }
@@ -1530,8 +1572,15 @@ static word process_schedule_delete(const char * const c)
    }
    else
    {
-      stats[ScheduleDeleteMiss]++;
-      _log(MAJOR, "Delete schedule miss: \"%s\".", c);
+      if(num_rows && c[2] == 'R')
+      {
+         // Can get a Revise for an expired schedule - quietly ignore.
+      }
+      else
+      {
+         stats[ScheduleDeleteMiss]++;
+         _log(MAJOR, "Delete schedule miss: \"%s\".", c);
+      }
    }
    return 0;
 }

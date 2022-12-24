@@ -32,7 +32,7 @@ static word mode_flags;
 /* Public data */
 word db_errored;
 
-word db_init(const char * const s, const char * const u, const char * const p, const char * const d)
+word db_init(const char * const s, const char * const u, const char * const p, const char * const d, const word f)
 {
    _log(PROC, "db_init(\"%s\", \"%s\", \"%s\", \"%s\")",s, u, p, d);
  
@@ -46,7 +46,7 @@ word db_init(const char * const s, const char * const u, const char * const p, c
    strcpy(database, d);
    mysql_object = 0;
    db_errored = false;
-   mode_flags = DB_MODE_NORMAL;
+   mode_flags = f;
 
    // Test if database is there
    return db_connect();
@@ -161,11 +161,7 @@ word db_connect(void)
       my_bool reconnect = 0;
       mysql_options(mysql_object, MYSQL_OPT_RECONNECT, &reconnect);   
 
-      {
-         char zs[128];
-         sprintf(zs, "Connection to database \"%s\" opened.", database);
-         _log(GENERAL, zs);
-      }
+      _log(GENERAL, "Connection to database \"%s\" opened.", database);
    }
   
    return 0;
@@ -275,13 +271,3 @@ word db_rollback_transaction(void)
    return r;
 }
 
-extern void db_mode(const word flags)
-{
-   mode_flags = flags;
-
-   if(mysql_object) 
-   {
-      db_disconnect();
-      db_connect();
-   }
-}

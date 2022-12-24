@@ -6,17 +6,17 @@ a virtual host if desired.
 
 	DocumentRoot /var/www
 	<Directory />
-		Options FollowSymLinks -Indexes
+		Options +FollowSymLinks -Indexes
 		AllowOverride None
 	</Directory>
 	<Directory /var/www/>
-		Options -Indexes FollowSymLinks MultiViews
+		Options -Indexes +FollowSymLinks +MultiViews
 		AllowOverride None
 		Order allow,deny
 		allow from all
 	</Directory>
 	<Directory /var/www/auxy>
-		Options -Indexes FollowSymLinks MultiViews
+		Options -Indexes +FollowSymLinks +MultiViews
 		AllowOverride None
 		Order allow,deny
 		allow from all
@@ -34,6 +34,13 @@ a virtual host if desired.
 		Order allow,deny
 		Allow from all      
 
+        </Directory>
+        <Directory "/usr/lib/cgi-bin/secure">
+                AllowOverride None
+                AddHandler cgi-script .pl .cgi
+                Options +ExecCGI -MultiViews +SymLinksIfOwnerMatch -Indexes
+                Order allow,deny
+                Allow from all      
 		AuthType Basic
 		AuthName "Rail Server"
                 #
@@ -45,8 +52,10 @@ a virtual host if desired.
 
 RewriteEngine   On
 RewriteRule     ^/rail/liverail(.*)$  /usr/lib/cgi-bin/liverail.cgi   [E=PARMS:$1]
+RewriteRule     ^/rail/livetrain(.*)$ /usr/lib/cgi-bin/livetrain.cgi  [E=PARMS:$1]
 RewriteRule     ^/rail/query(.*)$     /usr/lib/cgi-bin/railquery.cgi  [E=PARMS:$1]
 RewriteRule     ^/rail/livesig(.*)$   /usr/lib/cgi-bin/livesig.cgi    [E=PARMS:$1]
+RewriteRule     ^/rail/ops(.*)$       /usr/lib/cgi-bin/secure/ops.cgi [E=PARMS:$1]
 #
 	ErrorLog ${APACHE_LOG_DIR}/error.log
 

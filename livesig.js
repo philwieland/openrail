@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2013, 2014, 2015, 2017 Phil Wieland
+    Copyright (C) 2013, 2014, 2015, 2017, 2018 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -46,6 +46,8 @@ var tiplocs;
 var tt1;
 var tt2;
 var ttb;
+var pb;
+var pp;
 
 var SLOTS = 32;
 var displayed = new Array(SLOTS);
@@ -56,6 +58,8 @@ var cache_e   = new Array(SLOTS); // Expiry time of cache entry
 var cache_u   = new Array(SLOTS); // Most recent usage
 var cache_c   = new Array(SLOTS); // Created.
 
+var route_state;
+var calling_on;
 // Debug
 var qt = 0;
 var qc = 0;
@@ -87,11 +91,37 @@ function startup()
    tt1 = svg_doc.getElementById('tt1');
    tt2 = svg_doc.getElementById('tt2');
    ttb = svg_doc.getElementById('ttb');
+   pp = svg_doc.getElementById('progc');
+   pb = svg_doc.getElementById('diag-bg');
    for(i = 0; i < SLOTS; i++)
    {
       displayed[i] = '';
       cache_k[i] = '';
    }
+   // Load dual signal config
+   route_state = {};
+   calling_on = {};
+   if(svg_doc.getElementById('calling_on'))
+   {
+      var coc = svg_doc.getElementById('calling_on').innerHTML.split('|');
+      var describer;
+      var affected;
+      var index = 0;
+      while(index < coc.length)
+      {
+         describer = coc[index++];
+         affected = describer + 's' + coc[index++];
+         while(index < coc.length && coc[index] !== '$')
+         {
+            var route = coc[index++];
+            route = describer + 's' + route;
+            route_state[route] = false;
+            calling_on[route] = affected;
+         }
+         index++;
+      }
+   }
+
    if(describers === '')
    {
       // Non-updating map
@@ -175,7 +205,7 @@ function tick()
          updating_timeout = 0;
          feed_fault = 2;
          got_handle = reset_handle;
-         progress_colour('red');
+         progress_colour(0);
       }
    }
 
@@ -201,7 +231,7 @@ function tick()
          {
             if(req.status == 200)
             {
-               progress_colour('limegreen');
+               progress_colour(2);
                process_updates(req.responseText);
                updating_timeout = 0;
                req = null;
@@ -211,13 +241,13 @@ function tick()
                // Failed.  No action, leave for timeout to sort it out.
                req = null;
                feed_fault = 2;
-               progress_colour('red');
+               progress_colour(0);
             }
          }
       }
       req.open('GET', url_base + 'U/' + got_handle + '/' + describers, true);
       req.send(null);
-      progress_colour('orange');
+      progress_colour(1);
    }
 }
 
@@ -282,7 +312,7 @@ function process_updates(text)
    else
    {
       feed_fault = 3;
-      progress_colour('red');
+      progress_colour(0);
    }
    
    // Progress wheel
@@ -387,11 +417,45 @@ function update_signal(k, v)
       {
          svg_doc.getElementById(k + 's').style.fill = ((v === '1')?'#00ff00':'red');
       }
+      if(svg_doc.getElementById(k + 'sc'))
+      {
+         if(v === '')
+         {
+            svg_doc.getElementById(k + 'sc').style.fill = 'black';
+         }
+         else
+         {
+            svg_doc.getElementById(k + 'sc').style.fill = ((v === '1')?'#00ff00':'red');
+         }
+      }
    }
    else if(svg_doc.getElementById(k + 'r'))
    {
       // It's a route
       svg_doc.getElementById(k + 'r').style.opacity = ((v === '1')?'1.0':'0.0');
+      if(k in route_state)
+      {
+         route_state[k] = ((v === '1')?true:false);
+         var affected_signal = calling_on[k];
+         var signal_state = false;
+         for(var r in route_state)
+         {
+            var s = calling_on[r];
+            if(s === affected_signal && route_state[r]) signal_state = true;
+         }
+         if(signal_state)
+         {
+            // Make signal calling on
+            svg_doc.getElementById(affected_signal + 's').style.opacity = 0.0;
+            svg_doc.getElementById(affected_signal + 'sc').style.opacity = 1.0;
+         }
+         else
+         {
+            // Make signal main aspect
+            svg_doc.getElementById(affected_signal + 's').style.opacity = 1.0;
+            svg_doc.getElementById(affected_signal + 'sc').style.opacity = 0.0;
+         }
+      }
    }
 }
 
@@ -597,7 +661,14 @@ function tt_on(evt, text)
    {
       var bid = evt.currentTarget.id.substring(3,7);
       var des = evt.currentTarget.id.substring(0,2);
-      tt1.firstChild.data = 'Describer ' + des + ' Berth ' + bid;
+      if(text === '')
+      {
+         tt1.firstChild.data = 'Describer ' + des + ' Berth ' + bid;
+      }
+      else
+      {
+         tt1.firstChild.data = 'Describer ' + des + ' ' + text;
+      }
       var occ_id = evt.currentTarget.id.substring(0,7);
       var headcode = svg_doc.getElementById(occ_id).textContent;
       if(headcode.length === 4 && headcode !== 'FAST' && headcode !== 'SLOW')
@@ -650,6 +721,22 @@ function tt_off(evt)
 }
 function progress_colour(col)
 {
-   var progc = svg_doc.getElementById('progc');
-   if(progc) progc.style.fill = col;
+   // 0 Red    Fail
+   // 1 Orange Working
+   // 2 Green  Good
+   switch(col)
+   {
+   case 0:
+   default:
+      if(pp) pp.style.fill = 'red';
+      if(pb) pb.style.fill = '#ffdddd';
+      break;
+   case 1:
+      if(pp) pp.style.fill = 'orange';
+      break;
+   case 2:
+      if(pp) pp.style.fill = 'limegreen';
+      if(pb) pb.style.fill = '#ffffff';
+      break;
+   }
 }
