@@ -34,6 +34,13 @@ a virtual host if desired.
 		Order allow,deny
 		Allow from all      
 
+        </Directory>
+        <Directory "/usr/lib/cgi-bin/secure">
+                AllowOverride None
+                AddHandler cgi-script .pl .cgi
+                Options +ExecCGI -MultiViews +SymLinksIfOwnerMatch -Indexes
+                Order allow,deny
+                Allow from all      
 		AuthType Basic
 		AuthName "Rail Server"
                 #
