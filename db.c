@@ -158,7 +158,8 @@ word db_connect(void)
       }
 
       // Disable auto-reconnect
-      my_bool reconnect = 0;
+      // my_bool reconnect = 0;
+      int reconnect = 0;
       mysql_options(mysql_object, MYSQL_OPT_RECONNECT, &reconnect);   
 
       _log(GENERAL, "Connection to database \"%s\" opened.", database);

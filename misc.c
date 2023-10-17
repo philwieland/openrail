@@ -458,14 +458,14 @@ char * show_time_text(const char * const input)
 
 #define CONFIG_SIZE 4096
 static const char * const config_keys[MAX_CONF] = {"db_server", "db_name", "db_user", "db_password", 
-                                                   "nr_user", "nr_password", "nr_server",
+                                                   "nr_user", "nr_password", "nr_server", "nr_stomp_port",
                                                    "report_email", "public_url",
                                                    "stomp_topics", "stomp_topic_names", "stomp_topic_log",
                                                    "stompy_bin", "trustdb_no_deduce_act", "huyton_alerts",
                                                    "live_server", "tddb_report_new", "server_split",
                                                    "debug",};
 static const byte config_type[MAX_CONF] = { 0, 0, 0, 0,
-                                            0, 0, 0,
+                                            0, 0, 0, 0,
                                             0, 0,
                                             0, 0, 0,
                                             1, 1, 1,

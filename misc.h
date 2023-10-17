@@ -27,11 +27,15 @@ typedef unsigned long long qword;
 typedef unsigned int       dword;
 typedef unsigned short     word;
 typedef unsigned char      byte;
+#ifndef false
 #define false 0
+#endif
+#ifndef true
 #define true ~0
+#endif
 
 enum config_keys {conf_db_server, conf_db_name, conf_db_user, conf_db_password, 
-                  conf_nr_user, conf_nr_password, conf_nr_server,
+                  conf_nr_user, conf_nr_password, conf_nr_server, conf_nr_stomp_port,
                   conf_report_email, conf_public_url,
                   conf_stomp_topics, conf_stomp_topic_names, conf_stomp_topic_log,
                   conf_stompy_bin, conf_trustdb_no_deduce_act, conf_huyton_alerts,
