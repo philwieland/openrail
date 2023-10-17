@@ -1,5 +1,5 @@
 /*
-    Copyright (C) 2014, 2015, 2016, 2017, 2019, 2020, 2021, 2022 Phil Wieland
+    Copyright (C) 2014, 2015, 2016, 2017, 2019, 2020, 2021, 2022, 2023 Phil Wieland
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -43,10 +43,12 @@
 #define NAME  "stompy"
 
 #ifndef RELEASE_BUILD
-#define BUILD "3721p"
+#define BUILD "4828p"
 #else
 #define BUILD RELEASE_BUILD
 #endif
+
+#define STOMP_HANDLE ""
 
 static word debug, run, interrupt, sigusr1, controlled_shutdown;
 static char zs[4096];
@@ -69,7 +71,8 @@ static ssize_t stomp_tx_queue_on, stomp_tx_queue_off;
 #define BASE_PORT 55840
 
 #define STOMP_HOST conf[conf_nr_server]
-#define STOMP_PORT 61618
+#define DEFAULT_STOMP_PORT 61618
+static word stomp_port;
 
 // Select timeout period in seconds
 #define SELECT_TIMEOUT 2
@@ -120,8 +123,9 @@ static time_t now;
 static time_t stats_due, alarms_due, server_sockets_due, stomp_timeout, rates_due, heartbeat_tx_due;
 
 // STOMP controls
+#define MAX_HOLDOFF 16
 static word stomp_holdoff;
-static time_t stomp_holdoff_time[8] = { 8, 16, 32, 64, 64, 64, 64, 64};
+static time_t stomp_holdoff_time[MAX_HOLDOFF] = { 8, 16, 32, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 640};
 
 // Disc spool
 // This and sub-directories will be created if required.
@@ -245,6 +249,12 @@ int main(int argc, char *argv[])
    }
 
    debug = *conf[conf_debug];
+
+   stomp_port = DEFAULT_STOMP_PORT;
+   if(conf[conf_nr_stomp_port] && *conf[conf_nr_stomp_port])
+   {
+      stomp_port = atoi(conf[conf_nr_stomp_port]);
+   }
 
    if(usage)
    {
@@ -1450,12 +1460,12 @@ static void send_subscribes(void)
          strcat(headers, "\n");
          if(debug)
          {
-            sprintf(zs, "activemq.subscriptionName:%s-stompy-%d-debug\n", conf[conf_nr_user], stream);
+            sprintf(zs, "activemq.subscriptionName:%s-stompy%s-%d-debug\n", conf[conf_nr_user], STOMP_HANDLE, stream);
             strcat(headers, zs);
          }
          else
          {
-            sprintf(zs, "activemq.subscriptionName:%s-stompy-%d-%s\n", conf[conf_nr_user], stream, abbreviated_host_id());
+            sprintf(zs, "activemq.subscriptionName:%s-stompy%s-%d-%s\n", conf[conf_nr_user], STOMP_HANDLE, stream, abbreviated_host_id());
             strcat(headers, zs);
          }
          sprintf(zs, "id:%d\n", stream);
@@ -1551,7 +1561,7 @@ static void full_shutdown(void)
 
 
 ///////// STOMP Manager //////////
-#define SET_TIMER_HOLDOFF   {if(stomp_holdoff > 7) stomp_holdoff = 7; stomp_timeout = now + stomp_holdoff_time[stomp_holdoff]; stomp_holdoff++;}
+#define SET_TIMER_HOLDOFF   {if(stomp_holdoff > MAX_HOLDOFF - 1) stomp_holdoff = MAX_HOLDOFF - 1; stomp_timeout = now + stomp_holdoff_time[stomp_holdoff]; stomp_holdoff++;}
 #define SET_TIMER_RUNNING   {stomp_timeout = now + STOMP_TIMEOUT;}
 #define SET_TIMER_NEVER     {stomp_timeout = 0x7fffffff;}
 #define SET_TIMER_IMMEDIATE {stomp_timeout = now;}
@@ -1612,7 +1622,7 @@ static void stomp_manager(const enum stomp_manager_event event, const char * con
       }
       stomp_connect_time = 0;
       stats[ConnectAttempt]++;
-      _log(GENERAL, "Connecting to STOMP server.");
+      _log(GENERAL, "Connecting to STOMP server %s:%d.", STOMP_HOST, stomp_port);
       report_rates("Connecting to STOMP server.");
 
       stomp_read_state = STOMP_IDLE;
@@ -1646,7 +1656,7 @@ static void stomp_manager(const enum stomp_manager_event event, const char * con
       bcopy((char *)server->h_addr, 
             (char *)&serv_addr.sin_addr.s_addr,
             server->h_length);
-      serv_addr.sin_port = htons(STOMP_PORT);
+      serv_addr.sin_port = htons(stomp_port);
 
       // Now connect to the server
       // Really, we should do this in non-blocking mode and handle the successful/unsuccessful connection in the main select.
@@ -1681,14 +1691,15 @@ static void stomp_manager(const enum stomp_manager_event event, const char * con
          strcat(headers, "\n");          
          if(debug)
          {
-            sprintf(zs, "client-id:%s-stompy-debug\n", conf[conf_nr_user]);
+            sprintf(zs, "client-id:%s-stompy%s-debug\n", conf[conf_nr_user], STOMP_HANDLE);
             strcat(headers, zs);
          }
          else
          {
-            sprintf(zs, "client-id:%s-stompy-%s\n", conf[conf_nr_user], abbreviated_host_id());
+            sprintf(zs, "client-id:%s-stompy%s-%s\n", conf[conf_nr_user], STOMP_HANDLE, abbreviated_host_id());
             strcat(headers, zs);
          }          
+         strcat(headers, "accept-version:1.1\n");
          strcat(headers, "heart-beat:20000,20000\n");          
          strcat(headers, "\n");
          
@@ -1843,6 +1854,18 @@ static void report_stats(void)
    else
    {
       sprintf(zs, "%27s: Connection down.", "STOMP connection up time");
+   }
+   _log(GENERAL, zs);
+   strcat(report, zs);
+   strcat(report, "\n");
+
+   if(stomp_connect_time)
+   {
+      sprintf(zs, "%27s: %-14s %s:%d", "STOMP connected to", "", STOMP_HOST, stomp_port);
+   }
+   else
+   {
+      sprintf(zs, "%27s: %-14s %s:%d", "STOMP connecting to", "", STOMP_HOST, stomp_port);
    }
    _log(GENERAL, zs);
    strcat(report, zs);
@@ -2082,6 +2105,7 @@ static void report_rates(const char * const m)
                      sprintf(report, "No STOMP frames received in %d minutes.", REPORTED_SILENCE_THRESHOLD);
                      _log(MAJOR, report);
                      fprintf(rates_fp, "  %s", report);
+                     report_status();
                      email_alert(NAME, BUILD, "STOMP Alarm", report);
                   }
                }
